@@ -1,0 +1,31 @@
+{
+  "name": "cloud-agents",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Learn-by-doing kit for running autonomous coding agents in the cloud with the Cursor SDK",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "login": "tsx src/00-login.ts",
+    "smoke": "tsx src/01-local-smoke.ts",
+    "cloud": "tsx src/02-cloud-oneshot.ts",
+    "pipeline": "tsx src/03-cloud-pipeline.ts",
+    "resume": "tsx src/04-resume.ts",
+    "status": "tsx src/05-status.ts",
+    "build-app": "tsx src/06-build-app.ts"
+  },
+  "dependencies": {
+    "@cursor/sdk": "^1.0.30"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
