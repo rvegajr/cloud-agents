@@ -325,7 +325,12 @@ exactly these reasons:
 State is saved after every turn, so closing your laptop loses nothing. The cloud
 agent, its branch, and the PR are all still there.
 
-**My numbers:** 45 minutes, about $4, 19 tests, 7 verified user flows.
+**My numbers:** 45 minutes, about $4.57, 19 tests, 7 verified user flows. The
+result is public: [github.com/rvegajr/snippet-vault](https://github.com/rvegajr/snippet-vault).
+Transcripts and cost live in
+[docs/artifacts](https://github.com/rvegajr/snippet-vault/tree/main/docs/artifacts).
+Download a zip of `main` from
+[the v1.0.0 release](https://github.com/rvegajr/snippet-vault/releases/tag/v1.0.0).
 
 ---
 
@@ -334,7 +339,7 @@ agent, its branch, and the PR are all still there.
 Clone the result on your own machine and run it.
 
 ```bash
-git clone https://github.com/you/snippet-vault && cd snippet-vault
+git clone https://github.com/rvegajr/snippet-vault && cd snippet-vault
 npm install && npm run dev
 ```
 

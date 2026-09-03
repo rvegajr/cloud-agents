@@ -214,9 +214,12 @@ The loop logic has no SDK dependency, so its stop conditions are testable with a
 fake agent; that is how it was verified.
 
 **First live run** (`ideas/example-snippet-vault.md`, `composer-2.5`): 6
-milestones, 6 iterations, 0 stalls, about 45 minutes, about $4 in tokens, 19
-tests, all 7 user flows verified by the release gate. Result:
-[rvegajr/snippet-vault](https://github.com/rvegajr/snippet-vault). Two lessons
+milestones, 6 iterations, 0 stalls, about 45 minutes, about $4.57 in tokens, 19
+tests, all 7 user flows verified by the release gate. Public result:
+[rvegajr/snippet-vault](https://github.com/rvegajr/snippet-vault) — transcripts,
+cost, and a zip of `main` are under
+[docs/artifacts](https://github.com/rvegajr/snippet-vault/tree/main/docs/artifacts)
+and [releases](https://github.com/rvegajr/snippet-vault/releases). Two lessons
 that are now baked into the prompts:
 
 - The agent opened a new stacked branch and PR per milestone instead of growing
