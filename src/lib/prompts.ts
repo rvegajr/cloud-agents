@@ -14,6 +14,10 @@ export function loadTemplate(name: string): string {
   return readFileSync(resolve(ROOT, "prompts", `${name}.md`), "utf8");
 }
 
+export function loadBriefTemplate(): string {
+  return readFileSync(resolve(ROOT, "briefs", "TEMPLATE.md"), "utf8");
+}
+
 export function loadBrief(pathOrName: string): string {
   const candidates = [
     resolve(process.cwd(), pathOrName),

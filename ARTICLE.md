@@ -20,9 +20,9 @@ command. Total time if you do everything: about two hours. Total cost: under $10
 ## The loop, in one picture
 
 ```
-idea/brief  →  prompt  →  agent on a cloud VM  →  verify  →  pull request  →  feedback
-    ↑                                                                             |
-    └─────────────────────────────────────────────────────────────────────────────┘
+idea/brief (or a jam.dev recording)  →  prompt  →  agent on a cloud VM  →  verify  →  pull request  →  feedback
+    ↑                                                                                                      |
+    └──────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 Every step below adds one piece of this picture. By step 7 you will have built
@@ -221,14 +221,20 @@ Open `briefs/TEMPLATE.md`. Six sections:
 | Section | Why it exists |
 | --- | --- |
 | Goal | Outcome, not activity |
-| Context | Where the code lives, so the agent does not spend 20 minutes guessing |
+| Context | Where the code lives, so the agent does not spend 20 minutes guessing. For a bug, a jam.dev URL (`https://jam.dev/c/<uuid>`) is the repro: notes, console, network, click path, video. |
 | Scope: in / out | Prevents drive-by refactors and new dependencies |
 | Definition of done | Each item checkable by a command |
 | Verification | The exact commands that must exit 0 |
 | Constraints | Anything you would be angry about |
 
 Copy it to `briefs/my-first-change.md` and fill it in for something small and
-real in one of your repos. Then:
+real in one of your repos. If the work is a bug you captured with
+[Jam](https://jam.dev), put the share link in **Context** and do not retype
+page, role, or expected vs actual — the recording already has them. Cloud VMs
+do not have Jam MCP, so either paste the evidence into the brief yourself, or
+use the Slack bot from the next article, which fetches the recording before
+triage. A bare `@Cursor` in that channel prints usage; a jam.dev URL in the
+same mention is the request. Then:
 
 ```bash
 npm run cloud -- --brief my-first-change --repo https://github.com/you/some-repo
@@ -241,7 +247,8 @@ will write them right the first time.
 
 **What you learned:** the brief is the biggest lever on quality. A vague brief
 produces a confident wrong answer. A brief with a command-checkable definition
-of done produces a PR you can merge.
+of done — and, for a bug, a jam.dev recording instead of a guessed repro —
+produces a PR you can merge.
 
 ---
 
@@ -378,9 +385,46 @@ things:
 - **Where enforcement lives.** Repo hooks, gateway config, or human approvals.
 
 The parts that transfer everywhere are the ones you wrote yourself: a brief with
-a checkable definition of done, phase prompts with one job and one output
-contract each, and a verify step that re-derives the truth from disk instead of
-trusting the previous turn.
+a checkable definition of done, a recording (or other evidence) the agent did
+not invent, phase prompts with one job and one output contract each, and a
+verify step that re-derives the truth from disk instead of trusting the previous
+turn. For bugs, the recording is a jam.dev link. The Slack article is that input
+wired to the same loop.
+
+---
+
+## After it ships: the same loop from Slack
+
+`ARTICLE-SLACK.md` is the front door. The mention is a small command line, not a
+free-form paragraph you hope the bot interprets:
+
+```
+@Cursor                         usage (projects, this channel's default, examples)
+@Cursor <project>               that project's repo, branch, and options
+@Cursor <project> -             same
+@Cursor <project> <request>    start a job on that repo
+@Cursor <request>               start a job on this channel's project
+@Cursor <project> deploy        deploy that project (default target)
+@Cursor <project> deploy env=uat   deploy a named target
+@Cursor <project> deploy -      list that project's deploy targets
+@Cursor deploy                  deploy this channel's project
+```
+
+Name the channel `#<project>-fixbot` (or `#<project>-fixbot-test`) and `@Cursor`
+already knows which GitHub repo to clone. One process, many repos. `SLACK_PROJECTS`
+in `.env` is the catalog; a bare mention prints it. Options on a real request:
+`branch=`, `autopr=`, `model=`; on a deploy, `env=`.
+
+The hooks from step 6 are what that usage block means by `hooks: force-push, push
+to develop/main, deploys, and --no-verify are blocked`. Advice in `AGENTS.md`.
+Enforcement in `.cursor/hooks.json`. The Slack CLI just tells you they are there.
+
+`deploy` is the one verb that does not go to an agent. The bot process fires a
+Vercel Deploy Hook or a Railway `serviceInstanceDeployV2` (targets in
+`SLACK_DEPLOYS`, allowed people in `SLACK_DEPLOYERS`), reacts 🚀, posts progress in
+the thread, and broadcasts the final ✅ with the live URL — or ❌ with the last
+build-log lines — to the channel, @-mentioning whoever asked. The agent still
+cannot deploy. A person in the channel can, and the channel hears the result.
 
 ## Two mistakes to make early, on purpose
 
@@ -397,3 +441,6 @@ matters.
 Steps 0, 1, 2, and 3. Login, local smoke, read the transcript, one read-only
 cloud run. That is enough to see the whole loop with your own eyes. Do step 7 on
 a weekend morning with coffee, and check on it when you are done with the coffee.
+When you want the loop to start from a Slack message, name a channel
+`#<project>-fixbot`, copy `target-repo-kit/` into that repo, and follow
+`ARTICLE-SLACK.md` — a bare `@Cursor` prints the rest.

@@ -8,6 +8,7 @@
     "node": ">=22.13"
   },
   "scripts": {
+    "test": "tsx --test src/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "login": "tsx src/00-login.ts",
     "smoke": "tsx src/01-local-smoke.ts",
@@ -15,14 +16,17 @@
     "pipeline": "tsx src/03-cloud-pipeline.ts",
     "resume": "tsx src/04-resume.ts",
     "status": "tsx src/05-status.ts",
-    "build-app": "tsx src/06-build-app.ts"
+    "build-app": "tsx src/06-build-app.ts",
+    "slack": "tsx src/07-slack-bot.ts",
+    "start": "tsx src/07-slack-bot.ts"
   },
   "dependencies": {
-    "@cursor/sdk": "^1.0.30"
+    "@cursor/sdk": "^1.0.30",
+    "@slack/bolt": "^5.1.0",
+    "tsx": "^4.20.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "tsx": "^4.20.0",
     "typescript": "^5.9.0"
   },
   "allowScripts": {

@@ -11,6 +11,12 @@ import { Cursor } from "@cursor/sdk";
  * credential dependency is explicit.
  */
 export async function resolveApiKey(opts: { interactive?: boolean } = {}): Promise<string | undefined> {
+  // Empty CURSOR_API_KEY (placeholder in .env, or `set -a; source .env`) is
+  // an explicit no-auth signal to the SDK — strip it so ~/.cursor/sdk/auth.json
+  // can be used.
+  if (process.env.CURSOR_API_KEY !== undefined && process.env.CURSOR_API_KEY.trim() === "") {
+    delete process.env.CURSOR_API_KEY;
+  }
   const fromEnv = process.env.CURSOR_API_KEY?.trim();
   if (fromEnv) return fromEnv;
 

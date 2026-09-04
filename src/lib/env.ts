@@ -17,6 +17,7 @@ export function loadEnv(file = ".env"): void {
     const value = line.slice(eq + 1).trim().replace(/^(['"])(.*)\1$/, "$2");
     if (key && process.env[key] === undefined && value !== "") process.env[key] = value;
   }
+  if (process.env.CURSOR_API_KEY === "") delete process.env.CURSOR_API_KEY;
 }
 
 export function env(name: string, fallback?: string): string {

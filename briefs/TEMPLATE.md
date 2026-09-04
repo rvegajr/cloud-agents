@@ -9,6 +9,9 @@ matter to a user or operator?
   an agent in a fresh clone; pointing is cheap for you.
 - Existing patterns to copy (e.g. "follow how `src/routes/version.ts` is wired").
 - Anything non-obvious about the stack, environment, or history.
+- For a bug: a jam.dev share URL (`https://jam.dev/c/<uuid>`). Notes, recorded
+  page, console errors, failed network, and click path beat a prose repro. Do
+  not retype what the recording already shows.
 
 ## Scope
 In:

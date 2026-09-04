@@ -17,7 +17,7 @@ const command = String(input.command ?? "");
 
 const denied = [
   { re: /\bgit\s+push\b.*--force\b/, why: "force-push is never allowed for agents" },
-  { re: /\bgit\s+push\b.*\b(main|master)\b/, why: "agents push branches, never main" },
+  { re: /\bgit\s+push\b.*\b(main|master|develop)\b/, why: "agents push feature branches, never the integration branch (main/master/develop)" },
   { re: /\bgit\s+reset\s+--hard\b/, why: "destructive reset" },
   { re: /\brm\s+-rf\s+(\/|~|\.)\s*$/, why: "destructive delete of a root" },
   { re: /\bnpm\s+publish\b|\bpnpm\s+publish\b|\byarn\s+publish\b/, why: "publishing requires a human" },
