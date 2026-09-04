@@ -1,12 +1,12 @@
 {
   "display_information": {
-    "name": "FixBot",
-    "description": "Turns a Slack @mention into a cloud-agent pull request",
+    "name": "CloudAgents",
+    "description": "Turns a Slack @mention into a cloud-agent pull request. Rename freely; the bot reads its own name at startup.",
     "background_color": "#1a1a1a"
   },
   "features": {
     "bot_user": {
-      "display_name": "FixBot",
+      "display_name": "CloudAgents",
       "always_online": true
     }
   },
@@ -20,7 +20,8 @@
         "channels:read",
         "groups:read",
         "channels:join",
-        "reactions:write"
+        "reactions:write",
+        "users:read"
       ]
     }
   },

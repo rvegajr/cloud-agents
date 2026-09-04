@@ -233,8 +233,8 @@ real in one of your repos. If the work is a bug you captured with
 page, role, or expected vs actual — the recording already has them. Cloud VMs
 do not have Jam MCP, so either paste the evidence into the brief yourself, or
 use the Slack bot from the next article, which fetches the recording before
-triage. A bare `@Cursor` in that channel prints usage; a jam.dev URL in the
-same mention is the request. Then:
+triage. A bare mention of that bot in its channel prints usage; a jam.dev URL
+in the same mention is the request. Then:
 
 ```bash
 npm run cloud -- --brief my-first-change --repo https://github.com/you/some-repo
@@ -395,25 +395,28 @@ wired to the same loop.
 
 ## After it ships: the same loop from Slack
 
-`ARTICLE-SLACK.md` is the front door. The mention is a small command line, not a
+`ARTICLE-SLACK.md` is the front door. You create a Slack app of your own from the
+kit's manifest; `@<bot>` is whatever your workspace names it, and the bot reads
+that name at startup. It is deliberately not Cursor's `@Cursor` app, which runs
+Cursor's agent without any of this. The mention is a small command line, not a
 free-form paragraph you hope the bot interprets:
 
 ```
-@Cursor                         usage (projects, this channel's default, examples)
-@Cursor <project>               that project's repo, branch, and options
-@Cursor <project> -             same
-@Cursor <project> <request>    start a job on that repo
-@Cursor <request>               start a job on this channel's project
-@Cursor <project> deploy        deploy that project (default target)
-@Cursor <project> deploy env=uat   deploy a named target
-@Cursor <project> deploy -      list that project's deploy targets
-@Cursor deploy                  deploy this channel's project
+@<bot>                          usage (projects, this channel's default, examples)
+@<bot> <project>                that project's repo, branch, and options
+@<bot> <project> -              same
+@<bot> <project> <request>      start a job on that repo
+@<bot> <request>                start a job on this channel's project
+@<bot> <project> deploy         deploy that project (default target)
+@<bot> <project> deploy env=uat    deploy a named target
+@<bot> <project> deploy -       list that project's deploy targets
+@<bot> deploy                   deploy this channel's project
 ```
 
-Name the channel `#<project>-fixbot` (or `#<project>-fixbot-test`) and `@Cursor`
-already knows which GitHub repo to clone. One process, many repos. `SLACK_PROJECTS`
-in `.env` is the catalog; a bare mention prints it. Options on a real request:
-`branch=`, `autopr=`, `model=`; on a deploy, `env=`.
+Name the channel `#<project>-anything` (`#api-bugs`, `#api-agent-test`) and the
+bot already knows which GitHub repo to clone. One process, many repos.
+`SLACK_PROJECTS` in `.env` is the catalog; a bare mention prints it. Options on a
+real request: `branch=`, `autopr=`, `model=`; on a deploy, `env=`.
 
 The hooks from step 6 are what that usage block means by `hooks: force-push, push
 to develop/main, deploys, and --no-verify are blocked`. Advice in `AGENTS.md`.
@@ -442,5 +445,5 @@ Steps 0, 1, 2, and 3. Login, local smoke, read the transcript, one read-only
 cloud run. That is enough to see the whole loop with your own eyes. Do step 7 on
 a weekend morning with coffee, and check on it when you are done with the coffee.
 When you want the loop to start from a Slack message, name a channel
-`#<project>-fixbot`, copy `target-repo-kit/` into that repo, and follow
-`ARTICLE-SLACK.md` — a bare `@Cursor` prints the rest.
+`#<project>-anything`, copy `target-repo-kit/` into that repo, and follow
+`ARTICLE-SLACK.md` — a bare mention of your bot prints the rest.

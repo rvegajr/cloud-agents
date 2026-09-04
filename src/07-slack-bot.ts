@@ -5,10 +5,12 @@
  * reply contains `agent: bc-...`, and a later @mention in the same thread
  * resumes that agent.
  *
- * Bare mention prints CLI usage. `@Cursor <project>` (or `@Cursor <project> -`)
- * prints that project's options. A channel whose name starts with a project
- * (`#api-fixbot`) selects that project so the name can be omitted.
- * `@Cursor <project> deploy [env=<name>]` kicks a Vercel/Railway deploy from
+ * `@<bot>` is whatever this workspace named the app; the handle is read from
+ * Slack at startup, never hard-coded. Bare mention prints CLI usage.
+ * `@<bot> <project>` (or `@<bot> <project> -`) prints that project's options.
+ * A channel whose name starts with a project (`#api-bugs`, `#api-fixbot`)
+ * selects that project so the name can be omitted.
+ * `@<bot> <project> deploy [env=<name>]` kicks a Vercel/Railway deploy from
  * this process (SLACK_DEPLOYS) and reports back to the thread and channel.
  *
  *   npm run slack
@@ -143,6 +145,35 @@ function wrap(agent: SDKAgent): AgentHandle {
   };
 }
 
+/**
+ * The handle usage text prints is whatever this workspace named the app —
+ * never hard-coded, so a clone that calls its app "Shipper" prints `@Shipper`.
+ * Display name via users.info (needs users:read), else the username from
+ * auth.test, else SLACK_BOT_HANDLE. The env var, when set, wins.
+ */
+async function resolveBotHandle(
+  client: {
+    users: { info: (args: { user: string }) => Promise<{ user?: { profile?: { display_name?: string; real_name?: string }; real_name?: string; name?: string } }> };
+  },
+  auth: { user_id?: string; user?: string },
+): Promise<string> {
+  const override = process.env.SLACK_BOT_HANDLE?.trim();
+  if (override) return override.startsWith("@") ? override : `@${override}`;
+  if (auth.user_id) {
+    try {
+      const info = await client.users.info({ user: auth.user_id });
+      const u = info.user;
+      const name = u?.profile?.display_name || u?.profile?.real_name || u?.real_name || u?.name;
+      if (name) return `@${name}`;
+    } catch {
+      /* users:read not granted; fall through to the username */
+    }
+  }
+  if (auth.user) return `@${auth.user}`;
+  console.warn("Could not resolve the bot's Slack name; set SLACK_BOT_HANDLE so usage text names the right app.");
+  return "@<bot>";
+}
+
 function namedChannelFor(project: SlackProject | undefined, routes: Map<string, { repo: string; ref: string }>): string | undefined {
   if (!project) return undefined;
   for (const key of routes.keys()) {
@@ -209,7 +240,7 @@ try {
 
   const auth = await app.client.auth.test();
   const botUserId = typeof auth.user_id === "string" ? auth.user_id : "";
-  const botHandle = process.env.SLACK_BOT_HANDLE?.trim() || "@Cursor";
+  const botHandle = await resolveBotHandle(app.client, auth);
 
   type SlackClient = typeof app.client;
 
@@ -380,7 +411,10 @@ try {
 
     if (isUsage) {
       if (args.overlayOnly && inThread && !cli.explicitHelp && cli.kind === "usage") return;
-      await post(usageFor(args.bot, cli, channelName, implied));
+      const note = args.overlayOnly
+        ? `That mention goes to Cursor's own Slack app. For the Jam → triage → verify pipeline (and \`deploy\`), mention ${args.bot} instead:\n`
+        : "";
+      await post(note + usageFor(args.bot, cli, channelName, implied));
       return;
     }
 
@@ -533,13 +567,13 @@ try {
       user: "user" in event ? event.user : undefined,
       eventId,
       overlayOnly: true,
-      bot: "@Cursor",
+      bot: botHandle,
     });
   });
 
   await app.start();
   const defaultLine = fallbackTarget ? `default=${fallbackTarget.repo}@${fallbackTarget.ref}` : "default=(none)";
-  console.log(`Slack CLI running (Socket Mode). ${defaultLine}  maxConcurrent=${maxConcurrent}`);
+  console.log(`Slack CLI running (Socket Mode) as ${botHandle}. ${defaultLine}  maxConcurrent=${maxConcurrent}`);
   for (const [ch, t] of routes) console.log(`  ${ch} -> ${t.repo}@${t.ref}`);
   for (const p of projects.values()) console.log(`  project ${p.name} -> ${p.repo}@${p.ref}`);
   for (const [name, targets] of deploys) {
@@ -552,7 +586,7 @@ try {
     for (const m of missing) console.warn(`  missing ${m}`);
     console.log(`  deployers: ${deployers.size ? [...deployers].join(", ") : "anyone in an allowed channel"}`);
   }
-  if (cursorUserId) console.log(`  @Cursor overlay help on ${cursorUserId}`);
+  if (cursorUserId) console.log(`  mentions of Cursor's app (${cursorUserId}) get a pointer to ${botHandle}`);
   console.log(
     formatGlobalUsage({
       bot: botHandle,

@@ -49,8 +49,9 @@ should send.
   Cursor, a paid Cursor plan, the kit cloned
 - A Slack workspace where you can create an app (most of them)
 - The repo you want the bot to work on. Any repo. For one repo, set
-  `TARGET_REPO`. For several, set `SLACK_PROJECTS` and name each channel
-  `#<project>-fixbot`. Nothing in the TypeScript names a specific product.
+  `TARGET_REPO`. For several, set `SLACK_PROJECTS` and start each channel
+  name with the project (`#api-bugs`). Nothing in the TypeScript names a
+  specific product, a specific channel suffix, or a specific bot name.
 - A [jam.dev](https://jam.dev) workspace and a read PAT (`JAM_TOKEN`). Optional
   only if you are fine with prose reports. Without the token the bot can see
   the share URL, not the console and network events.
@@ -96,18 +97,25 @@ give you as files you can read:
    agent finished."
 4. **Repo-level enforcement.** Hooks that deny `git push --force` even if the
    model decides to try.
-5. **A mention CLI and channel-aware targeting.** `@Cursor` alone prints
-   usage. `@Cursor <project>` (or `@Cursor <project> -`) prints that
-   project's repo and options. A channel named `#api-fixbot` selects `api`
+5. **A mention CLI and channel-aware targeting.** `@<bot>` alone prints
+   usage. `@<bot> <project>` (or `@<bot> <project> -`) prints that
+   project's repo and options. A channel named `#api-bugs` selects `api`
    so the name can be omitted. One bot, many repos, no extra Slack apps.
 6. **Control over the thread.** Channel allowlist, concurrency cap, a cost
    line on every job, no extra Slack scopes.
-7. **Deploy from the channel.** `@Cursor api deploy` fires a Vercel or
+7. **Deploy from the channel.** `@<bot> api deploy` fires a Vercel or
    Railway deploy from the bot process and reports ✅/❌ back. The agent still
    cannot deploy; the hook blocks it. A person in Slack can.
 
 If those do not matter to you, stop here and install `@Cursor`. The rest of
 this article is those seven things, as code.
+
+One naming rule for the rest of the article. `@Cursor` means Cursor's app.
+`@<bot>` means the app *you* create in step 2 from the kit's manifest, under
+whatever name your workspace gives it. The manifest ships as `CloudAgents`;
+call it `Shipper` or `Fixer` and the bot reads the new name from Slack at
+startup and prints that in its usage. A workspace cannot have two apps named
+`Cursor`, so the two are never the same mention.
 
 **What you learned:** the product and the pattern are different. The product
 is a mention. The pattern is still recording → brief → VM → verify → PR →
@@ -178,24 +186,28 @@ The kit ships a manifest so you do not click through scopes by hand.
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App**
    → **From an app manifest**.
-2. Paste `slack-app-manifest.json`.
+2. Paste `slack-app-manifest.json`. Change `name` and `display_name` if you
+   want; that is the `@<bot>` handle from here on.
 3. **Socket Mode** is already on in the manifest. Under **Basic Information →
    App-Level Tokens**, generate a token with the `connections:write` scope.
    That is the `xapp-` value.
 4. **Install App** to the workspace. Copy the **Bot User OAuth Token**
    (`xoxb-`).
-5. Invite `@Cursor` to the channel: `/invite @Cursor`. Name that channel
-   `#<project>-fixbot` if you can. The leading name is how the project is
-   picked without typing one. Invite the kit app too if you are running
-   this overlay process (Jam prefetch, triage, the usage catalog).
+5. Invite it to the channel: `/invite @<bot>`. Start the channel name with
+   the project (`#api-bugs`, `#api-agent-test`; the suffix is yours). The
+   leading segment is how the project is picked without typing one.
 
 Put both tokens in `.env`:
 
 ```
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
-SLACK_BOT_HANDLE=@Cursor
 ```
+
+`SLACK_BOT_HANDLE` is not required. The bot calls `auth.test` and `users.info`
+at startup and prints its own display name. Set the variable only if you
+removed the `users:read` scope and the username it falls back to is not what
+people see.
 
 For one repo, `TARGET_REPO` / `TARGET_REF` are enough. For several, add a
 catalog (aliases are lowercase, last duplicate wins):
@@ -211,10 +223,12 @@ Optionally set `SLACK_ALLOWED_CHANNELS` to the channel ID (right-click the
 channel in Slack → Copy link → the `C…` segment). Empty means every channel
 the bot is in, which is fine for a first run and sloppy after that.
 
-`SLACK_CURSOR_USER_ID` is the member id of the official `@Cursor` bot. When
-set, and the app is subscribed to `message.channels` (already in the
-manifest), a bare `@Cursor` in a channel this bot is in prints the same
-usage. `@Cursor help`, `settings`, and `list my agents` are left to Cursor.
+`SLACK_CURSOR_USER_ID` is optional: the member id of Cursor's official
+`@Cursor` app, if it is also installed. When set, and the app is subscribed to
+`message.channels` (already in the manifest), someone who types `@Cursor` in a
+channel this bot is in gets a one-line pointer to `@<bot>` and the usage,
+because that mention went to Cursor's agent, not this pipeline. `@Cursor
+help`, `settings`, and `list my agents` are left to Cursor.
 
 Socket Mode means Slack opens a websocket **out** from this process. There is
 no public URL, no ngrok, no request signing to debug yet. That is why this
@@ -231,19 +245,21 @@ Slack, not a server on the internet.
 npm run slack
 ```
 
-You should see a Socket Mode line, then the same usage the bot posts in Slack:
+You should see a Socket Mode line naming the bot as Slack knows it, then the
+same usage the bot posts in Slack (the examples use `@CloudAgents`, the
+manifest's default; yours prints whatever you named it):
 
 ```
-Slack CLI running (Socket Mode). default=https://github.com/you/your-repo@develop  maxConcurrent=2
+Slack CLI running (Socket Mode) as @CloudAgents. default=https://github.com/you/your-repo@develop  maxConcurrent=2
   project api -> https://github.com/you/api@develop
   project web -> https://github.com/you/web@develop
-usage: @Cursor [<project>] [options] <request>
-       @Cursor [<project>] deploy [env=<name>]
+usage: @CloudAgents [<project>] [options] <request>
+       @CloudAgents [<project>] deploy [env=<name>]
 ...
-@Cursor                 this usage
-@Cursor <project>       options for that project
-@Cursor <project> -     same
-@Cursor <project> deploy -   deploy targets for that project
+@CloudAgents                 this usage
+@CloudAgents <project>       options for that project
+@CloudAgents <project> -     same
+@CloudAgents <project> deploy -   deploy targets for that project
 ```
 
 If a Slack token is missing, it exits immediately with the name of the var.
@@ -254,18 +270,18 @@ A project name with nothing after it (or with `-`) prints that project's
 repo, branch, and options. A request starts a job.
 
 ```
-@Cursor
-@Cursor api
-@Cursor api -
-@Cursor https://jam.dev/c/<uuid>
-@Cursor the settings page 500s after logout
+@<bot>
+@<bot> api
+@<bot> api -
+@<bot> https://jam.dev/c/<uuid>
+@<bot> the settings page 500s after logout
 ```
 
-In `#api-fixbot` you can omit `api`. In `#web-fixbot`, `@Cursor api <request>`
+In `#api-bugs` you can omit `api`. In `#web-bugs`, `@<bot> api <request>`
 still targets `api`. Inline options are stripped before triage:
 
 ```
-@Cursor api branch=release autopr=true On hosted, the webhook retries.
+@<bot> api branch=release autopr=true On hosted, the webhook retries.
 ```
 
 If the message contains a jam.dev link, the first reply is `Reading Jam
@@ -428,13 +444,13 @@ export const AGENT_ID_RE = /\bagent:\s*(bc-[a-z0-9-]+)/i;
 Reply in the thread:
 
 ```
-@Cursor the test you added doesn't cover the logged-out case. Add one.
+@<bot> the test you added doesn't cover the logged-out case. Add one.
 ```
 
 or paste a second recording of what is still wrong:
 
 ```
-@Cursor https://jam.dev/c/<uuid>
+@<bot> https://jam.dev/c/<uuid>
 ```
 
 `continueJob` runs `loadJamEvidence` on the new message too. One follow-up
@@ -459,11 +475,11 @@ on purpose. It does not block *you*, and the bot process is yours. So the
 mention CLI grows one verb:
 
 ```
-@Cursor api deploy                 the default target for api
-@Cursor api deploy env=uat         a named target
-@Cursor api deploy -               list api's targets
-@Cursor deploy                     this channel's project (#api-fixbot)
-@Cursor deploy api uat             same as the second line
+@<bot> api deploy                 the default target for api
+@<bot> api deploy env=uat         a named target
+@<bot> api deploy -               list api's targets
+@<bot> deploy                     this channel's project (#api-bugs)
+@<bot> deploy api uat             same as the second line
 ```
 
 Targets come from one variable, `<project>[/<env>]=<provider>:<spec>`:
@@ -527,10 +543,10 @@ is a multi-user input:
 | Guard | Where | Default |
 | --- | --- | --- |
 | Channel allowlist | `SLACK_ALLOWED_CHANNELS` | empty = all channels the bot is in |
-| Project catalog | `SLACK_PROJECTS` | aliases printed by `@Cursor` / `@Cursor <project>` |
-| Channel prefix | `#<project>-fixbot` | selects that project so the name can be omitted |
-| Mention in usage | `SLACK_BOT_HANDLE` | `@Cursor` |
-| `@Cursor` overlay | `SLACK_CURSOR_USER_ID` | empty = off |
+| Project catalog | `SLACK_PROJECTS` | aliases printed by `@<bot>` / `@<bot> <project>` |
+| Channel prefix | `#<project>-…` | selects that project so the name can be omitted |
+| Mention in usage | `SLACK_BOT_HANDLE` | read from Slack; env var overrides |
+| Stray `@Cursor` gets a pointer | `SLACK_CURSOR_USER_ID` | empty = off |
 | Deploy targets | `SLACK_DEPLOYS` | empty = `deploy` is not offered |
 | Who may deploy | `SLACK_DEPLOYERS` | empty = anyone in an allowed channel |
 | One deploy per target | in-memory set of `project/env` | "already running" reply |
@@ -572,7 +588,6 @@ railway variables --set "SLACK_BOT_TOKEN=$SLACK_BOT_TOKEN" \
   --set "SLACK_ALLOWED_CHANNELS=$SLACK_ALLOWED_CHANNELS" \
   --set "SLACK_PROJECTS=$SLACK_PROJECTS" \
   --set "SLACK_CHANNEL_REPOS=$SLACK_CHANNEL_REPOS" \
-  --set "SLACK_BOT_HANDLE=@Cursor" \
   --set "SLACK_CURSOR_USER_ID=$SLACK_CURSOR_USER_ID" \
   --set "SLACK_MAX_CONCURRENT=2" \
   --set "SLACK_DEPLOYS=$SLACK_DEPLOYS" \
@@ -595,7 +610,7 @@ first fetch if `JAM_TOKEN` is set. `tsx` is a runtime dependency so
 Do not put Slack or Jam tokens in the GitHub repo. Railway variables (or
 whatever your host uses) are the store.
 
-When it is up, close the laptop, mention `@Cursor` from your phone with a Jam
+When it is up, close the laptop, mention `@<bot>` from your phone with a Jam
 link, come back to a PR.
 
 **What you learned:** the hosting question is "can this process keep a
@@ -630,7 +645,7 @@ comment) that holds the `bc-` id.
 
 ## Two mistakes to make early, on purpose
 
-1. **Mention `@Cursor` with "fix it" and nothing else.** Watch it ask questions
+1. **Mention `@<bot>` with "fix it" and nothing else.** Watch it ask questions
    instead of opening a PR. That is triage working. Then mention it with a
    real `https://jam.dev/c/<uuid>` and compare the briefs. The second one
    should not ask which page you were on.
@@ -644,6 +659,6 @@ in `#prod-incidents`.
 
 Steps 0, 1, 3, and 4. Copy `target-repo-kit/` into one real repo and fill
 `AGENTS.md`; set `JAM_TOKEN`; run `npm run slack` against a channel named
-`#<project>-fixbot` that nobody important is in; mention `@Cursor` with nothing
+`#<project>-sandbox` that nobody important is in; mention `@<bot>` with nothing
 to see usage, then paste one Jam, with `--plan-only` already proven. Do step 8
 when you trust the thread enough to let it run overnight.

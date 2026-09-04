@@ -1,7 +1,8 @@
 /**
- * Slack mention as a small CLI: `@Cursor` prints usage, `@Cursor <project>`
- * (or `@Cursor <project> -`) prints that project's options, and a channel whose
- * name starts with a project alias (e.g. #api-fixbot) selects that project.
+ * Slack mention as a small CLI: `@<bot>` prints usage, `@<bot> <project>`
+ * (or `@<bot> <project> -`) prints that project's options, and a channel whose
+ * name starts with a project alias (e.g. #api-bugs) selects that project.
+ * `@<bot>` is whatever the workspace named the app; nothing here assumes one.
  */
 import { stripMention, type RepoTarget } from "./slack-thread.js";
 
@@ -59,7 +60,7 @@ export function mentionsUser(text: string, userId: string): boolean {
 }
 
 /**
- * Parse `SLACK_PROJECTS`: `filedrop=https://github.com/you/app@develop,blessbox=https://github.com/you/box`.
+ * Parse `SLACK_PROJECTS`: `api=https://github.com/you/api@develop,web=https://github.com/you/web`.
  * A missing `@ref` uses `fallbackRef`. Last duplicate name wins.
  */
 export function parseProjects(raw: string | undefined, fallbackRef: string): Map<string, SlackProject> {
@@ -82,13 +83,14 @@ export function parseProjects(raw: string | undefined, fallbackRef: string): Map
 }
 
 /**
- * From `#blessbox-fixbot` / `#rubriqflow-fixbot-test` pick the leading project
- * name (the segment before `-fixbot`). Other channel names are ignored.
+ * Leading segment of a channel name: `#api-bugs` → `api`, `#web-agent-test` →
+ * `web`, `#api` → `api`. Only meaningful for a channel that is already routed
+ * to a repo (SLACK_CHANNEL_REPOS); the suffix is the team's habit, not ours.
  */
-export function aliasFromFixbotChannel(channelName: string | undefined): string | undefined {
+export function aliasFromChannelName(channelName: string | undefined): string | undefined {
   if (!channelName) return undefined;
   const name = channelName.replace(/^#/, "").toLowerCase();
-  const m = name.match(/^([a-z][a-z0-9]*)-fixbot(?:-|$)/);
+  const m = name.match(/^([a-z][a-z0-9]*)(?:[-_]|$)/);
   return m?.[1];
 }
 
@@ -110,9 +112,10 @@ export function matchChannelProject(
 }
 
 /**
- * Channel-implied project: known alias at the front of the name, else the
- * `-fixbot` prefix paired with the channel's routed repo. When the name lookup
- * fails, named keys in SLACK_CHANNEL_REPOS (`#blessbox-fixbot=...`) still count.
+ * Channel-implied project: known alias at the front of the name, else — for a
+ * channel routed to a repo — the leading segment of the name becomes the alias.
+ * When the name lookup fails, named keys in SLACK_CHANNEL_REPOS
+ * (`#api-bugs=...`) still count.
  */
 export function channelProject(
   channelName: string | undefined,
@@ -121,13 +124,10 @@ export function channelProject(
 ): SlackProject | undefined {
   const matched = matchChannelProject(channelName, projects);
   if (matched) return matched;
-  const alias = aliasFromFixbotChannel(channelName);
-  if (alias) {
-    const known = projects.get(alias);
-    if (known) return known;
-    if (routed) return { name: alias, repo: routed.repo, ref: routed.ref };
-  }
-  return undefined;
+  if (!routed) return undefined;
+  const alias = aliasFromChannelName(channelName);
+  if (!alias) return undefined;
+  return projects.get(alias) ?? { name: alias, repo: routed.repo, ref: routed.ref };
 }
 
 /** Prefer the live channel name; fall back to `#name` keys that share this channel's repo. */

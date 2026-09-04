@@ -239,22 +239,28 @@ that are now baked into the prompts:
 npm run slack
 ```
 
-A Bolt app in Socket Mode (no public URL). The mention is a small CLI:
+A Bolt app in Socket Mode (no public URL). It is *your* Slack app, created
+from `slack-app-manifest.json`, and `@<bot>` below is whatever your workspace
+named it (the manifest ships as `CloudAgents`; rename it and the bot picks the
+new name up at startup). It is not Cursor's own `@Cursor` app: mentioning that
+runs Cursor's agent without the Jam fetch, triage, verify gate, or `deploy`.
+
+The mention is a small CLI:
 
 ```
-@Cursor                         usage (projects, channel default, examples)
-@Cursor <project>               that project's repo / branch / options
-@Cursor <project> -             same
-@Cursor <project> <request>     start a job
-@Cursor <request>               start a job on this channel's project
-@Cursor <project> deploy        deploy that project's default target
-@Cursor <project> deploy env=uat   deploy a named target
-@Cursor <project> deploy -      list that project's deploy targets
-@Cursor deploy                  deploy this channel's project
+@<bot>                          usage (projects, channel default, examples)
+@<bot> <project>                that project's repo / branch / options
+@<bot> <project> -              same
+@<bot> <project> <request>      start a job
+@<bot> <request>                start a job on this channel's project
+@<bot> <project> deploy         deploy that project's default target
+@<bot> <project> deploy env=uat    deploy a named target
+@<bot> <project> deploy -       list that project's deploy targets
+@<bot> deploy                   deploy this channel's project
 ```
 
-A channel whose name starts with a project (`#api-fixbot`,
-`#web-fixbot-test`) selects that project, so you can omit the name.
+A channel whose name starts with a project (`#api-bugs`, `#web-agent-test`,
+any suffix) selects that project, so you can omit the name.
 Paste a jam.dev URL or a sentence; the bot fetches the recording, triages it
 into a brief, runs plan → implement → verify, and posts the PR. A later
 @mention in that thread resumes the same `bc-` agent.
@@ -273,15 +279,15 @@ have Jam MCP; `src/lib/jam.ts` fetches evidence before the prompt is sent.
 
 Create the Slack app from `slack-app-manifest.json` (api.slack.com/apps → From
 an app manifest), mint a bot token (`xoxb-`) and an app-level token with
-`connections:write` (`xapp-`), put them in `.env`, `/invite @Cursor`.
+`connections:write` (`xapp-`), put them in `.env`, `/invite @<bot>`.
 
 `SLACK_PROJECTS=api=https://github.com/you/api@develop,web=https://github.com/you/web@develop`
-is the CLI catalog. `SLACK_CHANNEL_REPOS=C0123=https://github.com/you/api@develop,#web-fixbot=https://github.com/you/web`
+is the CLI catalog. `SLACK_CHANNEL_REPOS=C0123=https://github.com/you/api@develop,#web-bugs=https://github.com/you/web`
 still maps a channel id/`#name` when the channel is not prefixed with a
-project. `SLACK_BOT_HANDLE=@Cursor` is what usage examples print.
-`SLACK_CURSOR_USER_ID` (the `@Cursor` bot's member id) makes a bare `@Cursor`
-in those channels print the same usage. Unmapped channels use
-`TARGET_REPO`/`TARGET_REF`.
+project. Usage text prints the bot's real Slack name; `SLACK_BOT_HANDLE` only
+overrides it. `SLACK_CURSOR_USER_ID` (the member id of Cursor's official app,
+optional) makes a stray `@Cursor` in those channels answer with a pointer to
+`@<bot>` and the usage. Unmapped channels use `TARGET_REPO`/`TARGET_REF`.
 
 To leave it running when the laptop is closed:
 

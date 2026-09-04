@@ -1,5 +1,5 @@
 /**
- * `@Cursor <project> deploy [env=<name>]` — the bot process (never the cloud
+ * `@<bot> <project> deploy [env=<name>]` — the bot process (never the cloud
  * agent; the repo hook blocks agents from deploying) kicks a deploy and reports
  * back to the thread.
  *
@@ -10,7 +10,7 @@
  *                                                  `svc1+svc2` deploys several
  *
  * `SLACK_DEPLOYS` maps `<project>[/<env>]=<provider>:<spec>`; comma-separated.
- * `blessbox=vercel:…` is the default target; `fieldview/uat=railway:…` is `env=uat`.
+ * `web=vercel:…` is the default target; `api/uat=railway:…` is `env=uat`.
  */
 
 export type DeployStatus = "queued" | "building" | "ready" | "failed" | "canceled" | "unknown";
