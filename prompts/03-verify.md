@@ -9,6 +9,13 @@ re-derive the state from the repository, not from memory.
 
 ## What to do
 
+0. Bring the branch up to date before judging it: `git fetch origin` then
+   `git merge {{base_ref}}`. The integration branch may have moved since this
+   run started, and the verdict must hold against what will actually be merged.
+   If the only conflicts are in generated files (an OpenAPI client, types
+   generated from a spec, lockfiles), resolve them by re-running the project's
+   generator script, not by hand-editing. If a source file conflicts, resolve it
+   minimally and say so in `follow_ups`. Push the merge commit.
 1. Run `git status` and `git diff {{base_ref}}...HEAD` (or `git diff` if there
    are uncommitted changes). Read the full diff.
 2. Check every item in the brief's "Definition of done" against the diff and the
