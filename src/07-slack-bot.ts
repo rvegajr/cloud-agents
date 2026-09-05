@@ -88,6 +88,9 @@ const deploys = parseDeploys(process.env.SLACK_DEPLOYS);
 const deployers = new Set(parseAllowlist(process.env.SLACK_DEPLOYERS).map((u) => u.replace(/^<@|>$/g, "")));
 const deployCreds = credentialsFromEnv();
 const deployable = [...deploys.keys()];
+/** Usage stays short; this link is where the long version lives. */
+const docsUrl =
+  process.env.SLACK_DOCS_URL?.trim() || "https://github.com/rvegajr/cloud-agents/blob/main/ARTICLE-SLACK.md";
 
 const deduper = new Deduper();
 const gate = new ConcurrencyGate(maxConcurrent);
@@ -197,6 +200,7 @@ function usageFor(
       channelName,
       channelProjectName: implied?.name,
       deployEnvs: deploys.get(cli.project.name)?.map((t) => t.env),
+      docsUrl,
     });
   }
   return formatGlobalUsage({
@@ -206,6 +210,7 @@ function usageFor(
     projects: listedProjects(projects, implied),
     unknownProject: cli.unknownProject,
     deployable,
+    docsUrl,
   });
 }
 

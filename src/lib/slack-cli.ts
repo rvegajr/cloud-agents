@@ -265,6 +265,8 @@ export function formatGlobalUsage(opts: {
   unknownProject?: string;
   /** Project names that have deploy targets (`SLACK_DEPLOYS`). */
   deployable?: string[];
+  /** Where the long-form instructions live; printed as a clickable line after the usage block. */
+  docsUrl?: string;
 }): string {
   const bot = opts.bot;
   const deployable = new Set(opts.deployable ?? []);
@@ -328,7 +330,13 @@ export function formatGlobalUsage(opts: {
   lines.push(`${bot} <project> -     same`);
   if (deployable.size) lines.push(`${bot} <project> deploy -   deploy targets for that project`);
   lines.push("```");
+  if (opts.docsUrl) lines.push(docsLine(opts.docsUrl));
   return lines.join("\n");
+}
+
+/** Outside the code block so Slack renders it as a link. */
+export function docsLine(url: string): string {
+  return `Full instructions: ${url}`;
 }
 
 export function formatProjectUsage(opts: {
@@ -338,6 +346,7 @@ export function formatProjectUsage(opts: {
   channelProjectName?: string;
   /** Deploy target names for this project (`SLACK_DEPLOYS`); empty = not deployable. */
   deployEnvs?: string[];
+  docsUrl?: string;
 }): string {
   const { bot, project } = opts;
   const implied = opts.channelProjectName === project.name;
@@ -370,6 +379,7 @@ export function formatProjectUsage(opts: {
   lines.push("hooks:   force-push, push to develop/main, deploys, and --no-verify are blocked");
   if (envs.length) lines.push("deploy:  runs from this bot, not the agent; reports here when it finishes");
   lines.push("```");
+  if (opts.docsUrl) lines.push(docsLine(opts.docsUrl));
   return lines.join("\n");
 }
 

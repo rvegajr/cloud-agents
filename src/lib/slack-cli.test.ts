@@ -4,6 +4,7 @@ import {
   aliasFromChannelName,
   channelProject,
   formatGlobalUsage,
+  formatProjectUsage,
   impliedProject,
   isCursorNativeCommand,
   matchChannelProject,
@@ -150,4 +151,13 @@ test("usage text names the channel project and prints whatever handle it is give
   assert.match(text, /@Shipper \[<project>\]/);
   assert.match(text, /← this channel/);
   assert.doesNotMatch(text, /@Cursor/);
+  assert.doesNotMatch(text, /Full instructions/);
+});
+
+test("usage ends with a docs link outside the code block when one is configured", () => {
+  const url = "https://example.com/docs.md";
+  const text = formatGlobalUsage({ bot: "@Shipper", projects: [...projects.values()], docsUrl: url });
+  assert.ok(text.endsWith("```\nFull instructions: " + url), text.slice(-120));
+  const project = formatProjectUsage({ bot: "@Shipper", project: projects.get("api")!, docsUrl: url });
+  assert.ok(project.endsWith("```\nFull instructions: " + url), project.slice(-120));
 });
