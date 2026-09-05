@@ -3,3 +3,5 @@ node_modules/
 .runs/
 *.log
 .DS_Store
+# Written by `npm run stamp` (and `npm run deploy`). Describes one build, not the repo.
+version.json

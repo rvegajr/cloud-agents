@@ -474,9 +474,9 @@ kit's manifest, run one Node process that holds a socket open to Slack, and
 that process creates and resumes Cloud Agents exactly the way the scripts above
 do. `@<bot>` is whatever your workspace names it; the bot reads that name at
 startup. It is not Cursor's `@Cursor` app. That app also starts Cloud Agents,
-directly from your sentence, with none of the triage, evidence, verify gate, or
-deploy step below. The mention is a small command line, not a free-form
-paragraph you hope the bot interprets:
+directly from your sentence, with none of the triage, evidence, or verify gate
+below. The mention is a small command line, not a free-form paragraph you hope
+the bot interprets:
 
 ```
 @<bot>                          usage (projects, this channel's default, examples)
@@ -484,29 +484,24 @@ paragraph you hope the bot interprets:
 @<bot> <project> -              same
 @<bot> <project> <request>      start a Cloud Agent on that repo
 @<bot> <request>                start a Cloud Agent on this channel's project
-@<bot> <project> deploy         deploy that project (default target)
-@<bot> <project> deploy env=uat    deploy a named target
-@<bot> <project> deploy -       list that project's deploy targets
-@<bot> deploy                   deploy this channel's project
+@<bot> version                  which build of the bot is answering
 ```
 
 Name the channel `#<project>-anything` (I use `#<project>-fixbot`; `#api-bugs`
 works too) and the bot already knows which GitHub repo to clone. One process,
 many repos, one Cloud Agent per request. `SLACK_PROJECTS` in `.env` is the
 catalog; a bare mention prints it. Options on a real request: `branch=`,
-`autopr=`, `model=`; on a deploy, `env=`.
+`autopr=`, `model=`.
 
 The hooks from step 6 are what that usage block means by `hooks: force-push, push
 to develop/main, deploys, and --no-verify are blocked`. Advice in `AGENTS.md`.
 Enforcement in `.cursor/hooks.json`. The Slack CLI just tells you they are there.
 
-`deploy` is the one verb that never reaches a Cloud Agent. The bot process
-itself fires a Vercel Deploy Hook or a Railway `serviceInstanceDeployV2`
-(targets in `SLACK_DEPLOYS`, allowed people in `SLACK_DEPLOYERS`), reacts 🚀,
-posts progress in the thread, and broadcasts the final ✅ with the live URL, or
-❌ with the last build-log lines, to the channel, @-mentioning whoever asked.
-The agent still cannot deploy. A person in the channel can, and the channel
-hears the result.
+Notice what is *not* in that list: there is no deploy verb. The bot holds no
+Vercel or Railway credential, so the only way to ship is to merge the PR, and the
+platform posts the result into the same channel on its own. `ARTICLE-SLACK.md`
+step 6½ is why an earlier version of this kit had a `deploy` command and why it
+was taken out.
 
 ## Two mistakes to make early, on purpose
 

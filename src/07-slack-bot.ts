@@ -10,8 +10,10 @@
  * `@<bot> <project>` (or `@<bot> <project> -`) prints that project's options.
  * A channel whose name starts with a project (`#api-bugs`, `#api-fixbot`)
  * selects that project so the name can be omitted.
- * `@<bot> <project> deploy [env=<name>]` kicks a Vercel/Railway deploy from
- * this process (SLACK_DEPLOYS) and reports back to the thread and channel.
+ *
+ * The bot never deploys. A merged PR is the only deploy trigger, and the
+ * deploy status you see in the channel comes from Vercel for Slack or a
+ * Railway webhook — neither of which runs through this process.
  *
  *   npm run slack
  */
@@ -37,16 +39,7 @@ import {
   resolveRunTarget,
   type SlackProject,
 } from "./lib/slack-cli.js";
-import {
-  credentialsFromEnv,
-  formatDeployUsage,
-  formatDuration,
-  parseDeploys,
-  pickDeployTarget,
-  startDeploy,
-  statusEmoji,
-  type DeployProgress,
-} from "./lib/slack-deploy.js";
+import { formatVersion, formatVersionBlock } from "./lib/version.js";
 import {
   ConcurrencyGate,
   Deduper,
@@ -87,10 +80,6 @@ const maxConcurrent = Number(process.env.SLACK_MAX_CONCURRENT ?? "2") || 2;
 const cursorUserId = process.env.SLACK_CURSOR_USER_ID?.trim() || "";
 /** With a token, a PR whose verifier passed is flipped from draft to ready. */
 const githubToken = process.env.GITHUB_TOKEN?.trim() || "";
-const deploys = parseDeploys(process.env.SLACK_DEPLOYS);
-const deployers = new Set(parseAllowlist(process.env.SLACK_DEPLOYERS).map((u) => u.replace(/^<@|>$/g, "")));
-const deployCreds = credentialsFromEnv();
-const deployable = [...deploys.keys()];
 /** Usage stays short; this link is where the long version lives. */
 const docsUrl =
   process.env.SLACK_DOCS_URL?.trim() || "https://github.com/rvegajr/cloud-agents/blob/main/ARTICLE-SLACK.md";
@@ -202,7 +191,6 @@ function usageFor(
       project: cli.project,
       channelName,
       channelProjectName: implied?.name,
-      deployEnvs: deploys.get(cli.project.name)?.map((t) => t.env),
       docsUrl,
     });
   }
@@ -212,24 +200,7 @@ function usageFor(
     channelProject: implied,
     projects: listedProjects(projects, implied),
     unknownProject: cli.unknownProject,
-    deployable,
     docsUrl,
-  });
-}
-
-function deployUsageFor(bot: string, project: SlackProject | undefined, implied: SlackProject | undefined, problem?: string): string {
-  if (!project) {
-    const list = deployable.length ? deployable.join(", ") : "(none — set SLACK_DEPLOYS)";
-    return [problem ?? "", "```", `usage: ${bot} <project> deploy [env=<name>]`, "", `deployable: ${list}`, "```"]
-      .filter((l, i) => l !== "" || i !== 0)
-      .join("\n");
-  }
-  return formatDeployUsage({
-    bot,
-    project: project.name,
-    targets: deploys.get(project.name) ?? [],
-    implied: implied?.name === project.name,
-    problem,
   });
 }
 
@@ -251,112 +222,6 @@ try {
   const botHandle = await resolveBotHandle(app.client, auth);
 
   type SlackClient = typeof app.client;
-
-  const inflightDeploys = new Set<string>();
-
-  /**
-   * Progress stays in the thread; the final line is also broadcast to the
-   * channel and @-mentions whoever asked, so nobody has to watch the thread.
-   */
-  async function handleDeploy(args: {
-    client: SlackClient;
-    cli: { project?: SlackProject; options: { env?: string } };
-    channel: string;
-    threadTs: string;
-    user: string | undefined;
-    post: (text: string) => Promise<void>;
-    react: (name: string, action: "add" | "remove") => Promise<void>;
-    bot: string;
-    implied: SlackProject | undefined;
-  }): Promise<void> {
-    const { cli, post, react } = args;
-    const project = cli.project;
-    if (!project) {
-      await post(deployUsageFor(args.bot, undefined, args.implied, "Which project? Name one, or run this from a `#<project>-…` channel."));
-      return;
-    }
-    if (deployers.size && (!args.user || !deployers.has(args.user))) {
-      await post(`Deploys are limited to SLACK_DEPLOYERS (${[...deployers].map((u) => `<@${u}>`).join(", ")}). Ask one of them.`);
-      return;
-    }
-    const targets = deploys.get(project.name);
-    const picked = pickDeployTarget(targets, cli.options.env);
-    if (!picked.target) {
-      const problem =
-        picked.reason === "unknown-env"
-          ? `no deploy target \`${cli.options.env}\` for ${project.name}.`
-          : picked.reason === "ambiguous"
-            ? `${project.name} has several targets and none is the default; pass env=<name>.`
-            : undefined;
-      await post(deployUsageFor(args.bot, project, args.implied, problem));
-      return;
-    }
-    const target = picked.target;
-    const key = `${target.project}/${target.env}`;
-    if (inflightDeploys.has(key)) {
-      await post(`A deploy of ${key} is already running. I'll report when it finishes.`);
-      return;
-    }
-    inflightDeploys.add(key);
-    const who = args.user ? `<@${args.user}>` : "someone";
-    const started = Date.now();
-    const envLabel = target.env === "default" ? "" : ` env=${target.env}`;
-    try {
-      await react("rocket", "add");
-      const run = await startDeploy(target, deployCreds);
-      const where = run.inspectUrl ? ` → ${run.inspectUrl}` : "";
-      await post(`${statusEmoji("queued")} Deploying *${project.name}*${envLabel} (${run.label})${where}`);
-      console.log(`deploy ${key} started by ${args.user ?? "?"}: ${run.label}`);
-
-      if (!run.watch) {
-        await react("rocket", "remove");
-        await react("white_check_mark", "add");
-        await args.client.chat.postMessage({
-          channel: args.channel,
-          thread_ts: args.threadTs,
-          reply_broadcast: true,
-          text: `🚀 *${project.name}*${envLabel} deploy triggered by ${who} (${run.label}). No VERCEL_TOKEN set, so I can't watch it; check the dashboard.`,
-        });
-        return;
-      }
-
-      const final: DeployProgress = await run.watch(async (p) => {
-        const bits = [p.detail, p.inspectUrl].filter(Boolean).join(" · ");
-        await post(`${statusEmoji(p.status)} ${p.status}${bits ? ` — ${bits}` : ""}`);
-      });
-
-      await react("rocket", "remove");
-      const took = formatDuration(Date.now() - started);
-      let summary: string;
-      if (final.status === "ready") {
-        await react("white_check_mark", "add");
-        summary = `✅ *${project.name}*${envLabel} is live (${took}) — ${final.liveUrl ?? final.inspectUrl ?? run.label} ${who}`;
-      } else if (final.status === "failed") {
-        await react("x", "add");
-        summary = `❌ *${project.name}*${envLabel} deploy failed after ${took}${final.inspectUrl ? ` — ${final.inspectUrl}` : ""} ${who}`;
-        const log = await run.failureLog?.().catch(() => undefined);
-        if (log) await post("```\n" + log.slice(-2800) + "\n```");
-      } else {
-        await react("warning", "add");
-        summary = `${statusEmoji(final.status)} *${project.name}*${envLabel} deploy ended as ${final.status} after ${took}${final.detail ? ` (${final.detail})` : ""}${final.inspectUrl ? ` — ${final.inspectUrl}` : ""} ${who}`;
-      }
-      await args.client.chat.postMessage({ channel: args.channel, thread_ts: args.threadTs, reply_broadcast: true, text: summary });
-      console.log(`deploy ${key} ${final.status} in ${took}`);
-    } catch (err) {
-      console.error(err);
-      await react("rocket", "remove");
-      await react("x", "add");
-      const msg = err instanceof Error ? err.message : String(err);
-      await args.client.chat.postMessage({
-        channel: args.channel,
-        thread_ts: args.threadTs,
-        reply_broadcast: true,
-        text: `❌ *${project.name}*${envLabel} deploy could not start: ${msg} ${who}`,
-      });
-    } finally {
-      inflightDeploys.delete(key);
-    }
-  }
 
   async function handleCli(args: {
     client: SlackClient;
@@ -406,32 +271,27 @@ try {
       fallback: fallbackTarget,
     });
 
-    const isUsage = cli.kind === "usage" || cli.kind === "project-usage" || cli.kind === "deploy-usage";
+    const isUsage = cli.kind === "usage" || cli.kind === "project-usage" || cli.kind === "version";
     if (!allowed && !isUsage) {
       await post(`This channel (${channel}) is not on SLACK_ALLOWED_CHANNELS or SLACK_CHANNEL_REPOS. Add it to .env.`);
       return;
     }
 
-    if (cli.kind === "deploy-usage") {
-      await post(deployUsageFor(args.bot, cli.project, implied));
+    if (cli.kind === "version") {
+      await post(`${args.bot} ${formatVersion()}\n${formatVersionBlock()}`);
       return;
     }
 
     if (isUsage) {
       if (args.overlayOnly && inThread && !cli.explicitHelp && cli.kind === "usage") return;
       const note = args.overlayOnly
-        ? `That mention goes to Cursor's own Slack app. For the Jam → triage → verify pipeline (and \`deploy\`), mention ${args.bot} instead:\n`
+        ? `That mention goes to Cursor's own Slack app. For the Jam → triage → verify pipeline, mention ${args.bot} instead:\n`
         : "";
       await post(note + usageFor(args.bot, cli, channelName, implied));
       return;
     }
 
     if (args.overlayOnly) return;
-
-    if (cli.kind === "deploy") {
-      await handleDeploy({ client: args.client, cli, channel, threadTs, user: args.user, post, react, bot: args.bot, implied });
-      return;
-    }
 
     const target = resolveRunTarget(cli, routed, fallbackTarget);
     if (!target) {
@@ -590,30 +450,23 @@ try {
 
   await app.start();
   const defaultLine = fallbackTarget ? `default=${fallbackTarget.repo}@${fallbackTarget.ref}` : "default=(none)";
+  // Which build is answering. On a host this comes from version.json, so a
+  // redeploy that did not take is visible in the first line of the logs.
+  console.log(`cloud-agents ${formatVersion()}`);
   console.log(`Slack CLI running (Socket Mode) as ${botHandle}. ${defaultLine}  maxConcurrent=${maxConcurrent}`);
   for (const [ch, t] of routes) console.log(`  ${ch} -> ${t.repo}@${t.ref}`);
   for (const p of projects.values()) console.log(`  project ${p.name} -> ${p.repo}@${p.ref}`);
-  for (const [name, targets] of deploys) {
-    console.log(`  deploy ${name} -> ${targets.map((t) => `${t.env}:${t.provider}`).join(", ")}`);
-  }
-  if (deploys.size) {
-    const missing: string[] = [];
-    if ([...deploys.values()].flat().some((t) => t.provider === "vercel") && !deployCreds.vercelToken) missing.push("VERCEL_TOKEN (vercel deploys will fire but not be watched)");
-    if ([...deploys.values()].flat().some((t) => t.provider === "railway") && !deployCreds.railwayToken) missing.push("RAILWAY_API_TOKEN or RAILWAY_TOKEN (railway deploys will fail)");
-    for (const m of missing) console.warn(`  missing ${m}`);
-    console.log(`  deployers: ${deployers.size ? [...deployers].join(", ") : "anyone in an allowed channel"}`);
-  }
   if (cursorUserId) console.log(`  mentions of Cursor's app (${cursorUserId}) get a pointer to ${botHandle}`);
   console.log(
     githubToken
       ? "  PRs: marked ready for review when the verifier passes (GITHUB_TOKEN set)"
       : "  PRs: left as drafts (set GITHUB_TOKEN to mark them ready when the verifier passes)",
   );
+  console.log("  deploys: not from here — a merged PR triggers the host, which posts the result to the channel");
   console.log(
     formatGlobalUsage({
       bot: botHandle,
       projects: listedProjects(projects),
-      deployable,
     }).replace(/```\n?/g, "").trim(),
   );
 

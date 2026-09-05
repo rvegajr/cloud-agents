@@ -14,11 +14,9 @@ import {
   manifestBotScopes,
   normalizeRepoUrl,
   parsePhaseFilter,
-  redactHook,
+  PHASES,
   slackTokenKind,
   summarize,
-  validateRailwaySpec,
-  validateVercelHook,
   type Check,
 } from "./doctor.js";
 
@@ -27,10 +25,12 @@ test("parsePhaseFilter accepts a letter, a list, and a range", () => {
   assert.deepEqual([...parsePhaseFilter("a,c")], ["A", "C"]);
   assert.deepEqual([...parsePhaseFilter("B-D")], ["B", "C", "D"]);
   assert.deepEqual([...parsePhaseFilter("D-B")], ["B", "C", "D"]);
-  assert.equal(parsePhaseFilter(undefined).size, 8);
+  assert.equal(parsePhaseFilter(undefined).size, PHASES.length);
   // `--phase` with no value becomes "true"; treat it as "every phase".
-  assert.equal(parsePhaseFilter("true").size, 8);
-  assert.equal(parsePhaseFilter("Z").size, 8);
+  assert.equal(parsePhaseFilter("true").size, PHASES.length);
+  assert.equal(parsePhaseFilter("Z").size, PHASES.length);
+  // The deploy phase is gone; H is no longer a phase at all.
+  assert.equal(parsePhaseFilter("H").size, PHASES.length);
 });
 
 test("normalizeRepoUrl makes ssh, https, .git, and case the same repo", () => {
@@ -108,31 +108,6 @@ test("hasRepoScope needs the whole repo scope, not a subscope", () => {
   assert.ok(!hasRepoScope(undefined));
 });
 
-test("validateVercelHook accepts a real hook and explains every rejection", () => {
-  const ok = validateVercelHook("https://api.vercel.com/v1/integrations/deploy/prj_abc123/hook456");
-  assert.ok(ok.ok);
-  assert.equal(ok.detail, "prj_abc123");
-  assert.ok(!validateVercelHook("not a url").ok);
-  assert.ok(!validateVercelHook("http://api.vercel.com/v1/integrations/deploy/prj_a/b").ok);
-  assert.ok(!validateVercelHook("https://example.com/v1/integrations/deploy/prj_a/b").ok);
-  assert.ok(!validateVercelHook("https://api.vercel.com/v1/integrations/deploy/").ok);
-});
-
-test("validateRailwaySpec mirrors what the deploy path will accept", () => {
-  const ok = validateRailwaySpec("p-id/uat/web+api");
-  assert.ok(ok.ok);
-  assert.equal(ok.detail, "p-id / uat / web + api");
-  assert.ok(!validateRailwaySpec("p-id/uat").ok);
-});
-
-test("redactHook identifies a hook without printing a usable one", () => {
-  const url = "https://api.vercel.com/v1/integrations/deploy/prj_abc123/secrethook";
-  const shown = redactHook(url);
-  assert.equal(shown, "…/deploy/prj_abc123/…");
-  assert.ok(!shown.includes("secrethook"));
-  assert.ok(!redactHook("https://api.vercel.com/v1/integrations/deploy/nope/secrethook").includes("secrethook"));
-});
-
 test("slack id shapes: members vs channels", () => {
   assert.ok(isSlackUserId("U0123ABCD"));
   assert.ok(isSlackUserId("<@U0123ABCD>"));
@@ -146,8 +121,8 @@ test("slack id shapes: members vs channels", () => {
 const checks: Check[] = [
   { phase: "A", group: "cursor", name: "api key", verdict: "pass", detail: "you@example.com" },
   { phase: "C", group: "slack", name: "bot scopes", verdict: "warn", detail: "missing users:read", fix: "reinstall the app" },
-  { phase: "F", group: "vercel", name: "token", verdict: "skip", detail: "VERCEL_TOKEN not set" },
-  { phase: "H", group: "github", name: "PAT kind", verdict: "fail", detail: "fine-grained", fix: "mint a classic PAT" },
+  { phase: "F", group: "notifications", name: "railway webhook", verdict: "skip", detail: "not observable from here" },
+  { phase: "G", group: "github", name: "PAT kind", verdict: "fail", detail: "fine-grained", fix: "mint a classic PAT" },
 ];
 
 test("summarize counts verdicts and fails the exit code only on FAIL", () => {

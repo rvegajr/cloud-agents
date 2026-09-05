@@ -8,7 +8,7 @@
  *
  * Phases are the ones in IMPLEMENTATION-GUIDE.md:
  *   A bootstrap  B target repo  C Slack app  D local run
- *   E hosting    F deploy       G notifications  H Jam + ready-for-review
+ *   E hosting    F deploy notifications       G Jam + ready-for-review
  *
  *   npm run doctor
  *   npm run doctor -- --phase C        one phase (also `A,C` or `A-D`)
@@ -23,7 +23,7 @@ import { loadEnv, flags } from "./lib/env.js";
 import { resolveApiKey } from "./lib/auth.js";
 import { parseProjects } from "./lib/slack-cli.js";
 import { parseAllowlist, parseChannelRepos } from "./lib/slack-thread.js";
-import { credentialsFromEnv, parseDeploys, parseRailwaySpec, type DeployTarget } from "./lib/slack-deploy.js";
+import { formatVersion, versionInfo } from "./lib/version.js";
 import {
   classifyGitHubToken,
   collectRepoRefs,
@@ -36,11 +36,8 @@ import {
   manifestBotScopes,
   normalizeRepoUrl,
   parsePhaseFilter,
-  redactHook,
   slackTokenKind,
   summarize,
-  validateRailwaySpec,
-  validateVercelHook,
   type Check,
   type Phase,
   type Verdict,
@@ -96,8 +93,6 @@ const targetRepo = envVar("TARGET_REPO");
 const projects = parseProjects(process.env.SLACK_PROJECTS, targetRef);
 const routes = parseChannelRepos(process.env.SLACK_CHANNEL_REPOS, targetRef);
 const repoRefs = collectRepoRefs({ targetRepo, targetRef, projects, routes });
-const deploys = parseDeploys(process.env.SLACK_DEPLOYS);
-const deployTargets: DeployTarget[] = [...deploys.values()].flat();
 
 // ---------------------------------------------------------------------------
 // Phase A — Cursor account, model, and the GitHub grant the VM clones with
@@ -335,26 +330,20 @@ async function checkSlack(): Promise<void> {
     }
   }
 
-  // Deployers and the optional Cursor-app pointer are member ids, not channels.
-  const deployers = parseAllowlist(process.env.SLACK_DEPLOYERS).map((u) => u.replace(/^<@|>$/g, ""));
-  for (const u of deployers) {
-    if (!isSlackUserId(u)) {
-      add("F", "slack", `deployer ${u}`, "fail", "not a U… member id", "profile → ⋮ → Copy member ID");
-      continue;
-    }
-    const info = await slack("users.info", botToken, { user: u });
-    if (info.ok) {
-      const user = (info.body.user ?? {}) as { name?: string };
-      add("F", "slack", `deployer ${u}`, "pass", user.name ?? "resolved");
-    } else {
-      add("F", "slack", `deployer ${u}`, "warn", info.error ?? "not resolved", info.error === "missing_scope" ? "users:read is not granted; the id is still honoured" : "check the member id");
-    }
-  }
   const cursorUser = envVar("SLACK_CURSOR_USER_ID");
-  if (cursorUser) {
+  if (cursorUser && !isSlackUserId(cursorUser)) {
+    add("C", "slack", "cursor app pointer", "fail", `SLACK_CURSOR_USER_ID=${cursorUser} is not a U… member id`, "the app's profile → ⋮ → Copy member ID, or leave it empty");
+  } else if (cursorUser) {
     const info = await slack("users.info", botToken, { user: cursorUser });
     if (info.ok) add("C", "slack", "cursor app pointer", "pass", `mentions of ${cursorUser} get a pointer to @${botUser}`);
     else add("C", "slack", "cursor app pointer", "warn", info.error ?? "not resolved", "leave SLACK_CURSOR_USER_ID empty unless Cursor's own app is installed too");
+  }
+
+  // Retired settings, still sitting in a .env someone copied forward.
+  for (const stale of ["SLACK_DEPLOYS", "SLACK_DEPLOYERS", "VERCEL_TOKEN", "VERCEL_TEAM_ID", "RAILWAY_API_TOKEN"]) {
+    if (envVar(stale)) {
+      add("C", "slack", `stale ${stale}`, "warn", "the bot no longer deploys, so this is ignored", "delete it from .env and from the host's variables; a merged PR is the deploy trigger");
+    }
   }
 
   // Phase D is about routing being answerable at all, not about tokens.
@@ -427,140 +416,54 @@ async function checkHost(): Promise<void> {
   } else {
     add("E", "host", "CURSOR_API_KEY", "pass", "set, so it can be copied into the host's variables");
   }
+
+  await checkVersionStamp();
 }
 
-// ---------------------------------------------------------------------------
-// Phase F — deploy targets. Shapes are validated; nothing is ever fired.
-
-async function vercelApi<T>(path: string, token: string, teamId?: string): Promise<T> {
-  const url = new URL(`https://api.vercel.com${path}`);
-  if (teamId) url.searchParams.set("teamId", teamId);
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20_000) });
-  if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()) as T;
-}
-
-async function railwayGql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
-  const creds = credentialsFromEnv();
-  if (!creds.railwayToken) throw new Error("no Railway token");
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (creds.railwayTokenKind === "project") headers["Project-Access-Token"] = creds.railwayToken;
-  else headers.Authorization = `Bearer ${creds.railwayToken}`;
-  const res = await fetch("https://backboard.railway.com/graphql/v2", {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ query, variables }),
-    signal: AbortSignal.timeout(20_000),
-  });
-  const json = (await res.json().catch(() => ({}))) as { data?: T; errors?: Array<{ message: string }> };
-  if (!res.ok || json.errors?.length) throw new Error(json.errors?.map((e) => e.message).join("; ") || `HTTP ${res.status}`);
-  return json.data as T;
-}
-
-async function checkDeploys(): Promise<void> {
-  if (!deployTargets.length) {
-    add("F", "deploy", "SLACK_DEPLOYS", "skip", "no deploy targets configured", "optional: `@<bot> <project> deploy` needs one entry per project/env");
+/**
+ * A deployed container has no `.git`, so the version the bot reports comes from
+ * the stamp. A stamp that predates HEAD means the last deploy shipped different
+ * code than the one you are reading.
+ */
+async function checkVersionStamp(): Promise<void> {
+  const info = versionInfo();
+  if (info.source === "package.json") {
+    add("E", "version", "stamp", "warn", "no stamp and no git metadata", "run `npm run stamp`, or deploy with `npm run deploy` which stamps first");
     return;
   }
-  add("F", "deploy", "SLACK_DEPLOYS", "pass", `${deployTargets.length} target(s): ${[...deploys.keys()].join(", ")}`);
-
-  const creds = credentialsFromEnv();
-  const wantsVercel = deployTargets.some((t) => t.provider === "vercel");
-  const wantsRailway = deployTargets.some((t) => t.provider === "railway");
-
-  for (const t of deployTargets) {
-    const label = `${t.project}/${t.env}`;
-    if (t.provider === "vercel") {
-      const v = validateVercelHook(t.spec);
-      if (v.ok) add("F", "vercel", `hook ${label}`, "pass", `${v.detail} (${redactHook(t.spec)}) — not fired`);
-      else add("F", "vercel", `hook ${label}`, "fail", v.detail, v.fix);
-    } else {
-      const v = validateRailwaySpec(t.spec);
-      if (!v.ok) {
-        add("F", "railway", `spec ${label}`, "fail", v.detail, v.fix);
-        continue;
-      }
-      add("F", "railway", `spec ${label}`, "pass", v.detail);
-    }
+  if (info.source === "git") {
+    add(
+      "E",
+      "version",
+      "stamp",
+      "warn",
+      `${formatVersion(info)} from live git; nothing stamped yet`,
+      "deploy with `npm run deploy` so the hosted bot can report its commit",
+    );
+    return;
   }
-
-  if (wantsVercel) {
-    if (!creds.vercelToken) {
-      add("F", "vercel", "VERCEL_TOKEN", "warn", "not set: the hook still fires, but the bot cannot report READY or FAILED", "vercel.com/account/tokens");
-    } else {
-      try {
-        const me = await vercelApi<{ user?: { username?: string; email?: string } }>("/v2/user", creds.vercelToken);
-        add("F", "vercel", "VERCEL_TOKEN", "pass", me.user?.username ?? me.user?.email ?? "authenticated");
-      } catch (err) {
-        add("F", "vercel", "VERCEL_TOKEN", "fail", msg(err), "mint a new token at vercel.com/account/tokens");
-      }
-      if (creds.vercelTeamId) {
-        try {
-          const team = await vercelApi<{ name?: string; slug?: string }>(`/v2/teams/${creds.vercelTeamId}`, creds.vercelToken);
-          add("F", "vercel", "VERCEL_TEAM_ID", "pass", team.slug ?? team.name ?? creds.vercelTeamId);
-        } catch (err) {
-          add("F", "vercel", "VERCEL_TEAM_ID", "fail", msg(err), "team projects need the team id the token can see");
-        }
-      } else {
-        add("F", "vercel", "VERCEL_TEAM_ID", "skip", "not set (personal-scope projects do not need it)");
-      }
-    }
+  const head = (await run("git", ["rev-parse", "HEAD"], 10_000)).out.trim();
+  if (head && info.commit && !head.startsWith(info.commit)) {
+    add("E", "version", "stamp", "warn", `${info.source} says ${info.commit}, HEAD is ${head.slice(0, 12)}`, "re-run `npm run deploy` so the stamp matches what you are shipping");
+    return;
   }
-
-  if (wantsRailway) {
-    if (!creds.railwayToken) {
-      add("F", "railway", "token", "fail", "no RAILWAY_TOKEN or RAILWAY_API_TOKEN, so railway deploys will fail", "prefer a project token: target project → Settings → Tokens, scoped to one environment");
-      return;
-    }
-    add("F", "railway", "token", "pass", `${creds.railwayTokenKind} token (${creds.railwayTokenKind === "project" ? "Project-Access-Token" : "Authorization: Bearer"})`);
-    // Resolve every spec the way startRailway will: names must match real ones.
-    for (const t of deployTargets.filter((x) => x.provider === "railway")) {
-      const label = `${t.project}/${t.env}`;
-      let parsed: { projectId: string; environment: string; services: string[] };
-      try {
-        parsed = parseRailwaySpec(t.spec);
-      } catch {
-        continue; // already reported above
-      }
-      try {
-        const info = await railwayGql<{
-          project: {
-            name: string;
-            environments: { edges: Array<{ node: { id: string; name: string } }> };
-            services: { edges: Array<{ node: { id: string; name: string } }> };
-          };
-        }>(
-          `query p($id: String!) { project(id: $id) { name
-             environments { edges { node { id name } } }
-             services { edges { node { id name } } } } }`,
-          { id: parsed.projectId },
-        );
-        const envs = info.project.environments.edges.map((e) => e.node);
-        const svcs = info.project.services.edges.map((e) => e.node);
-        const env = envs.find((e) => e.id === parsed.environment || e.name.toLowerCase() === parsed.environment.toLowerCase());
-        if (!env) {
-          add("F", "railway", `resolve ${label}`, "fail", `no environment "${parsed.environment}" in ${info.project.name}`, `have: ${envs.map((e) => e.name).join(", ")}`);
-          continue;
-        }
-        const missing = parsed.services.filter((s) => !svcs.some((x) => x.id === s || x.name.toLowerCase() === s.toLowerCase()));
-        if (missing.length) {
-          add("F", "railway", `resolve ${label}`, "fail", `no service ${missing.join(", ")} in ${info.project.name}`, `have: ${svcs.map((x) => x.name).join(", ")}`);
-          continue;
-        }
-        add("F", "railway", `resolve ${label}`, "pass", `${info.project.name} / ${env.name} / ${parsed.services.join(" + ")}`);
-      } catch (err) {
-        add("F", "railway", `resolve ${label}`, "fail", msg(err), "a project token only reaches its own project; check the token and the projectId");
-      }
-    }
-  }
+  add(
+    "E",
+    "version",
+    "stamp",
+    info.dirty ? "warn" : "pass",
+    `${formatVersion(info)} from ${info.source}, built ${info.builtAt ?? "?"}`,
+    info.dirty ? "the stamp came from a dirty tree, so it does not correspond to any commit" : undefined,
+  );
 }
 
 // ---------------------------------------------------------------------------
-// Phase G — nothing here is verifiable from outside, so print the checklist
+// Phase F — deploy status. Nothing here is verifiable from outside: the bot is
+// not in the deploy path at all, so the checklist is the check.
 
 function checkNotifications(): void {
   add(
-    "G",
+    "F",
     "notifications",
     "vercel for slack",
     "skip",
@@ -568,56 +471,54 @@ function checkNotifications(): void {
     "install vercel.com/integrations/slack/new, then per channel: /invite @Vercel, /vercel signin, /vercel subscribe <team>/<project>, tick Deployment Succeeded + Deployment Error",
   );
   add(
-    "G",
+    "F",
     "notifications",
     "railway webhook",
     "skip",
     "not observable from here",
     "Slack app → Incoming Webhooks → On → Add to #<project>-fixbot, then Railway target project → Settings → Webhooks → paste; Deployment Deployed + Failed",
   );
-  if (envVar("SLACK_DEPLOYS")) {
-    add("G", "notifications", "manual vs auto", "pass", "SLACK_DEPLOYS is the manual `deploy` command; auto-deploy status comes from the integrations above, not from the bot");
-  }
-  add("G", "notifications", "proof", "skip", "a merge is the only real test", "merge to the integration branch and watch #<project>-fixbot for a deploy card");
+  add("F", "notifications", "trigger", "pass", "a merged PR is the only deploy trigger; the bot has no deploy command and holds no deploy credentials");
+  add("F", "notifications", "proof", "skip", "a merge is the only real test", "merge to the integration branch and watch #<project>-fixbot for a deploy card");
 }
 
 // ---------------------------------------------------------------------------
-// Phase H — Jam evidence, and the PAT that takes a PR out of draft
+// Phase G — Jam evidence, and the PAT that takes a PR out of draft
 
 async function checkJam(): Promise<void> {
   const token = envVar("JAM_TOKEN");
   const storedCreds = existsSync(join(homedir(), ".config/jam/credentials.json"));
   if (!token && !storedCreds) {
-    add("H", "jam", "JAM_TOKEN", "skip", "not set: the bot passes the URL through and the agent triages from prose", "jam.dev → Settings → MCP, scope mcp:read");
+    add("G", "jam", "JAM_TOKEN", "skip", "not set: the bot passes the URL through and the agent triages from prose", "jam.dev → Settings → MCP, scope mcp:read");
     return;
   }
   const version = await run("jam", ["--version"], 15_000);
   if (!version.ok) {
-    add("H", "jam", "jam CLI", "warn", "not on PATH", "the bot self-installs it on first fetch (curl -fsSL https://native.jam.dev/install | bash)");
+    add("G", "jam", "jam CLI", "warn", "not on PATH", "the bot self-installs it on first fetch (curl -fsSL https://native.jam.dev/install | bash)");
     return;
   }
   // `jam --version` appends an "Update available" notice, so take the version line.
   const lines = version.out.split("\n").map((l) => l.trim());
-  add("H", "jam", "jam CLI", "pass", lines.find((l) => /^\d+\.\d+\.\d+/.test(l)) ?? lines[0] ?? "");
+  add("G", "jam", "jam CLI", "pass", lines.find((l) => /^\d+\.\d+\.\d+/.test(l)) ?? lines[0] ?? "");
   const doctor = await run("jam", ["doctor"], 20_000);
   const authLine = doctor.out.split("\n").find((l) => l.trim().startsWith("Auth:")) ?? "";
   if (/logged in/i.test(authLine)) {
-    add("H", "jam", "auth", "pass", `${authLine.replace(/^\s*Auth:\s*/, "")}${token ? " (JAM_TOKEN set)" : " (stored credentials, not JAM_TOKEN — the host needs the token)"}`);
+    add("G", "jam", "auth", "pass", `${authLine.replace(/^\s*Auth:\s*/, "")}${token ? " (JAM_TOKEN set)" : " (stored credentials, not JAM_TOKEN — the host needs the token)"}`);
   } else {
-    add("H", "jam", "auth", "warn", authLine || "jam doctor reported no login", "check JAM_TOKEN, or run `jam auth login`");
+    add("G", "jam", "auth", "warn", authLine || "jam doctor reported no login", "check JAM_TOKEN, or run `jam auth login`");
   }
 }
 
 async function checkGitHubToken(): Promise<void> {
   const token = envVar("GITHUB_TOKEN");
   if (!token) {
-    add("H", "github", "GITHUB_TOKEN", "skip", "not set: PRs stay drafts until someone clicks Ready", "optional; a classic PAT with `repo` lets the bot flip a verified PR to ready");
+    add("G", "github", "GITHUB_TOKEN", "skip", "not set: PRs stay drafts until someone clicks Ready", "optional; a classic PAT with `repo` lets the bot flip a verified PR to ready");
     return;
   }
   const kind = classifyGitHubToken(token);
   if (kind === "fine-grained" || kind === "app-installation") {
     add(
-      "H",
+      "G",
       "github",
       "token kind",
       "fail",
@@ -632,22 +533,22 @@ async function checkGitHubToken(): Promise<void> {
       signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
-      add("H", "github", "GITHUB_TOKEN", "fail", `GET /user → ${res.status}`, "the token is expired or revoked; mint a new classic PAT");
+      add("G", "github", "GITHUB_TOKEN", "fail", `GET /user → ${res.status}`, "the token is expired or revoked; mint a new classic PAT");
       return;
     }
     const user = (await res.json()) as { login?: string };
     const scopes = res.headers.get("x-oauth-scopes");
     if (scopes === null) {
-      add("H", "github", "token scopes", "fail", "GitHub reported no OAuth scopes, which means this is not a classic PAT", "mint a classic PAT with `repo`");
+      add("G", "github", "token scopes", "fail", "GitHub reported no OAuth scopes, which means this is not a classic PAT", "mint a classic PAT with `repo`");
       return;
     }
     if (!hasRepoScope(scopes)) {
-      add("H", "github", "token scopes", "fail", `has "${scopes || "(none)"}", needs repo`, "edit the token and tick the whole `repo` scope");
+      add("G", "github", "token scopes", "fail", `has "${scopes || "(none)"}", needs repo`, "edit the token and tick the whole `repo` scope");
       return;
     }
-    add("H", "github", "GITHUB_TOKEN", "pass", `classic PAT for ${user.login ?? "?"} with repo`);
+    add("G", "github", "GITHUB_TOKEN", "pass", `classic PAT for ${user.login ?? "?"} with repo`);
   } catch (err) {
-    add("H", "github", "GITHUB_TOKEN", "fail", msg(err), "check network access to api.github.com");
+    add("G", "github", "GITHUB_TOKEN", "fail", msg(err), "check network access to api.github.com");
   }
 }
 
@@ -682,9 +583,8 @@ const gates = [
   "A: cursor.com/agents → connect GitHub → grant the target repo",
   "C: create the Slack app from slack-app-manifest.json, mint xapp- and xoxb-, /invite the bot",
   "E: railway login, and choosing which workspace pays for the service",
-  "F: mint the Vercel deploy hook and the Railway project token",
-  "G: install Vercel for Slack and create the Slack incoming webhook Railway posts to",
-  "H: mint the classic GitHub PAT and the Jam mcp:read token",
+  "F: install Vercel for Slack and create the Slack incoming webhook Railway posts to",
+  "G: mint the classic GitHub PAT and the Jam mcp:read token",
 ];
 
 if (want("A")) await checkHygiene();
@@ -693,17 +593,16 @@ if (want("B")) {
   await checkGit();
   checkTargetRepoKit();
 }
-if (want("C", "D", "F")) await checkSlack();
+if (want("C", "D")) await checkSlack();
 if (want("D")) await checkAgents();
 if (want("E")) await checkHost();
-if (want("F")) await checkDeploys();
-if (want("G")) checkNotifications();
-if (want("H")) {
+if (want("F")) checkNotifications();
+if (want("G")) {
   await checkJam();
   await checkGitHubToken();
 }
 
-// Some checks share a request (Slack tokens serve C, D, and F), so filter at
+// Some checks share a request (the Slack tokens serve C and D), so filter at
 // the end rather than pretending each phase is a separate round trip.
 const shown = checks.filter((c) => wanted.has(c.phase));
 const summary = summarize(shown);

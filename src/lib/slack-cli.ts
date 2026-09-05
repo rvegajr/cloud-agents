@@ -17,11 +17,9 @@ export interface MentionOptions {
   autopr?: boolean;
   repo?: string;
   model?: string;
-  /** Deploy target name from `SLACK_DEPLOYS` (`env=uat`). */
-  env?: string;
 }
 
-export type CliKind = "usage" | "project-usage" | "run" | "deploy" | "deploy-usage";
+export type CliKind = "usage" | "project-usage" | "run" | "version";
 
 export interface MentionCli {
   kind: CliKind;
@@ -34,16 +32,16 @@ export interface MentionCli {
 }
 
 const HELP_TOKENS = new Set(["", "help", "--help", "-h", "-?", "?", "-", "usage", "commands", "options"]);
-const DEPLOY_TOKENS = new Set(["deploy", "deploy!", "redeploy", "ship"]);
+const VERSION_TOKENS = new Set(["version", "--version", "-v"]);
 
 /** Official Cursor Slack commands — we stay silent so Cursor can answer. */
 const CURSOR_NATIVE = /^(help|settings|list|agent)\b/i;
 
 const IDENT_RE = /^[a-z][a-z0-9_-]*$/i;
-const OPTION_RE = /\b(branch|autopr|repo|model|env)=(?:"([^"]*)"|'([^']*)'|(\S+))/gi;
+const OPTION_RE = /\b(branch|autopr|repo|model)=(?:"([^"]*)"|'([^']*)'|(\S+))/gi;
 
-export function isDeployToken(text: string): boolean {
-  return DEPLOY_TOKENS.has(text.trim().toLowerCase());
+export function isVersionToken(text: string): boolean {
+  return VERSION_TOKENS.has(text.trim().toLowerCase());
 }
 
 export function isHelpToken(text: string): boolean {
@@ -164,7 +162,6 @@ export function parseOptions(text: string): { text: string; options: MentionOpti
     if (key === "branch") options.branch = value;
     else if (key === "repo") options.repo = value;
     else if (key === "model") options.model = value;
-    else if (key === "env") options.env = value.toLowerCase();
     else if (key === "autopr") options.autopr = parseBool(value);
     return " ";
   });
@@ -192,26 +189,20 @@ export function parseMentionCli(
     return { kind: "usage", project: ctx.channelProject, request: "", options, explicitHelp };
   }
 
+  // `version` on its own: which build of the bot is answering.
+  if (isVersionToken(text)) {
+    return { kind: "version", project: ctx.channelProject, request: "", options, explicitHelp: true };
+  }
+
   const space = text.search(/\s/);
   const first = (space === -1 ? text : text.slice(0, space)).toLowerCase();
   const rest = space === -1 ? "" : text.slice(space).trim();
   const named = IDENT_RE.test(first) ? ctx.projects.get(first) : undefined;
 
-  // `deploy [<project>] [env] [-]`
-  if (isDeployToken(first)) {
-    const [second = "", ...tail] = rest.split(/\s+/).filter(Boolean);
-    const target = IDENT_RE.test(second) ? ctx.projects.get(second.toLowerCase()) : undefined;
-    if (target) return deployCli(target, tail.join(" "), options);
-    return deployCli(ctx.channelProject, rest, options);
-  }
-
   if (named) {
     if (isHelpToken(rest)) {
       return { kind: "project-usage", project: named, request: "", options, explicitHelp: rest !== "" };
     }
-    // `<project> deploy [env] [-]`
-    const [verb = "", ...tail] = rest.split(/\s+/).filter(Boolean);
-    if (isDeployToken(verb)) return deployCli(named, tail.join(" "), options);
     return { kind: "run", project: named, request: rest, options, explicitHelp: false };
   }
 
@@ -228,17 +219,6 @@ export function parseMentionCli(
 
   const implied = ctx.channelProject ?? (ctx.fallback ? { name: "default", ...ctx.fallback } : undefined);
   return { kind: "run", project: implied, request: text, options, explicitHelp: false };
-}
-
-/** After the `deploy` verb: `-`/help → usage; a bare word is the env (`deploy uat`). */
-function deployCli(project: SlackProject | undefined, rest: string, options: MentionOptions): MentionCli {
-  const trimmed = rest.trim();
-  if (isHelpToken(trimmed) && trimmed !== "") {
-    return { kind: "deploy-usage", project, request: "", options, explicitHelp: true };
-  }
-  const [word = ""] = trimmed.split(/\s+/).filter(Boolean);
-  if (word && IDENT_RE.test(word) && !options.env) options.env = word.toLowerCase();
-  return { kind: "deploy", project, request: "", options, explicitHelp: false };
 }
 
 export function resolveRunTarget(
@@ -263,13 +243,10 @@ export function formatGlobalUsage(opts: {
   channelProject?: SlackProject;
   projects: SlackProject[];
   unknownProject?: string;
-  /** Project names that have deploy targets (`SLACK_DEPLOYS`). */
-  deployable?: string[];
   /** Where the long-form instructions live; printed as a clickable line after the usage block. */
   docsUrl?: string;
 }): string {
   const bot = opts.bot;
-  const deployable = new Set(opts.deployable ?? []);
   const lines: string[] = [];
   if (opts.unknownProject) {
     lines.push(`unknown project \`${opts.unknownProject}\`. pick one from the list.`);
@@ -277,7 +254,6 @@ export function formatGlobalUsage(opts: {
   }
   lines.push("```");
   lines.push(`usage: ${bot} [<project>] [options] <request>`);
-  if (deployable.size) lines.push(`       ${bot} [<project>] deploy [env=<name>]`);
   lines.push("");
   if (opts.channelProject) {
     const ch = opts.channelName ? `#${opts.channelName.replace(/^#/, "")}` : "(this channel)";
@@ -291,11 +267,8 @@ export function formatGlobalUsage(opts: {
     lines.push("projects:");
     const width = Math.max(...projects.map((p) => p.name.length));
     for (const p of projects) {
-      const marks = [
-        deployable.has(p.name) ? "deploy" : "",
-        p.name === opts.channelProject?.name ? "← this channel" : "",
-      ].filter(Boolean);
-      lines.push(`  ${p.name.padEnd(width)}  ${p.repo} @ ${p.ref}${marks.length ? `  ${marks.join("  ")}` : ""}`);
+      const mark = p.name === opts.channelProject?.name ? "  ← this channel" : "";
+      lines.push(`  ${p.name.padEnd(width)}  ${p.repo} @ ${p.ref}${mark}`);
     }
     lines.push("");
   }
@@ -303,32 +276,29 @@ export function formatGlobalUsage(opts: {
   if (opts.channelProject) {
     lines.push(`  ${bot} https://jam.dev/c/<id>`);
     lines.push(`  ${bot} On hosted, the settings page 500s after logout. Add a unit test.`);
-    if (deployable.has(opts.channelProject.name)) lines.push(`  ${bot} deploy`);
     const other = projects.find((p) => p.name !== opts.channelProject?.name);
     if (other) {
       lines.push(`  ${bot} ${other.name} -`);
       lines.push(`  ${bot} ${other.name} <request>`);
-      if (deployable.has(other.name)) lines.push(`  ${bot} ${other.name} deploy`);
     }
   } else {
     const sample = projects[0]?.name ?? "<project>";
     lines.push(`  ${bot} ${sample} https://jam.dev/c/<id>`);
     lines.push(`  ${bot} ${sample} On hosted, the settings page 500s after logout.`);
     lines.push(`  ${bot} ${sample} -`);
-    const dep = projects.find((p) => deployable.has(p.name));
-    if (dep) lines.push(`  ${bot} ${dep.name} deploy`);
   }
   lines.push("");
   lines.push("options:");
   lines.push("  branch=<name>        base branch (default: the project's)");
   lines.push("  autopr=true|false    open a PR when done (default: true)");
   lines.push("  model=<id>           override CURSOR_MODEL");
-  if (deployable.size) lines.push("  env=<name>           deploy target (default: the project's default)");
   lines.push("");
   lines.push(`${bot}                 this usage`);
   lines.push(`${bot} <project>       options for that project`);
   lines.push(`${bot} <project> -     same`);
-  if (deployable.size) lines.push(`${bot} <project> deploy -   deploy targets for that project`);
+  lines.push(`${bot} version         which build of the bot is answering`);
+  lines.push("");
+  lines.push("deploys happen when a PR merges, not from here.");
   lines.push("```");
   if (opts.docsUrl) lines.push(docsLine(opts.docsUrl));
   return lines.join("\n");
@@ -344,18 +314,13 @@ export function formatProjectUsage(opts: {
   project: SlackProject;
   channelName?: string;
   channelProjectName?: string;
-  /** Deploy target names for this project (`SLACK_DEPLOYS`); empty = not deployable. */
-  deployEnvs?: string[];
   docsUrl?: string;
 }): string {
   const { bot, project } = opts;
   const implied = opts.channelProjectName === project.name;
   const channel = opts.channelName ? `#${opts.channelName.replace(/^#/, "")}` : undefined;
-  const envs = opts.deployEnvs ?? [];
   const lines = ["```", `usage: ${bot} ${project.name} [options] <request>`];
-  if (envs.length) lines.push(`       ${bot} ${project.name} deploy [env=<name>]`);
   lines.push("", `  repo    ${project.repo}`, `  branch  ${project.ref}`, "  autopr  true");
-  if (envs.length) lines.push(`  deploy  ${envs.join(", ")}`);
   lines.push("");
   if (implied && channel) {
     lines.push(`${channel} already selects ${project.name}; you can omit the name.`);
@@ -365,19 +330,13 @@ export function formatProjectUsage(opts: {
   if (implied) {
     lines.push(`  ${bot} https://jam.dev/c/<id>`);
     lines.push(`  ${bot} On hosted, a student hits /settings after logout and gets a 500.`);
-    if (envs.length) lines.push(`  ${bot} deploy`);
   }
   lines.push(`  ${bot} ${project.name} https://jam.dev/c/<id>`);
   lines.push(`  ${bot} ${project.name} autopr=true On hosted, the submissions page 500s.`);
-  if (envs.length) {
-    lines.push(`  ${bot} ${project.name} deploy`);
-    const named = envs.find((e) => e !== "default");
-    if (named) lines.push(`  ${bot} ${project.name} deploy env=${named}`);
-  }
   lines.push("");
-  lines.push(`options: branch=<name>  autopr=true|false  model=<id>${envs.length ? "  env=<name>" : ""}`);
+  lines.push("options: branch=<name>  autopr=true|false  model=<id>");
   lines.push("hooks:   force-push, push to develop/main, deploys, and --no-verify are blocked");
-  if (envs.length) lines.push("deploy:  runs from this bot, not the agent; reports here when it finishes");
+  lines.push("deploy:  merge the PR — the host builds and posts the result here");
   lines.push("```");
   if (opts.docsUrl) lines.push(docsLine(opts.docsUrl));
   return lines.join("\n");

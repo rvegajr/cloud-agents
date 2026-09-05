@@ -7,12 +7,10 @@
  * testable without a network or a token.
  *
  * Phases match IMPLEMENTATION-GUIDE.md: A bootstrap, B target repo, C Slack app,
- * D local run, E hosting, F deploy targets, G auto-deploy notifications,
- * H Jam + ready-for-review.
+ * D local run, E hosting, F deploy notifications, G Jam + ready-for-review.
  */
-import { parseRailwaySpec } from "./slack-deploy.js";
 
-export const PHASES = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
+export const PHASES = ["A", "B", "C", "D", "E", "F", "G"] as const;
 export type Phase = (typeof PHASES)[number];
 
 /** fail blocks the phase; warn is a decision for the human; skip means "not configured". */
@@ -50,7 +48,7 @@ export function parsePhaseFilter(raw: string | undefined): Set<Phase> {
   if (!raw || raw.trim() === "" || raw.trim() === "true") return all;
   const wanted = new Set<Phase>();
   for (const part of raw.toUpperCase().split(/[,\s]+/).filter(Boolean)) {
-    const range = part.match(/^([A-H])-([A-H])$/);
+    const range = part.match(/^([A-G])-([A-G])$/);
     if (range) {
       const from = PHASES.indexOf(range[1] as Phase);
       const to = PHASES.indexOf(range[2] as Phase);
@@ -180,63 +178,9 @@ export function hasRepoScope(scopeHeader: string | undefined | null): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Deploy targets
+// Slack ids
 
-export interface SpecCheck {
-  ok: boolean;
-  detail: string;
-  fix?: string;
-}
-
-/**
- * Shape-only. A deploy hook URL is a bearer credential, so the doctor reads it
- * and never fires it — POSTing here would start a real deploy.
- */
-export function validateVercelHook(url: string): SpecCheck {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return { ok: false, detail: `not a URL: ${redactHook(url)}`, fix: "Vercel → project → Settings → Git → Deploy Hooks" };
-  }
-  if (parsed.protocol !== "https:") {
-    return { ok: false, detail: `deploy hooks are https: ${parsed.protocol}`, fix: "copy the hook URL again" };
-  }
-  if (parsed.hostname !== "api.vercel.com") {
-    return { ok: false, detail: `expected api.vercel.com, got ${parsed.hostname}`, fix: "use the URL from Settings → Git → Deploy Hooks" };
-  }
-  const projectId = parsed.pathname.match(/\/deploy\/(prj_[A-Za-z0-9]+)/)?.[1];
-  if (!projectId) {
-    return {
-      ok: false,
-      detail: "no prj_… segment; the bot cannot watch a deploy it cannot identify",
-      fix: "the path looks like /v1/integrations/deploy/prj_…/<hookId>",
-    };
-  }
-  return { ok: true, detail: projectId };
-}
-
-export function validateRailwaySpec(spec: string): SpecCheck {
-  try {
-    const { projectId, environment, services } = parseRailwaySpec(spec);
-    return { ok: true, detail: `${projectId} / ${environment} / ${services.join(" + ")}` };
-  } catch (err) {
-    return {
-      ok: false,
-      detail: err instanceof Error ? err.message : String(err),
-      fix: "railway:<projectId>/<environment>/<service>[+<service>]",
-    };
-  }
-}
-
-/** Deploy hooks are secrets; show enough to identify one, not enough to fire it. */
-export function redactHook(url: string): string {
-  const prj = url.match(/(prj_[A-Za-z0-9]+)/)?.[1];
-  if (prj) return `…/deploy/${prj}/…`;
-  return url.length > 24 ? `${url.slice(0, 24)}…` : url;
-}
-
-/** Slack member ids as the bot stores them: `U…` / `W…`, with `<@…>` stripped. */
+/** Slack member ids: `U…` / `W…`, with a `<@…>` wrapper stripped. */
 export function isSlackUserId(value: string): boolean {
   return /^[UW][A-Z0-9]{6,}$/i.test(value.replace(/^<@|>$/g, ""));
 }

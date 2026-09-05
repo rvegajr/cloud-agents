@@ -14,7 +14,8 @@ Read this file top to bottom once. Then run the numbered scripts in order.
 walkthrough, with a jam.dev recording as the preferred bug report.
 `IMPLEMENTATION-GUIDE.md` is the same setup as a recipe an AI agent can execute:
 every credential and scope in the order it is needed, with the browser-only steps
-marked as human gates, and `npm run doctor` to prove each one.
+marked as human gates, and `npm run doctor` to prove each one. `CHANGELOG.md` is
+what changed between tags — start there if you are upgrading.
 
 ---
 
@@ -72,10 +73,10 @@ npm run status       # account, models, connected repos, agents launched by this
 npm run doctor       # every credential, scope, and grant, with the fix for each gap
 ```
 
-`npm run doctor` is read-only and safe to re-run at any point: it never fires a
-deploy hook, posts to Slack, or creates anything. `npm run doctor -- --phase A`
-scopes it to one phase of `IMPLEMENTATION-GUIDE.md`; `--json` is the form to hand
-an agent.
+`npm run doctor` is read-only and safe to re-run at any point: it never posts to
+Slack and never creates or changes anything. `npm run doctor -- --phase A` scopes
+it to one phase of `IMPLEMENTATION-GUIDE.md`; `--json` is the form to hand an
+agent.
 
 ---
 
@@ -256,7 +257,7 @@ A Bolt app in Socket Mode (no public URL). It is *your* Slack app, created
 from `slack-app-manifest.json`, and `@<bot>` below is whatever your workspace
 named it (the manifest ships as `CloudAgents`; rename it and the bot picks the
 new name up at startup). It is not Cursor's own `@Cursor` app: mentioning that
-runs Cursor's agent without the Jam fetch, triage, verify gate, or `deploy`.
+runs Cursor's agent without the Jam fetch, triage, or verify gate.
 
 The mention is a small CLI:
 
@@ -266,10 +267,7 @@ The mention is a small CLI:
 @<bot> <project> -              same
 @<bot> <project> <request>      start a job
 @<bot> <request>                start a job on this channel's project
-@<bot> <project> deploy         deploy that project's default target
-@<bot> <project> deploy env=uat    deploy a named target
-@<bot> <project> deploy -       list that project's deploy targets
-@<bot> deploy                   deploy this channel's project
+@<bot> version                  which build of the bot is answering
 ```
 
 A channel whose name starts with a project (`#api-bugs`, `#web-agent-test`,
@@ -278,14 +276,11 @@ Paste a jam.dev URL or a sentence; the bot fetches the recording, triages it
 into a brief, runs plan → implement → verify, and posts the PR. A later
 @mention in that thread resumes the same `bc-` agent.
 
-`deploy` runs in the bot process, not in a cloud agent (the repo hook keeps
-agents from deploying). It fires a Vercel Deploy Hook or Railway
-`serviceInstanceDeployV2`, reacts 🚀 on your message, posts progress in the
-thread, and broadcasts the final ✅/❌ line (with the live URL or the last 25
-build-log lines) to the channel, @-mentioning whoever asked. Targets live in
-`SLACK_DEPLOYS`; `SLACK_DEPLOYERS` limits who may run it. Vercel watching
-needs `VERCEL_TOKEN`; Railway needs `RAILWAY_TOKEN` (project token) or
-`RAILWAY_API_TOKEN`. See `.env.example`.
+**The bot cannot deploy.** It holds no Vercel or Railway credential, and there is
+no `deploy` verb: merging the PR is the only trigger. The deploy card you see in
+the channel is posted by Vercel for Slack or a Railway webhook, neither of which
+runs through this process — `IMPLEMENTATION-GUIDE.md` phase F sets them up, and
+`ARTICLE-SLACK.md` step 6½ is the argument for doing it this way.
 
 Set `JAM_TOKEN` from jam.dev → Settings → MCP (`mcp:read`). Cloud VMs do not
 have Jam MCP; `src/lib/jam.ts` fetches evidence before the prompt is sent.
@@ -307,13 +302,41 @@ To leave it running when the laptop is closed:
 ```bash
 railway init
 railway variables --set SLACK_BOT_TOKEN=... --set SLACK_APP_TOKEN=... --set JAM_TOKEN=... # plus TARGET_* and CURSOR_*
-railway up
+npm run deploy       # stamps the git commit into BUILD_INFO, then railway up
 ```
 
 `railway.json` installs the Jam CLI if needed, then starts `npm run slack`.
 Socket Mode dials out; no domain needed.
 
 Walkthrough: `ARTICLE-SLACK.md`.
+
+### Versioning and releases
+
+A bot you cannot see needs to be able to tell you what it is running.
+
+```bash
+npm run stamp        # write version.json + print the BUILD_INFO pair
+npm run deploy       # stamp the host, then railway up
+npm run doctor -- --phase E   # warns when the stamp and HEAD disagree
+```
+
+`src/lib/version.ts` resolves the version from `BUILD_INFO` (set by
+`npm run deploy`), then `version.json`, then live `git describe`, then bare
+`package.json` — and reports *which* source it used, so a local checkout cannot
+pass itself off as a deployed build. The bot prints it as the first line of its
+logs and answers `@<bot> version` with the detail. The stamp has to travel as an
+environment variable because `railway up` honours `.gitignore` and a built image
+has no `.git`.
+
+Releases are semver git tags with a `CHANGELOG.md` entry:
+
+```bash
+# move CHANGELOG.md's Unreleased section under the new version, then:
+npm version minor -m "release: v%s"   # bump + commit + annotated tag
+git push --follow-tags
+```
+
+`--follow-tags` is what stops you pushing the commit and leaving the tag behind.
 
 ---
 
@@ -401,6 +424,7 @@ cloud-agents/
   ARTICLE.md                     walkthrough: idea -> app on a cloud agent
   ARTICLE-SLACK.md               walkthrough: Slack @mention -> PR
   IMPLEMENTATION-GUIDE.md        agent-executable recipe: credentials, phases, human gates
+  CHANGELOG.md                   what changed between tags
   slack-app-manifest.json        paste at api.slack.com/apps
   railway.json                   start command for npm run slack
   .env.example                   credentials + target repo + Slack tokens
@@ -428,18 +452,19 @@ cloud-agents/
     06-build-app.ts              idea -> spec -> milestones loop -> release gate
     07-slack-bot.ts              Bolt Socket Mode; @mention -> pipeline
     08-doctor.ts                 read-only preflight: every credential, scope, grant
+    09-stamp-version.ts          stamp the commit into BUILD_INFO before a deploy
     lib/
       pipeline.ts                plan -> implement -> verify, SDK-agnostic
       jam.ts                     fetch jam.dev recordings into the prompt
-      slack-cli.ts               mention CLI: usage, <project>, deploy, channel prefix
+      slack-cli.ts               mention CLI: usage, <project>, version, channel prefix
       slack-cli.test.ts
-      slack-deploy.ts            `deploy`: SLACK_DEPLOYS, Vercel hook, Railway GraphQL, polling
-      slack-deploy.test.ts
       slack-fix.ts               startJob / continueJob
       slack-thread.ts            agent id in thread, allowlist, dedupe
       build-loop.ts              the loop: phases, stall/block detection, resumable state
       doctor.ts                  verdict model, scope diffing, credential shape checks
       doctor.test.ts
+      version.ts                 BUILD_INFO -> version.json -> git -> package.json
+      version.test.ts
       auth.ts                    env -> stored login -> interactive
       prompts.ts                 load templates and briefs, render {{vars}}
       stream.ts                  readable transcript from run.stream()
