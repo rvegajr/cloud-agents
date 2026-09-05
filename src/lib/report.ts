@@ -54,15 +54,37 @@ export function saveRunRecord(record: {
   return file;
 }
 
-/** Pull the last fenced ```json block out of the agent's final message, if it left one. */
+/**
+ * Pull the last fenced ```json block out of the agent's final message, if it
+ * left one.
+ *
+ * The JSON often carries Markdown in a string field (a triage brief, a verify
+ * report), and that Markdown can contain its own ``` fences. A non-greedy
+ * "up to the next ```" match stops at the inner fence and hands JSON.parse a
+ * truncated string. So for each ```json opener, try every later fence as the
+ * closer until one parses. Blocks are scanned last-to-first so the final
+ * report wins, as before.
+ */
 export function extractJsonBlock<T = unknown>(text: string | undefined): T | undefined {
   if (!text) return undefined;
-  const matches = [...text.matchAll(/```json\s*([\s\S]*?)```/g)];
-  const last = matches.at(-1)?.[1];
-  if (!last) return undefined;
-  try {
-    return JSON.parse(last) as T;
-  } catch {
-    return undefined;
+  const openers = [...text.matchAll(/```json[ \t]*\r?\n?/g)];
+  for (const opener of openers.reverse()) {
+    const start = opener.index + opener[0].length;
+    const parsed = parseUpToSomeFence<T>(text, start);
+    if (parsed !== undefined) return parsed;
+  }
+  return undefined;
+}
+
+function parseUpToSomeFence<T>(text: string, start: number): T | undefined {
+  let from = start;
+  for (;;) {
+    const close = text.indexOf("```", from);
+    if (close === -1) return undefined;
+    try {
+      return JSON.parse(text.slice(start, close)) as T;
+    } catch {
+      from = close + 3;
+    }
   }
 }
