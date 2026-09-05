@@ -8,6 +8,12 @@
  * Doing it here, after verify, means a failed verify leaves the PR a draft
  * and a passed one becomes merge-eligible. That is the policy; the repo's
  * own gate (required checks, protected paths) still decides whether it lands.
+ *
+ * Token requirement: markPullRequestReadyForReview only accepts user-level
+ * OAuth tokens (classic PAT with `repo` scope). Fine-grained PATs and App /
+ * Actions installation tokens get FORBIDDEN "Resource not accessible" even with
+ * Pull requests: write + Contents: read, and there is no REST equivalent.
+ * Verified 2026-09-05 against YOLOVibeCode/scholaracle#17.
  */
 
 export interface PullRequestRef {
