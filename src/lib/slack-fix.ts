@@ -30,6 +30,11 @@ export interface JobRuntime {
   create: (args: { repo: string; ref: string; autoCreatePR?: boolean; model?: string }) => Promise<AgentHandle>;
   resume: (agentId: string) => Promise<AgentHandle>;
   post: (text: string) => Promise<void>;
+  /**
+   * Flip the agent's draft PR to ready. Called only when the verifier reports
+   * done and a PR exists. Absent = leave drafts alone (no GITHUB_TOKEN).
+   */
+  markPrReady?: (prUrl: string) => Promise<"marked" | "already-ready">;
 }
 
 export interface TriageReport {
@@ -270,6 +275,17 @@ async function runAndReport(
 
   if (out.report) await runtime.post(formatVerifyReport(out.report, out.prUrl));
   else await runtime.post(out.prUrl ? `PR: ${out.prUrl}\nVerifier did not return a parseable JSON block.` : "Verifier did not return a parseable JSON block.");
+  if (out.done && out.prUrl && runtime.markPrReady) {
+    try {
+      const marked = await runtime.markPrReady(out.prUrl);
+      if (marked === "marked") await runtime.post("PR marked ready for review (verifier passed); the repo's auto-merge takes it from here.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await runtime.post(`PR left as draft: could not mark ready (${msg}). A human needs to click "Ready for review".`);
+    }
+  } else if (out.prUrl && !out.done) {
+    await runtime.post("PR left as draft: the verifier did not report done, so it is not auto-merge eligible.");
+  }
   if (line) await runtime.post(line);
   await record(handle, {
     repo,

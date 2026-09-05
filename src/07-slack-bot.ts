@@ -23,6 +23,7 @@ import { reportStartupFailure } from "./lib/report.js";
 import { printStream } from "./lib/stream.js";
 import { ensureJamBin, extractJamIds } from "./lib/jam.js";
 import { continueJob, startJob, type AgentHandle, type JobRuntime } from "./lib/slack-fix.js";
+import { markPullRequestReady } from "./lib/github.js";
 import {
   channelProject,
   formatGlobalUsage,
@@ -84,6 +85,8 @@ if (!fallbackTarget && routes.size === 0 && projects.size === 0) {
 const allowlist = parseAllowlist(process.env.SLACK_ALLOWED_CHANNELS);
 const maxConcurrent = Number(process.env.SLACK_MAX_CONCURRENT ?? "2") || 2;
 const cursorUserId = process.env.SLACK_CURSOR_USER_ID?.trim() || "";
+/** With a token, a PR whose verifier passed is flipped from draft to ready. */
+const githubToken = process.env.GITHUB_TOKEN?.trim() || "";
 const deploys = parseDeploys(process.env.SLACK_DEPLOYS);
 const deployers = new Set(parseAllowlist(process.env.SLACK_DEPLOYERS).map((u) => u.replace(/^<@|>$/g, "")));
 const deployCreds = credentialsFromEnv();
@@ -507,6 +510,15 @@ try {
           return wrap(agent);
         },
         post,
+        ...(githubToken
+          ? {
+              markPrReady: async (prUrl: string) => {
+                const result = await markPullRequestReady(prUrl, githubToken);
+                console.log(`pr ${prUrl} ${result}`);
+                return result;
+              },
+            }
+          : {}),
       };
 
       const outcome = existingId
@@ -592,6 +604,11 @@ try {
     console.log(`  deployers: ${deployers.size ? [...deployers].join(", ") : "anyone in an allowed channel"}`);
   }
   if (cursorUserId) console.log(`  mentions of Cursor's app (${cursorUserId}) get a pointer to ${botHandle}`);
+  console.log(
+    githubToken
+      ? "  PRs: marked ready for review when the verifier passes (GITHUB_TOKEN set)"
+      : "  PRs: left as drafts (set GITHUB_TOKEN to mark them ready when the verifier passes)",
+  );
   console.log(
     formatGlobalUsage({
       bot: botHandle,
