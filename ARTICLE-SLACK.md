@@ -97,7 +97,15 @@ shows the format). Check that Cursor can see the repo:
 
 ```bash
 npm run status
+npm run doctor
 ```
+
+`npm run doctor` is the preflight for everything in this article: it proves each
+token, scope, and grant, and names the fix for whatever is missing. It is
+read-only — no deploy is fired, no message is posted. Run it after every step;
+`--phase A` through `--phase H` scope it to one step of
+`IMPLEMENTATION-GUIDE.md`, which is this article compressed into a recipe an AI
+agent can execute.
 
 ---
 
@@ -112,7 +120,7 @@ npm run status
 | Jam links | Not readable from the VM | A URL in the prompt | Fetched by the bot (console, network, click path, video) and pasted into the prompt |
 | Phases | Whatever it is told | One agent turn | plan → implement → verify with a JSON report and a checklist in the thread |
 | Which repo | Whatever you name | `@Cursor settings` per channel | `SLACK_PROJECTS` catalog; `#api-…` channel implies `api`; `@<bot> web …` overrides |
-| Deploy | Blocked by the repo hook | No | `@<bot> <project> deploy`, from the bot process, ✅/❌ broadcast to the channel |
+| Deploy | Blocked by the repo hook | No | `@<bot> <project> deploy` is the manual rebuild. Auto-deploy status is Vercel for Slack / Railway webhooks (addendums), not the bot |
 | Guardrails | Repo hooks, run in the VM | Cursor's | Channel allowlist, `SLACK_DEPLOYERS`, concurrency cap, one job per thread, cost line |
 | Follow-ups | `Agent.resume(bc-…)` | Reply in thread | Reply in thread; the `agent: bc-…` line is the id the bot resumes |
 | Where the code is | Cursor's | Cursor's | `src/07-slack-bot.ts`, `src/lib/slack-*.ts`, `prompts/slack/*.md` |
@@ -591,14 +599,18 @@ two provider functions are the whole thing; `startDeploy` returns a `watch`
 callback the bot drives. `npm test` covers the parsing.
 
 Both Vercel projects in the running example already auto-deploy on push to
-their linked branch, so there the command means "rebuild develop now." The
-Railway project has no git trigger; there it is the only way to ship from a
-phone.
+their linked branch, so there the command means "rebuild develop now." Leave
+`SLACK_DEPLOYS` empty if you do not want the verb at all. The usual "is it
+out yet?" after a merge does not need this command: GitHub already told
+Vercel or Railway to ship. The addendums at the end of this article are how
+that auto-deploy posts into the same `#<project>-fixbot` channel, with no
+bot code and no deploy hook.
 
 **What you learned:** the hook says what the model may not do. The bot says
 what a person in the channel may do. Deploy is the first place those two
 lines diverge, and the code keeps them apart: the Cloud Agent never gets a
-token that can deploy; the bot process never gets a prompt.
+token that can deploy; the bot process never gets a prompt. Status after an
+ordinary merge is a platform concern, not a mention.
 
 ---
 
@@ -656,7 +668,15 @@ workflow. Possible, and a different article. Keep the layers straight:
 Railway hosts the bot; Vercel and Railway host the *apps*; Cursor hosts the
 *agents*.
 
-From this directory, after `railway login`:
+Before you push it anywhere, make the local env green. Every variable in the
+block below is one the doctor can check, and a token that is missing on your
+laptop will be missing on the server too:
+
+```bash
+npm run doctor
+```
+
+Then, from this directory, after `railway login`:
 
 ```bash
 railway init
@@ -704,6 +724,108 @@ later.
 
 ---
 
+## Addendum A: Vercel for Slack (auto-deploy status, no bot code)
+
+Vercel already deploys when GitHub receives a push to the linked branch. The
+official Slack integration is how that status lands in `#api-fixbot`
+without a Deploy Hook, a `VERCEL_TOKEN`, or `SLACK_DEPLOYS`. `@Vercel` is
+another Slack app, next to `@<bot>` and Cursor's `@Cursor`. It does not
+start Cloud Agents. It posts deployment events.
+
+Install it from
+[vercel.com/integrations/slack/new](https://vercel.com/integrations/slack/new),
+not from Vercel's **Connect** page. **Connect** (`vercel.com/…/~/connect`) is
+Vercel-managed OAuth to third-party APIs. It is a different product. The Slack
+app is an **Integration**. After Slack's Allow screen, Vercel shows a
+configure URL on `slack-integration.vercel.sh`. That install is team-wide;
+channels still have to subscribe one project at a time.
+
+Then, in the channel that should hear about that project:
+
+1. `/invite @Vercel`.
+2. `/vercel signin` and complete **Connect to Slack** while you are already
+   logged into Vercel in the browser. That links *your* Vercel user to Slack
+   so slash commands have an identity. If Slack instead emails a
+   six-character code to authorize the *Vercel* app, you are on the Slack
+   OAuth path for the app install, not this user-link step; finish that
+   first, then sign in.
+3. `/vercel subscribe your-team/your-project`. The team slug and project
+   name are the path you see on vercel.com (`your-team/api`).
+4. Pick events. **Deployment Succeeded** (`deployment_ready`) and
+   **Deployment Error** are the useful pair. Leave **Deployment Created**
+   off or every push is two messages. `/vercel subscribe list` reprints what
+   the channel is getting.
+
+One nuance if the integration branch is not `main`: Vercel's "production"
+is the production branch. A merge to `develop` is usually a **preview**
+deployment. The default subscribe includes those. If you only tick
+production, `#api-fixbot` will stay quiet after the merge you actually care
+about.
+
+Composing `/vercel subscribe` as a normal message does nothing. It has to
+be a slash command (Slack's command UI, or `chat.command` if you are
+automating). The confirmation is often ephemeral ("Only visible to you")
+plus a channel message naming the project and events.
+
+`@<bot> api deploy` is still the manual rebuild. This addendum is the
+merge-to-live line: GitHub → Vercel → `#api-fixbot`.
+
+**What you learned:** Vercel already knew how to deploy. You only had to
+point the existing events at the channel that already holds the PR.
+
+---
+
+## Addendum B: Railway Slack webhooks (the muxer)
+
+Railway does not ship a `/railway` Slack app. It ships **project webhooks**,
+and if the URL looks like `hooks.slack.com` it reformats the payload itself.
+Railway calls that a muxer. Discord URLs get the same treatment. You do not
+write middleware.
+
+A webhook is per **project**, not per service or environment. Every
+environment in that project (production, uat, a PR env if you tick the box)
+POSTs to the same URL. Point `#web-fixbot` at the `web` project and both
+production and uat will talk there. That is usually what you want.
+
+Incoming webhooks are a Slack feature, not a bot scope you already have.
+Socket Mode `chat:write` lets `@<bot>` post; it does not give Railway a URL.
+Create one:
+
+1. [api.slack.com/apps](https://api.slack.com/apps) → the same app as
+   `@<bot>` (or a tiny app whose only job is webhooks) → **Incoming
+   Webhooks** → **On**. Slack will ask you to **reinstall** so the
+   `incoming-webhook` scope takes effect. That does not rotate the `xoxb-`
+   token unless you click **Revoke All OAuth Tokens**. Do not.
+2. **Add New Webhook to Workspace**, pick `#web-fixbot`, Allow. You get a
+   URL of the form `https://hooks.slack.com/services/T…/B…/…`. Treat it as
+   a secret. One URL is one channel; add a second webhook for a second
+   channel.
+3. Railway dashboard → the **target** project (the app, not the bot
+   service) → **Settings → Webhooks** → paste the URL. Event types worth
+   turning on: **Deployment Deployed**, **Deployment Failed**, plus the
+   critical set (crashed, OOM, volume, monitor) if you want crashes in the
+   same channel. Leave **Include PR environments** off unless preview
+   environments should spam the fixbot channel.
+4. Save. Do not trust **Test Webhook**. Railway sends that click from the
+   *browser*, so CORS often reports failure on a URL that is fine. `curl`
+   a JSON `{"text":"…"}` at the Slack URL instead, or wait for the next
+   real deploy.
+
+The public Railway GraphQL API can `webhookTest`. It cannot create the
+webhook. Config-as-code / `.railway/railway.ts` cannot either. The
+dashboard is the store.
+
+What the channel sees, after a merge that Railway built: a CloudAgents (or
+whatever you named the app) message with service, environment, status, and a
+link. That is Railway's formatter, not `src/lib/slack-deploy.ts`. The bot
+process is not in the path.
+
+**What you learned:** Railway already knew how to deploy and how to talk to
+Slack. The missing piece was a `hooks.slack.com` URL owned by the channel
+that already holds the PR.
+
+---
+
 ## What you now understand
 
 The first article was the loop. This one is one way to fire it. The preferred
@@ -717,7 +839,9 @@ Three choices stay yours, and they are the same three as before:
 
 - **Who owns the machine.** Cursor owns the VM that writes code: the Cloud
   Agent. You own the process that talks to Slack and fetches Jams: the bot.
-  Neither one is the other.
+  Neither one is the other. Vercel and Railway host the *apps* and already
+  deploy on git push; their Slack integrations (addendums A and B) are how
+  "it's live" shows up in the same channel as the PR.
 - **What the artifact is.** Still a PR. Slack is how you hear about it.
 - **Where enforcement lives.** Hooks in the target repo, run by the VM;
   allowlist and cap in the bot; verify JSON as the definition of done. The

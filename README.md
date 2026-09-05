@@ -12,6 +12,9 @@ orchestrator that creates, prompts, and resumes them.
 Read this file top to bottom once. Then run the numbered scripts in order.
 `ARTICLE.md` is the idea-to-app walkthrough; `ARTICLE-SLACK.md` is the Slack
 walkthrough, with a jam.dev recording as the preferred bug report.
+`IMPLEMENTATION-GUIDE.md` is the same setup as a recipe an AI agent can execute:
+every credential and scope in the order it is needed, with the browser-only steps
+marked as human gates, and `npm run doctor` to prove each one.
 
 ---
 
@@ -66,7 +69,13 @@ Then set `TARGET_REPO` in `.env`. Check everything with:
 
 ```bash
 npm run status       # account, models, connected repos, agents launched by this kit
+npm run doctor       # every credential, scope, and grant, with the fix for each gap
 ```
+
+`npm run doctor` is read-only and safe to re-run at any point: it never fires a
+deploy hook, posts to Slack, or creates anything. `npm run doctor -- --phase A`
+scopes it to one phase of `IMPLEMENTATION-GUIDE.md`; `--json` is the form to hand
+an agent.
 
 ---
 
@@ -391,6 +400,7 @@ cloud-agents/
   README.md                      this guide
   ARTICLE.md                     walkthrough: idea -> app on a cloud agent
   ARTICLE-SLACK.md               walkthrough: Slack @mention -> PR
+  IMPLEMENTATION-GUIDE.md        agent-executable recipe: credentials, phases, human gates
   slack-app-manifest.json        paste at api.slack.com/apps
   railway.json                   start command for npm run slack
   .env.example                   credentials + target repo + Slack tokens
@@ -417,6 +427,7 @@ cloud-agents/
     05-status.ts                 account, models, repos, agents, usage
     06-build-app.ts              idea -> spec -> milestones loop -> release gate
     07-slack-bot.ts              Bolt Socket Mode; @mention -> pipeline
+    08-doctor.ts                 read-only preflight: every credential, scope, grant
     lib/
       pipeline.ts                plan -> implement -> verify, SDK-agnostic
       jam.ts                     fetch jam.dev recordings into the prompt
@@ -427,6 +438,8 @@ cloud-agents/
       slack-fix.ts               startJob / continueJob
       slack-thread.ts            agent id in thread, allowlist, dedupe
       build-loop.ts              the loop: phases, stall/block detection, resumable state
+      doctor.ts                  verdict model, scope diffing, credential shape checks
+      doctor.test.ts
       auth.ts                    env -> stored login -> interactive
       prompts.ts                 load templates and briefs, render {{vars}}
       stream.ts                  readable transcript from run.stream()
