@@ -1,31 +1,53 @@
-# I Wired Slack to a Cloud Agent So a Bug Report Became a Pull Request
+# I Wired Slack to Cursor Cloud Agents So a Bug Report Became a Pull Request
 
-## A step-by-step guide to taking any existing repo, attaching Slack, and letting an @mention kick off the same plan/implement/verify loop from the first article
+## A step-by-step guide to taking any existing repo, attaching Slack, and letting an @mention start the same plan/implement/verify loop from the first article, on a Cursor Cloud Agent
 
-I already had the loop: a brief, a cloud VM, three phases, a pull request. The
-missing piece was the front door. Bugs do not arrive as markdown files in
-`briefs/`. They arrive as a [jam.dev](https://jam.dev) recording — console,
-network, clicks, video — pasted into Slack while you are in a meeting.
+I already had the loop: a brief, a Cursor Cloud Agent on a VM, three phases, a
+pull request. The missing piece was the front door. Bugs do not arrive as
+markdown files in `briefs/`. They arrive as a [jam.dev](https://jam.dev)
+recording, with console, network, clicks, and video, pasted into Slack while
+you are in a meeting.
 
 This article adds that door. By the last step you will have a bot that sits in
 a channel, treats a mention as a small CLI, treats a jam.dev link as the source
-of truth, turns it into a brief, runs the pipeline against the repo that channel
-(or the project name) selected, posts the PR in the thread, and treats a reply
-as feedback to the same agent.
+of truth, turns it into a brief, starts a Cloud Agent against the repo that
+channel (or the project name) selected, posts the PR in the thread, and treats
+a reply as feedback to the same agent.
 
-This is not Cursor's official Slack app. That app already exists, and step 0
-tells you when to use it. This is the same kit as the first article, with one
-more script, so you can see every moving part.
+Be precise about what is being built, because the names are close enough to
+blur. The **bot is not a Cursor agent**. It is a plain Node process you run
+(the running example lives on Railway) that uses the Cursor SDK to create and
+resume Cloud Agents. The **Cloud Agent** is Cursor's VM that clones your repo,
+writes the code, and opens the PR; it is the same thing the first article
+drove from a terminal. And **`@Cursor`** is Cursor's own Slack app, a third
+thing, which also starts Cloud Agents and which this article is not about.
+Step 0 lays the three side by side.
+
+```
+you, in Slack
+   │  @<bot> <project> https://jam.dev/c/…
+   ▼
+your bot process (Node, Socket Mode, Railway)        ← this article
+   │  fetch Jam · parse the mention · write a brief
+   │  Agent.create({ cloud: { repos } })  via @cursor/sdk
+   ▼
+Cursor Cloud Agent (Cursor's VM, bc-… id)            ← the first article
+   │  triage → plan → implement → verify
+   ▼
+your GitHub repo  →  branch + PR  →  thread gets the checklist
+```
 
 Each step is a single command or a five-minute click-through. Total time if you
 do everything: about an hour, plus however long the agent spends on the actual
-fix. Total extra cost: the tokens for one cloud run, typically a few dollars.
+fix. Total extra cost: the tokens for one Cloud Agent run, typically a few
+dollars.
 
 The live run that proved the door works: **13 minutes** from `@mention` to
 a PR in the same Slack thread, **547,656 tokens**, **$0.49**, PR
-https://github.com/rvegajr/rubriq-flow/pull/164. The first turn's plan-mode
-triage did not emit parseable JSON; a follow-up `@mention` in that thread
-resumed the same `bc-` agent, implemented, and posted the checklist.
+https://github.com/rvegajr/rubriq-flow/pull/164 (reviewed and closed; the
+point was the round trip). The first turn's plan-mode triage did not emit
+parseable JSON; a follow-up `@mention` in that thread resumed the same `bc-`
+agent, implemented, and posted the checklist.
 
 ---
 
@@ -38,10 +60,10 @@ jam.dev URL in Slack  →  bot fetches the recording  →  triage (brief)
         └──────── reply in the same thread (another Jam ok) ─┘
 ```
 
-The inner four boxes are the pipeline from the first article. The new pieces
-are the arrows on the left and the right: a recording in, a PR out, with the
-thread as the durable handle. A Slack sentence still works. A Jam is what you
-should send.
+The inner four boxes are the pipeline from the first article, running on one
+Cloud Agent. The new pieces are the arrows on the left and the right: a
+recording in, a PR out, with the thread as the durable handle. A Slack sentence
+still works. A Jam is what you should send.
 
 ## What you need
 
@@ -50,11 +72,15 @@ should send.
 - A Slack workspace where you can create an app (most of them)
 - The repo you want the bot to work on. Any repo. For one repo, set
   `TARGET_REPO`. For several, set `SLACK_PROJECTS` and start each channel
-  name with the project (`#api-bugs`). Nothing in the TypeScript names a
-  specific product, a specific channel suffix, or a specific bot name.
+  name with the project (`#api-fixbot`, `#api-bugs`). Nothing in the
+  TypeScript names a specific product, a specific channel suffix, or a
+  specific bot name.
 - A [jam.dev](https://jam.dev) workspace and a read PAT (`JAM_TOKEN`). Optional
   only if you are fine with prose reports. Without the token the bot can see
   the share URL, not the console and network events.
+- Somewhere to keep one Node process alive when you close the laptop (step 8).
+  Railway is what the running example uses. It is not Vercel, and step 8 says
+  why.
 
 ```bash
 git clone https://github.com/rvegajr/cloud-agents
@@ -75,42 +101,42 @@ npm run status
 
 ---
 
-## Step 0: You might not need this bot
+## Step 0: Three things with similar names
 
-Cursor already ships a Slack integration. Install it from
-[cursor.com/dashboard](https://cursor.com/dashboard), mention `@Cursor` with a
-prompt, get a cloud agent and a PR. For a sharp, well-scoped request in a
-channel that already knows which repo to use, that is enough. `@Cursor help`
-lists Cursor's own commands. It will not print *your* project catalog.
+| | Cursor Cloud Agent | `@Cursor` (Cursor's Slack app) | `@<bot>` (this kit) |
+| --- | --- | --- | --- |
+| What it is | The VM + model + branch + PR. The engine. | A front door Cursor hosts | A front door you host |
+| Where it runs | Cursor's infrastructure | Cursor's infrastructure | Your Node process (Railway) |
+| How it starts | Web, desktop, iOS, `@Cursor`, GitHub `@cursor`, Linear, API/SDK | Mention in Slack | Mention in Slack → `Agent.create()` via the SDK |
+| What your sentence becomes | The prompt | The prompt, directly | A triage turn that writes a brief, or asks 1–2 questions, before implement tokens are spent |
+| Jam links | Not readable from the VM | A URL in the prompt | Fetched by the bot (console, network, click path, video) and pasted into the prompt |
+| Phases | Whatever it is told | One agent turn | plan → implement → verify with a JSON report and a checklist in the thread |
+| Which repo | Whatever you name | `@Cursor settings` per channel | `SLACK_PROJECTS` catalog; `#api-…` channel implies `api`; `@<bot> web …` overrides |
+| Deploy | Blocked by the repo hook | No | `@<bot> <project> deploy`, from the bot process, ✅/❌ broadcast to the channel |
+| Guardrails | Repo hooks, run in the VM | Cursor's | Channel allowlist, `SLACK_DEPLOYERS`, concurrency cap, one job per thread, cost line |
+| Follow-ups | `Agent.resume(bc-…)` | Reply in thread | Reply in thread; the `agent: bc-…` line is the id the bot resumes |
+| Where the code is | Cursor's | Cursor's | `src/07-slack-bot.ts`, `src/lib/slack-*.ts`, `prompts/slack/*.md` |
 
-Build this bot instead when you want seven things the official app does not
-give you as files you can read:
+Read the first column as the engine and the other two as ignition switches.
+Both switches start the same engine; both agents show up at
+[cursor.com/agents](https://cursor.com/agents); both open PRs on your repo.
+The difference is everything between the mention and the agent, and this
+kit's whole reason to exist is that it puts that middle in files you can read
+and change.
 
-1. **A Jam as the brief.** Paste `https://jam.dev/c/<uuid>`. The bot fetches
-   notes, console errors, failed requests, the click path, and video analysis,
-   then writes the brief from that. Cloud VMs do not have Jam MCP; this
-   process does the fetch so the agent is not guessing from a paragraph.
-2. **Triage into a brief.** A Slack sentence is not a definition of done. The
-   first turn writes one, or asks one or two questions, before anyone spends
-   implement tokens. A Jam usually makes those questions unnecessary.
-3. **The verify gate.** A JSON report with per-item evidence, not just "the
-   agent finished."
-4. **Repo-level enforcement.** Hooks that deny `git push --force` even if the
-   model decides to try.
-5. **A mention CLI and channel-aware targeting.** `@<bot>` alone prints
-   usage. `@<bot> <project>` (or `@<bot> <project> -`) prints that
-   project's repo and options. A channel named `#api-bugs` selects `api`
-   so the name can be omitted. One bot, many repos, no extra Slack apps.
-6. **Control over the thread.** Channel allowlist, concurrency cap, a cost
-   line on every job, no extra Slack scopes.
-7. **Deploy from the channel.** `@<bot> api deploy` fires a Vercel or
-   Railway deploy from the bot process and reports ✅/❌ back. The agent still
-   cannot deploy; the hook blocks it. A person in Slack can.
+If "mention, get a PR" is all you want, install Cursor's app from
+[cursor.com/dashboard](https://cursor.com/dashboard) and stop reading. Build
+this bot when you want the Jam evidence, the triage turn, the verify
+checklist, the project routing, or `deploy`.
 
-If those do not matter to you, stop here and install `@Cursor`. The rest of
-this article is those seven things, as code.
+**One front door.** The two apps can coexist in a workspace, but in practice
+the bot does everything `@Cursor` does plus the list above, and two mentions
+that both "talk to Cursor" confuse people. The running example started with
+both installed and ended with one: Cursor's app uninstalled, `@<bot>` the only
+mention anyone learns. If you do keep both, `SLACK_CURSOR_USER_ID` (step 2)
+makes a stray `@Cursor` in the bot's channels answer with a pointer to `@<bot>`.
 
-One naming rule for the rest of the article. `@Cursor` means Cursor's app.
+A naming rule for the rest of the article: `@Cursor` means Cursor's app.
 `@<bot>` means the app *you* create in step 2 from the kit's manifest, under
 whatever name your workspace gives it. The manifest ships as `CloudAgents`;
 call it `Shipper` or `Fixer` and the bot reads the new name from Slack at
@@ -118,14 +144,14 @@ startup and prints that in its usage. A workspace cannot have two apps named
 `Cursor`, so the two are never the same mention.
 
 **What you learned:** the product and the pattern are different. The product
-is a mention. The pattern is still recording → brief → VM → verify → PR →
-feedback.
+is a mention. The pattern is still recording → brief → Cloud Agent → verify →
+PR → feedback, and the engine in the middle is the same either way.
 
 ---
 
 ## Step 1: Make the existing repo agent-ready
 
-Pointing a cloud agent at a repo that was set up for humans in an IDE is how
+Pointing a Cloud Agent at a repo that was set up for humans in an IDE is how
 unattended runs go off the rails. Do this before you invite Slack into it.
 
 Copy the kit into the **target** repo, not this one:
@@ -141,7 +167,7 @@ actually matter:
 | Blank | Why existing projects get this wrong |
 | --- | --- |
 | Commands | Install at the repo root, test in a subdirectory. Write both. |
-| Integration branch | Many repos use `develop`, not `main`. Set `TARGET_REF` to match. The shell hook now blocks pushes to `main`, `master`, *and* `develop`. |
+| Integration branch | Many repos use `develop`, not `main`. Set `TARGET_REF` to match. The shell hook blocks pushes to `main`, `master`, *and* `develop`. |
 | Tests the agent can run | If `npm test` needs Docker, Mailpit, or a paid API, say so, and give the agent the subset that works in a fresh clone (unit + typecheck is enough). |
 | Never | CI config, production deploy files, existing migrations. Prompts will not hold this line; the hook and this list will. |
 
@@ -158,7 +184,15 @@ Three other things a real repo usually has that fight the unattended posture:
    required `.env.local`. If `npm ci && npm test` cannot succeed on a stock
    Ubuntu VM, the verify phase cannot succeed either. Document the minimum
    env in `AGENTS.md` (copy from the example file, no secrets) or the agent
-   will invent one.
+   will invent one. If the repo needs system packages or a service to test,
+   describe the VM in `.cursor/environment.json` (Cursor's
+   [Cloud Agent setup](https://cursor.com/docs/cloud-agent/setup)); secrets go
+   in the Cloud Agents dashboard, not in the repo and not in Slack.
+
+The hook in `.cursor/hooks.json` is the part that is specific to Cloud
+Agents: they run repo hooks inside the VM before every shell command, so a
+`deny` from `guard-shell.mjs` is enforced no matter what the model, or the
+Slack message, said.
 
 Prove it with a read-only run. Cheap, reversible, tells you whether Cursor
 can clone the repo at all:
@@ -175,8 +209,8 @@ land a health endpoint. You are trying to see `[status] CREATING`, a clone,
 and a plan that mentions the real layout. If that works, Slack is a trigger.
 If it does not, Slack will not save you.
 
-**What you learned:** the bot does not make a repo agent-ready. `AGENTS.md`
-and the hook do. Slack only fires the starting pistol.
+**What you learned:** the bot does not make a repo agent-ready. `AGENTS.md`,
+the environment, and the hook do. Slack only fires the starting pistol.
 
 ---
 
@@ -194,8 +228,12 @@ The kit ships a manifest so you do not click through scopes by hand.
 4. **Install App** to the workspace. Copy the **Bot User OAuth Token**
    (`xoxb-`).
 5. Invite it to the channel: `/invite @<bot>`. Start the channel name with
-   the project (`#api-bugs`, `#api-agent-test`; the suffix is yours). The
-   leading segment is how the project is picked without typing one.
+   the project. The running example uses `#<project>-fixbot` for every repo
+   (`#api-fixbot`, `#web-fixbot`) plus a `#welcome` where a bare mention
+   prints the catalog; `#api-bugs` or `#api-anything` works exactly the same.
+   The leading segment is how the project is picked without typing one. The
+   manifest includes `channels:join`, so the bot can also join public
+   channels itself.
 
 Put both tokens in `.env`:
 
@@ -223,12 +261,12 @@ Optionally set `SLACK_ALLOWED_CHANNELS` to the channel ID (right-click the
 channel in Slack → Copy link → the `C…` segment). Empty means every channel
 the bot is in, which is fine for a first run and sloppy after that.
 
-`SLACK_CURSOR_USER_ID` is optional: the member id of Cursor's official
-`@Cursor` app, if it is also installed. When set, and the app is subscribed to
-`message.channels` (already in the manifest), someone who types `@Cursor` in a
-channel this bot is in gets a one-line pointer to `@<bot>` and the usage,
-because that mention went to Cursor's agent, not this pipeline. `@Cursor
-help`, `settings`, and `list my agents` are left to Cursor.
+`SLACK_CURSOR_USER_ID` is optional and only matters if Cursor's own `@Cursor`
+app is *also* installed. Set it to that app's member id and someone who types
+`@Cursor` in a channel this bot is in gets a one-line pointer to `@<bot>` and
+the usage, because that mention went to Cursor's agent, not this pipeline.
+`@Cursor help`, `settings`, and `list my agents` are left to Cursor. If you
+took the one-front-door advice from step 0, leave it empty.
 
 Socket Mode means Slack opens a websocket **out** from this process. There is
 no public URL, no ngrok, no request signing to debug yet. That is why this
@@ -277,7 +315,7 @@ repo, branch, and options. A request starts a job.
 @<bot> the settings page 500s after logout
 ```
 
-In `#api-bugs` you can omit `api`. In `#web-bugs`, `@<bot> api <request>`
+In `#api-fixbot` you can omit `api`. In `#web-fixbot`, `@<bot> api <request>`
 still targets `api`. Inline options are stripped before triage:
 
 ```
@@ -293,6 +331,11 @@ agent: bc-…
 Triaging against https://github.com/you/your-repo@develop
 ```
 
+That `bc-` id is a real Cloud Agent. Open cursor.com/agents while the thread
+is running and it is there, Source → SDK, with the same transcript the bot is
+streaming to its logs. You can read along, or type into it from the web; the
+bot will pick up whatever state the agent is in on the next mention.
+
 Then phase lines (`Planning (read-only)...`, `Implementing...`,
 `Verifying...`) and, if the request was enough, a PR URL plus a checklist
 copied from the verify JSON. An hourglass reaction on your mention turns into
@@ -305,8 +348,25 @@ const cli = parseMentionCli(event.text, { projects, channelProject: implied });
 // kind: "usage" | "project-usage" | "run" | "deploy" | "deploy-usage"
 ```
 
-Open `src/07-slack-bot.ts` for the Bolt listener. The part that branches once
-there is a request:
+Open `src/07-slack-bot.ts` for the Bolt listener. The part that creates the
+Cloud Agent is the same call as the first article, with Slack's context in
+`metadata` so `npm run status` and the dashboard can tell where it came from:
+
+```typescript
+const agent = await Agent.create({
+  ...creds,
+  model: { id: modelId ?? cli.options.model ?? defaultModel.id },
+  mode: "plan",
+  cloud: {
+    repos: [{ url: r, startingRef }],
+    autoCreatePR: autoCreatePR ?? cli.options.autopr ?? true,
+    skipReviewerRequest: true,
+    metadata: { kit: "cloud-agents", source: "slack", channel, user, project }, // abridged
+  },
+});
+```
+
+And the part that branches once there is a request:
 
 ```typescript
 const existingId = findAgentId(threadMessages);
@@ -318,7 +378,12 @@ const outcome = existingId
 
 A new mention creates an agent. A mention in a thread that already has
 `agent: bc-…` resumes it. There is no database. Restart the process, deploy
-it, close the laptop: the thread still has the id.
+it, close the laptop: the thread still has the id, and Cursor still has the
+agent.
+
+Two mentions in two channels are two Cloud Agents on two VMs, at the same
+time. Cursor does not cap that; the bot does (`SLACK_MAX_CONCURRENT`, step 7),
+because the cap is about your token budget, not Cursor's capacity.
 
 Prove the parser without Slack:
 
@@ -341,11 +406,11 @@ the page, the role, the click path, the console, the failed requests, and
 (if the mic was on) what the reporter said.
 
 That is why Jam is not an optional attachment in this kit. It is the input
-I actually use. The bot is written so the cloud agent can *see* the
+I actually use. The bot is written so the Cloud Agent can *see* the
 recording, not just the URL.
 
-Cloud VMs do not have Jam MCP. Opening `https://jam.dev/c/<uuid>` in a
-browser is summary-only (signal counts, not events). So this process
+The Cloud Agent's VM does not have Jam MCP. Opening `https://jam.dev/c/<uuid>`
+in a browser is summary-only (signal counts, not events). So the bot process
 fetches the evidence **before** it sends the triage prompt:
 
 1. `extractJamIds` in `src/lib/jam.ts` pulls uuids out of the Slack text,
@@ -372,7 +437,7 @@ the rest as follow-ups. One request per new Slack message; a second Jam of
 the remainder goes in the **same thread**.
 
 If there is no Jam, triage still works. It will ask for page, role, expected
-vs actual, and environment — the things a recording would have given it for
+vs actual, and environment: the things a recording would have given it for
 free.
 
 **What you learned:** the expensive mistake is letting the agent invent a
@@ -383,7 +448,7 @@ inject it, then let triage write the brief.
 
 ## Step 5: A Slack message is not a brief
 
-Turn 0 is triage. It runs in `mode: "plan"` (read-only) against the repo,
+Turn 0 is triage. It runs in `mode: "plan"` (read-only) on the Cloud Agent,
 with `prompts/slack/triage.md`, `prompts/slack/jam.md`, and
 `briefs/TEMPLATE.md` in its prompt. It must emit:
 
@@ -403,7 +468,7 @@ questions back, not a PR. Reply in the thread, mention the bot again. That
 is a follow-up (step 6), not a new agent.
 
 If `ready` is true, the same agent continues into the three-phase pipeline
-from `src/lib/pipeline.ts` — the same function `npm run pipeline` uses. Plan
+from `src/lib/pipeline.ts`, the same function `npm run pipeline` uses. Plan
 is still read-only. Implement is `mode: "agent"`. Verify re-derives from
 `git diff` and re-runs the commands in the brief. The Jam URL belongs in the
 brief's Context so later phases still have it.
@@ -459,7 +524,8 @@ answering triage questions, or a PR already exists and this is review. The
 agent stays on the same branch. The bot posts an updated checklist.
 
 `.runs/` still gets a JSON record, for you, on the machine that ran the bot.
-The thread does not need it. A Railway restart does not need it.
+The thread does not need it. A Railway restart does not need it. Cursor keeps
+the agent; the thread keeps the id.
 
 **What you learned:** state that has to survive a process restart belongs in
 the conversation the human can already see. A second Jam is still that
@@ -472,13 +538,14 @@ conversation, not a new job.
 The PR merged. The next question in the channel is always "is it out yet?"
 The repo hook blocks the *agent* from running `vercel deploy` or `railway up`,
 on purpose. It does not block *you*, and the bot process is yours. So the
-mention CLI grows one verb:
+mention CLI grows one verb, and it is the only verb that never creates a
+Cloud Agent:
 
 ```
 @<bot> api deploy                 the default target for api
 @<bot> api deploy env=uat         a named target
 @<bot> api deploy -               list api's targets
-@<bot> deploy                     this channel's project (#api-bugs)
+@<bot> deploy                     this channel's project (#api-fixbot)
 @<bot> deploy api uat             same as the second line
 ```
 
@@ -488,16 +555,16 @@ Targets come from one variable, `<project>[/<env>]=<provider>:<spec>`:
 SLACK_DEPLOYS=api=vercel:https://api.vercel.com/v1/integrations/deploy/prj_x/y,web/uat=railway:684f4bb6-…/uat/web+api,web/production=railway:684f4bb6-…/production/web+api
 ```
 
-- `vercel:<deploy-hook-url>` — Vercel → project → Settings → Git → Deploy
+- `vercel:<deploy-hook-url>`: Vercel → project → Settings → Git → Deploy
   Hooks. A hook is tied to one branch, so a project with `develop` and `main`
   hooks gets two entries (`api=…` and `api/main=…`). The hook fires without
   a token; watching it to READY/FAILED needs `VERCEL_TOKEN` (and
   `VERCEL_TEAM_ID` for team projects).
-- `railway:<projectId>/<environment>/<service>[+<service>]` — names or ids;
+- `railway:<projectId>/<environment>/<service>[+<service>]`: names or ids;
   `web+api` deploys both and waits for both. Uses `serviceInstanceDeployV2`
   on the GraphQL API, so it picks up the latest commit on the connected
-  branch. Needs `RAILWAY_TOKEN` (a project token, scoped to one environment
-  — prefer this when one target is enough) or `RAILWAY_API_TOKEN` (account
+  branch. Needs `RAILWAY_TOKEN` (a project token, scoped to one environment;
+  prefer this when one target is enough) or `RAILWAY_API_TOKEN` (account
   token, needed once Slack should reach several environments or projects).
   Same names the Railway CLI uses.
 
@@ -512,7 +579,7 @@ What you see in Slack, in order:
    @-mentioning you, so nobody has to follow the thread:
    `✅ *api* is live (1m 42s) — https://api-git-develop-you.vercel.app @you`
    or `❌ *api* deploy failed after 58s — <inspector url> @you`, followed by
-   the last 25 build-log lines in the thread. The 🚀 turns into ✅ or ❌.
+   the last build-log lines in the thread. The 🚀 turns into ✅ or ❌.
 
 Who may run it is `SLACK_DEPLOYERS`, a list of Slack member ids. Empty means
 anyone in an allowed channel, which is right for a two-person team and wrong
@@ -530,15 +597,15 @@ phone.
 
 **What you learned:** the hook says what the model may not do. The bot says
 what a person in the channel may do. Deploy is the first place those two
-lines diverge, and the code keeps them apart: the agent never gets a token
-that can deploy; the bot process never gets a prompt.
+lines diverge, and the code keeps them apart: the Cloud Agent never gets a
+token that can deploy; the bot process never gets a prompt.
 
 ---
 
 ## Step 7: Guardrails that belong in the bot, not the repo
 
-The repo hook still blocks force-push. The bot adds more, because Slack
-is a multi-user input:
+The repo hook still blocks force-push, inside the VM. The bot adds more,
+because Slack is a multi-user input and every job is your money:
 
 | Guard | Where | Default |
 | --- | --- | --- |
@@ -546,18 +613,21 @@ is a multi-user input:
 | Project catalog | `SLACK_PROJECTS` | aliases printed by `@<bot>` / `@<bot> <project>` |
 | Channel prefix | `#<project>-…` | selects that project so the name can be omitted |
 | Mention in usage | `SLACK_BOT_HANDLE` | read from Slack; env var overrides |
-| Stray `@Cursor` gets a pointer | `SLACK_CURSOR_USER_ID` | empty = off |
+| Stray `@Cursor` gets a pointer | `SLACK_CURSOR_USER_ID` | empty = off (leave off with one front door) |
 | Deploy targets | `SLACK_DEPLOYS` | empty = `deploy` is not offered |
 | Who may deploy | `SLACK_DEPLOYERS` | empty = anyone in an allowed channel |
 | One deploy per target | in-memory set of `project/env` | "already running" reply |
-| Concurrency cap | `SLACK_MAX_CONCURRENT` | 2 |
+| Concurrency cap | `SLACK_MAX_CONCURRENT` | 2 (the running example uses 10) |
 | Duplicate events | `Deduper` on Slack's event id | 10 minute TTL |
-| One job per thread | in-memory set of `thread_ts` | skip with a "already working" reply |
+| One job per thread | in-memory set of `thread_ts` | skip with an "already working" reply |
 | Cost line | `agent.getUsage()` after the job | tokens, and dollars when billing has landed |
 
 Open `src/07-slack-bot.ts` and `src/lib/slack-thread.ts` and match each row.
 There is no extra service. The cap is per process; one Railway replica is one
-cap, which is the point.
+cap, which is the point. Cloud Agents themselves run in parallel without a
+limit you will hit from a Slack channel, so the number in
+`SLACK_MAX_CONCURRENT` is a statement about how many VMs you want billing at
+once, not a technical ceiling.
 
 Also still true from article 1: `skipReviewerRequest: true`, so a Slack-fired
 agent does not page a human reviewer on the GitHub side just because it
@@ -570,9 +640,21 @@ Bot guards are about who may spend your tokens, and how many at once.
 
 ## Step 8: Leave it running when the laptop lid closes
 
-Socket Mode still applies on a server. The process dials out to Slack. You do
-not need a domain, TLS, or a signing secret. Railway is one option; any box
-that can keep a Node process alive and reach the internet works.
+Socket Mode still applies on a server. The process dials out to Slack and
+holds that websocket open for as long as it lives. You do not need a domain,
+TLS, or a signing secret. You do need a host that keeps one Node process
+alive. Railway is what the running example uses; any box that can keep a
+process up and reach the internet works.
+
+That requirement is why the bot does **not** run on Vercel, even though two
+of the apps it deploys do. Vercel Functions are request-scoped: they start on
+an HTTP request and end when the handler returns. A websocket that has to
+stay open between mentions does not fit that model. Running there would mean
+switching Bolt to HTTP mode (a public Request URL, request signing, a
+3-second ack) and pushing the minutes-long pipeline into a queue or a
+workflow. Possible, and a different article. Keep the layers straight:
+Railway hosts the bot; Vercel and Railway host the *apps*; Cursor hosts the
+*agents*.
 
 From this directory, after `railway login`:
 
@@ -588,8 +670,7 @@ railway variables --set "SLACK_BOT_TOKEN=$SLACK_BOT_TOKEN" \
   --set "SLACK_ALLOWED_CHANNELS=$SLACK_ALLOWED_CHANNELS" \
   --set "SLACK_PROJECTS=$SLACK_PROJECTS" \
   --set "SLACK_CHANNEL_REPOS=$SLACK_CHANNEL_REPOS" \
-  --set "SLACK_CURSOR_USER_ID=$SLACK_CURSOR_USER_ID" \
-  --set "SLACK_MAX_CONCURRENT=2" \
+  --set "SLACK_MAX_CONCURRENT=10" \
   --set "SLACK_DEPLOYS=$SLACK_DEPLOYS" \
   --set "SLACK_DEPLOYERS=$SLACK_DEPLOYERS" \
   --set "VERCEL_TOKEN=$VERCEL_TOKEN" \
@@ -598,9 +679,11 @@ railway up
 railway logs
 ```
 
-`RAILWAY_TOKEN` here is a project token for the *target* project, not for
-the one running the bot. Mint it in that project's Settings → Tokens, scoped
-to the environment you want Slack to be able to ship.
+`CURSOR_API_KEY` on the server is a key from cursor.com/dashboard/integrations
+(the browser login from article 1 lives in your home directory and does not
+travel). `RAILWAY_TOKEN` here is a project token for the *target* project,
+not for the one running the bot. Mint it in that project's Settings → Tokens,
+scoped to the environment you want Slack to be able to ship.
 
 `railway.json` in the kit installs the Jam CLI if it is missing, then runs
 `npm run slack`, and restarts on failure. The bot also self-installs `jam` on
@@ -611,7 +694,8 @@ Do not put Slack or Jam tokens in the GitHub repo. Railway variables (or
 whatever your host uses) are the store.
 
 When it is up, close the laptop, mention `@<bot>` from your phone with a Jam
-link, come back to a PR.
+link, come back to a PR. Open the Cursor iOS app while you wait and the same
+agent is there.
 
 **What you learned:** the hosting question is "can this process keep a
 websocket open, and can it reach jam.dev with a token," not "what is my
@@ -624,24 +708,26 @@ later.
 
 The first article was the loop. This one is one way to fire it. The preferred
 payload is a jam.dev recording, because that is the repro the model did not
-invent. Every other front door — a GitHub `issues.labeled` Action, a Linear
-webhook, a cron — is the same `startJob` / `continueJob` pair with a different
+invent. Every other front door, a GitHub `issues.labeled` Action, a Linear
+webhook, a cron, is the same `startJob` / `continueJob` pair with a different
 `post` callback. If that door also carries a Jam URL, call `loadJamEvidence`
 the same way.
 
 Three choices stay yours, and they are the same three as before:
 
-- **Who owns the machine.** Cursor owns the VM that writes code. You own the
-  process that talks to Slack and fetches Jams.
+- **Who owns the machine.** Cursor owns the VM that writes code: the Cloud
+  Agent. You own the process that talks to Slack and fetches Jams: the bot.
+  Neither one is the other.
 - **What the artifact is.** Still a PR. Slack is how you hear about it.
-- **Where enforcement lives.** Hooks in the target repo, allowlist and cap in
-  the bot, verify JSON as the definition of done. The Jam is the definition of
-  *what happened*.
+- **Where enforcement lives.** Hooks in the target repo, run by the VM;
+  allowlist and cap in the bot; verify JSON as the definition of done. The
+  Jam is the definition of *what happened*.
 
 The parts that transfer if you throw this bot away tomorrow: a brief with a
 checkable definition of done, a recording the agent can actually read, a
 triage turn that is allowed to say "not yet," and a thread (or an issue, or a
-comment) that holds the `bc-` id.
+comment) that holds the `bc-` id. Swap the SDK calls for a different engine
+and the Slack layer would not know.
 
 ## Two mistakes to make early, on purpose
 
@@ -660,5 +746,6 @@ in `#prod-incidents`.
 Steps 0, 1, 3, and 4. Copy `target-repo-kit/` into one real repo and fill
 `AGENTS.md`; set `JAM_TOKEN`; run `npm run slack` against a channel named
 `#<project>-sandbox` that nobody important is in; mention `@<bot>` with nothing
-to see usage, then paste one Jam, with `--plan-only` already proven. Do step 8
-when you trust the thread enough to let it run overnight.
+to see usage, then paste one Jam, with `--plan-only` already proven. Watch the
+same agent at cursor.com/agents while it runs. Do step 8 when you trust the
+thread enough to let it run overnight.

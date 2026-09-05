@@ -1,9 +1,13 @@
 # cloud-agents: learn to build autonomously in the cloud
 
 A working, minimal kit that shows every moving part of "an agent builds software
-for me on a machine in the cloud while I do something else." It uses the Cursor
-SDK, which is the same infrastructure Grok Bot and Cursor Cloud Agents run on,
-exposed as a library you can call from a script, a cron job, or a CI step.
+for me on a machine in the cloud while I do something else." The agents are
+Cursor Cloud Agents: Cursor-hosted VMs that clone your repo, work on a branch,
+and open a PR. The kit drives them through the Cursor SDK (`@cursor/sdk`), the
+same API behind Cursor's own web, IDE, and Slack entry points, exposed as a
+library you can call from a script, a cron job, a CI step, or (step 8) a Slack
+bot you host yourself. Nothing in `src/` is itself a Cursor agent; it is the
+orchestrator that creates, prompts, and resumes them.
 
 Read this file top to bottom once. Then run the numbered scripts in order.
 `ARTICLE.md` is the idea-to-app walkthrough; `ARTICLE-SLACK.md` is the Slack
