@@ -15,6 +15,17 @@ npm run deploy                        # stamp the commit, then ship
 
 ## [Unreleased]
 
+### Added
+
+- **Jobs HTTP API on the Slack process.** `GET /health`, `GET /v1/projects`,
+  `POST /v1/jobs` (same mention CLI, Slack progress), `POST /v1/mentions`
+  (Dispatcher posts `@CloudAgents …`). Slack does not fire `app_mention` for
+  bot-authored mentions, so allowlisted `SLACK_DRIVER_BOT_IDS` posts are
+  handled on the `message` event. Bearer `JOBS_API_TOKEN`. Slack's own user
+  token cannot mention this app; a second app from
+  `slack-dispatcher-manifest.json` can, when its `B…` id is in
+  `SLACK_DRIVER_BOT_IDS`.
+
 ## [0.2.0] — 2026-09-05
 
 The bot lost its ability to deploy and gained the ability to say what it is.

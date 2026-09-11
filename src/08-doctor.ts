@@ -22,7 +22,7 @@ import { Agent, Cursor } from "@cursor/sdk";
 import { loadEnv, flags } from "./lib/env.js";
 import { resolveApiKey } from "./lib/auth.js";
 import { parseProjects } from "./lib/slack-cli.js";
-import { parseAllowlist, parseChannelRepos } from "./lib/slack-thread.js";
+import { parseAllowlist, parseBotIds, parseChannelRepos } from "./lib/slack-thread.js";
 import { formatVersion, versionInfo } from "./lib/version.js";
 import {
   classifyGitHubToken,
@@ -338,6 +338,36 @@ async function checkSlack(): Promise<void> {
     if (info.ok) add("C", "slack", "cursor app pointer", "pass", `mentions of ${cursorUser} get a pointer to @${botUser}`);
     else add("C", "slack", "cursor app pointer", "warn", info.error ?? "not resolved", "leave SLACK_CURSOR_USER_ID empty unless Cursor's own app is installed too");
   }
+
+  const driverIds = parseBotIds(process.env.SLACK_DRIVER_BOT_IDS);
+  const driverToken = envVar("SLACK_DRIVER_TOKEN");
+  if (driverIds.length) {
+    add("C", "slack", "dispatcher bots", "pass", driverIds.join(", "));
+  } else if (driverToken) {
+    add("C", "slack", "dispatcher bots", "warn", "SLACK_DRIVER_TOKEN is set but SLACK_DRIVER_BOT_IDS is empty", "put the Dispatcher's B… id in SLACK_DRIVER_BOT_IDS or CloudAgents will ignore its mentions");
+  } else {
+    add("C", "slack", "dispatcher bots", "skip", "no SLACK_DRIVER_BOT_IDS — POST /v1/mentions and API-posted @mentions stay off");
+  }
+  if (driverToken) {
+    if (slackTokenKind(driverToken) !== "bot") {
+      add("C", "slack", "dispatcher token", "warn", "SLACK_DRIVER_TOKEN is not an xoxb- bot token", "install slack-dispatcher-manifest.json and copy that app's Bot User OAuth Token");
+    } else {
+      const driverAuth = await slack("auth.test", driverToken);
+      if (driverAuth.ok) {
+        const driverBot = typeof driverAuth.body.bot_id === "string" ? driverAuth.body.bot_id : "";
+        add("C", "slack", "dispatcher token", "pass", `@${String(driverAuth.body.user ?? "dispatcher")} ${driverBot}`);
+        if (driverBot && driverIds.length && !driverIds.includes(driverBot.toUpperCase())) {
+          add("C", "slack", "dispatcher id match", "fail", `${driverBot} is not in SLACK_DRIVER_BOT_IDS`, `set SLACK_DRIVER_BOT_IDS=${driverBot}`);
+        }
+      } else {
+        add("C", "slack", "dispatcher token", "fail", driverAuth.error ?? "rejected", "reinstall the Dispatcher app and copy its xoxb- token");
+      }
+    }
+  }
+
+  const jobsToken = envVar("JOBS_API_TOKEN");
+  if (jobsToken) add("C", "slack", "jobs API token", "pass", "JOBS_API_TOKEN set (Bearer for POST /v1/jobs)");
+  else add("C", "slack", "jobs API token", "skip", "no JOBS_API_TOKEN — HTTP /health can listen, POST /v1/jobs returns 401");
 
   // Retired settings, still sitting in a .env someone copied forward.
   for (const stale of ["SLACK_DEPLOYS", "SLACK_DEPLOYERS", "VERCEL_TOKEN", "VERCEL_TEAM_ID", "RAILWAY_API_TOKEN"]) {

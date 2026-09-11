@@ -18,6 +18,12 @@ test("`@bot version` is its own command, not a job", () => {
   const cli = parseMentionCli("<@U1> version", { projects });
   assert.equal(cli.kind, "version");
   assert.equal(cli.request, "");
+});
+
+test("`@bot <project> version` is still version, not a coding job", () => {
+  const cli = parseMentionCli("<@U1> api version", { projects });
+  assert.equal(cli.kind, "version");
+  assert.equal(cli.project?.name, "api");
   // A request that merely mentions a version is still work to do.
   const job = parseMentionCli("<@U1> api version the footer says 0.0.0", { projects });
   assert.equal(job.kind, "run");

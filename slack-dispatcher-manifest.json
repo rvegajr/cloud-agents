@@ -1,0 +1,23 @@
+{
+  "display_information": {
+    "name": "CloudAgents Dispatcher",
+    "description": "Posts @CloudAgents mentions from the jobs API. Not a coding agent. Invite it to the same #*-fixbot channels.",
+    "background_color": "#2c2d30"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "Dispatcher",
+      "always_online": true
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": ["chat:write", "channels:join", "channels:read"]
+    }
+  },
+  "settings": {
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}

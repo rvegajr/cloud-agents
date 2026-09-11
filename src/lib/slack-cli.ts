@@ -200,6 +200,9 @@ export function parseMentionCli(
   const named = IDENT_RE.test(first) ? ctx.projects.get(first) : undefined;
 
   if (named) {
+    if (isVersionToken(rest)) {
+      return { kind: "version", project: named, request: "", options, explicitHelp: true };
+    }
     if (isHelpToken(rest)) {
       return { kind: "project-usage", project: named, request: "", options, explicitHelp: rest !== "" };
     }
