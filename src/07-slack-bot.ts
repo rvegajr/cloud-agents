@@ -13,7 +13,7 @@
  *   npm run slack
  */
 import { App } from "@slack/bolt";
-import { loadEnv, env } from "./lib/env.js";
+import { loadEnv } from "./lib/env.js";
 import { resolveApiKey } from "./lib/auth.js";
 import { reportStartupFailure } from "./lib/report.js";
 import { ensureJamBin } from "./lib/jam.js";
@@ -26,6 +26,7 @@ import {
   parseProjects,
 } from "./lib/slack-cli.js";
 import { formatVersion } from "./lib/version.js";
+import { selectModel } from "./lib/model.js";
 import {
   isDriverBot,
   parseAllowlist,
@@ -130,7 +131,7 @@ async function resolveBotHandle(
 try {
   const apiKey = await resolveApiKey();
   const creds = apiKey ? { apiKey } : {};
-  const defaultModel = { id: env("CURSOR_MODEL", "composer-2.5") };
+  const defaultModel = selectModel();
 
   const app = new App({
     token: botToken,

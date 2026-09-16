@@ -22,6 +22,7 @@ import { Agent, Cursor } from "@cursor/sdk";
 import { loadEnv, flags } from "./lib/env.js";
 import { resolveApiKey } from "./lib/auth.js";
 import { parseProjects } from "./lib/slack-cli.js";
+import { selectModel } from "./lib/model.js";
 import { parseAllowlist, parseBotIds, parseChannelRepos } from "./lib/slack-thread.js";
 import { formatVersion, versionInfo } from "./lib/version.js";
 import {
@@ -126,7 +127,7 @@ async function checkCursor(): Promise<void> {
   try {
     const models = await Cursor.models.list(creds);
     const ids = models.map((m) => m.id);
-    if (ids.includes(model)) add("A", "cursor", "model", "pass", model);
+    if (ids.includes(model)) add("A", "cursor", "model", "pass", `${model} (fast=${selectModel(model).params?.[0]?.value})`);
     else add("A", "cursor", "model", "fail", `CURSOR_MODEL=${model} is not available to this account`, `pick one of: ${ids.slice(0, 8).join(", ")}`);
   } catch (err) {
     add("A", "cursor", "model", "warn", `could not list models (${msg(err)})`, "retry; the key worked for Cursor.me so this is usually transient");

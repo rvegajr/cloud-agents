@@ -22,6 +22,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { loadEnv, env, flags } from "./lib/env.js";
+import { selectModel } from "./lib/model.js";
 import { resolveApiKey } from "./lib/auth.js";
 import { runBuildLoop, type LoopState, type SendFn } from "./lib/build-loop.js";
 import { reportStartupFailure } from "./lib/report.js";
@@ -63,7 +64,7 @@ function banner(title: string) {
 
 try {
   const apiKey = await resolveApiKey();
-  const model = { id: env("CURSOR_MODEL", "composer-2.5") };
+  const model = selectModel();
 
   let record: BuildRecord;
   let agent;

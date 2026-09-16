@@ -15,6 +15,12 @@ npm run deploy                        # stamp the commit, then ship
 
 ## [Unreleased]
 
+### Changed
+
+- **Composer Fast is off.** Every `Agent.create` / `Agent.prompt` now sends
+  `params: [{ id: "fast", value: "false" }]` so Composer 2.5 (and Grok) use
+  the regular rate card. Cursor's product default is Fast.
+
 ### Added
 
 - **Jobs HTTP API on the Slack process.** `GET /health`, `GET /v1/projects`,

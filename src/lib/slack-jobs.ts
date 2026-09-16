@@ -28,6 +28,7 @@ import { formatVersion, formatVersionBlock } from "./version.js";
 import { printStream } from "./stream.js";
 import type { JobRecord, JobStore, JobsBody } from "./jobs-http.js";
 import { mentionText } from "./jobs-http.js";
+import { selectModel } from "./model.js";
 
 export interface SlackClient {
   chat: {
@@ -60,7 +61,7 @@ export interface MentionArgs {
 
 export interface SlackJobsConfig {
   creds: { apiKey?: string };
-  defaultModel: { id: string };
+  defaultModel: { id: string; params?: Array<{ id: string; value: string }> };
   routes: Map<string, RepoTarget>;
   projects: Map<string, SlackProject>;
   fallbackTarget: RepoTarget | undefined;
@@ -265,7 +266,7 @@ export function createSlackJobs(cfg: SlackJobsConfig) {
         create: async ({ repo: r, ref: startingRef, autoCreatePR, model: modelId }) => {
           const agent = await Agent.create({
             ...cfg.creds,
-            model: { id: modelId ?? cli.options.model ?? cfg.defaultModel.id },
+            model: selectModel(modelId ?? cli.options.model ?? cfg.defaultModel.id),
             mode: "plan",
             cloud: {
               repos: [{ url: r, startingRef }],
