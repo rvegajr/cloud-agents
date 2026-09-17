@@ -25,5 +25,6 @@ This repo **is** the factory (`npm run build-farm`, `build-app`, Slack bot).
 Write COST last. Every AI provider is its own meter — never add them into one number. Log `COST running` as spend arrives; close with the board. `npm run cost-board`. Never omit it.
 
 - Whatever engine is running, record it (`cursor:billed`, `claude:api-eq`, `local:local`, or a new slug). Do not fold an unknown AI into Cursor.
-- Billed meters use the invoice (`chargedCents`). API-eq / local / tracked still get a line.
-- Missing usage: `COST this run: unknown` on that meter.
+- Only print meters that have spend. Do not pad Cursor or Claude with `$0.00`.
+- Billed meters use the invoice (`chargedCents`). API-eq / local / tracked still get a line when they have cents.
+- Missing usage: `COST this run: unknown` (no fake zeros).

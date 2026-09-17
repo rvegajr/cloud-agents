@@ -22,8 +22,12 @@ npm run deploy                        # stamp the commit, then ship
   and a monthly outlook if that pace holds. Append-only `.runs/cost-ledger.jsonl`;
   `npm run cost-board` prints the day/project board. Meters are **AI-agnostic**
   (`cursor:billed`, `claude:api-eq`, `local:local`, or any future provider slug)
-  and are never summed into one number. `COST running` logs as spend arrives.
-  A job still closes with COST when usage is unknown.
+  and are never summed into one number. A meter with no spend is omitted, not
+  printed as `$0.00`. `COST running` logs as spend arrives. The board harvests
+  cents already stored in `.runs/` farm manifests, Claude records, and build
+  `chargedCents` — Slack dated json never stored usage, so those jobs stay out
+  until a live close writes the ledger. A job still closes with COST when usage
+  is unknown.
 - **Cursor farm (`npm run build-farm`).** One markdown file per app under
   `--ideas-dir`; a concurrency pool of Cursor Cloud Agents (Fast off); a
   `FARM_MAX_USD` cap; `.runs/farm-*.json` as the review board. Always
