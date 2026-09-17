@@ -86,10 +86,22 @@ export function profileLineExportsAnthropicKey(line: string): boolean {
   return /(?:^|[\s;])(?:export\s+)?ANTHROPIC_API_KEY=/.test(t);
 }
 
-/** Subprocess env: model credential only. No Slack, GitHub, Jam, or API keys. */
+/** Subprocess env: keep the login session, drop product and API secrets. */
 export function scrubbedEnv(): Record<string, string | undefined> {
-  const { PATH, HOME, CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_CONFIG_DIR } = process.env;
-  return { PATH, HOME, CLAUDE_CODE_OAUTH_TOKEN, CLAUDE_CONFIG_DIR };
+  const dropExact = new Set([
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+    "CURSOR_API_KEY",
+  ]);
+  const dropPrefix = /^(SLACK_|JAM_|JOBS_API_|VERCEL_|RAILWAY_)/;
+  const out: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (dropExact.has(k) || dropPrefix.test(k)) continue;
+    out[k] = v;
+  }
+  return out;
 }
 
 export function assertClaudeCredential(): void {

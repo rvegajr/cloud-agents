@@ -79,7 +79,7 @@ test("clone URL never leaves the token in the public origin", () => {
   assert.equal(publicGithubUrl("git@github.com:rvegajr/sji-flight-deck-platform.git"), repo);
 });
 
-test("scrubbedEnv drops API keys and Slack tokens", () => {
+test("scrubbedEnv drops API keys and Slack tokens but keeps the Max login", () => {
   const saved = { ...process.env };
   process.env.ANTHROPIC_API_KEY = "dummy-anthropic-key";
   process.env.SLACK_BOT_TOKEN = "dummy-slack-bot-token";
