@@ -21,4 +21,5 @@ Kit for efficient generation. Factory commands live in this repo.
 Last lines of every job are COST. Every AI provider is its own meter — never one combined dollar. Log running cost as spend arrives. `npm run cost-board`. Do not end a report without it.
 
 - Record whichever engine is running. Do not fold an unknown AI into Cursor.
+- Only print meters that have spend — no `$0.00` padding.
 - Missing usage: `COST this run: unknown`.

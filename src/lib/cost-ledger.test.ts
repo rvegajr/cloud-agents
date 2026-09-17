@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -11,7 +11,9 @@ import {
   formatCostBoard,
   formatCostClose,
   formatRunningCost,
+  harvestRunCosts,
   loadCostLedger,
+  loadFactoryCosts,
   meterForEngine,
   meterFromAgentId,
   normalizeMeter,
@@ -72,6 +74,7 @@ test("ledger rolls this run, project, today, and a monthly outlook", () => {
   assert.match(text, /this run:\s+\$0\.80\s+Cursor billed/);
   assert.match(text, /this project:\s+Cursor billed \$2\.00/);
   assert.doesNotMatch(text, /Claude/);
+  assert.doesNotMatch(text, /Cursor billed \$0\.00/);
   assert.match(text, /if this pace holds:/);
   assert.equal(today.project, "farm-slugify");
 });
@@ -153,8 +156,10 @@ test("unknown this run still prints project totals and does not append", () => {
     source: "slack",
   });
   assert.equal(entry, undefined);
-  assert.match(close, /this run:\s+unknown\s+Cursor billed/);
+  assert.match(close, /this run:\s+unknown/);
+  assert.doesNotMatch(close, /this run:\s+unknown\s+Cursor/);
   assert.match(close, /this project:\s+Cursor billed \$0\.49/);
+  assert.doesNotMatch(close, /Claude/);
   assert.equal(loadCostLedger(file).length, 1);
 });
 
@@ -192,3 +197,69 @@ test("meters are AI-agnostic: unknown engines are not Cursor", () => {
   assert.equal(formatRunningCost(120, "cursor:billed"), "COST running: $1.20  Cursor billed");
   assert.equal(formatRunningCost(undefined, "cursor:billed"), undefined);
 });
+
+test("COST close omits meters with no data", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cost-empty-"));
+  const { close } = closeJobCost({
+    stateDir: dir,
+    project: "cloud-agents",
+    cents: undefined,
+    meter: "cursor:billed",
+    source: "pipeline",
+  });
+  assert.equal(close, "COST\n  this run:     unknown");
+  assert.doesNotMatch(close, /\$0\.00/);
+  assert.doesNotMatch(close, /Claude/);
+  assert.doesNotMatch(close, /this project:/);
+});
+
+test("harvest reads farm cents and Claude API-eq, skips tmp scratch", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cost-harvest-"));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "farm-2026-09-17T14-16-06-393Z.json"),
+    JSON.stringify({
+      createdAt: "2026-09-17T14:16:06.393Z",
+      updatedAt: "2026-09-17T14:27:05.160Z",
+      jobs: [
+        { repoName: "farm-slugify", repo: "https://github.com/rvegajr/farm-slugify", agentId: "bc-deb", cents: 63.66518 },
+        { repoName: "farm-empty", cents: 0 },
+      ],
+    }),
+  );
+  writeFileSync(
+    join(dir, "claude-cc-sv.json"),
+    JSON.stringify({
+      agentId: "cc-55f6ec96",
+      repo: "https://github.com/rvegajr/sv-claude",
+      apiEquivalentUsd: 6.649168,
+    }),
+  );
+  writeFileSync(
+    join(dir, "claude-cc-tmp.json"),
+    JSON.stringify({
+      agentId: "cc-tmp",
+      repo: "/private/tmp/claude/scratchpad/e2e/origin",
+      apiEquivalentUsd: 0.22,
+      engine: "hybrid",
+    }),
+  );
+  writeFileSync(
+    join(dir, "build-bc-vault.json"),
+    JSON.stringify({
+      agentId: "bc-4936ea78",
+      repo: "https://github.com/rvegajr/sv-cursor",
+      engine: "cursor",
+      chargedCents: 120.25,
+      updatedAt: "2026-09-17T05:01:34.575Z",
+    }),
+  );
+  const harvested = harvestRunCosts(dir);
+  assert.equal(harvested.some((e) => e.agentId === "cc-tmp"), false);
+  assert.equal(harvested.find((e) => e.agentId === "bc-deb")?.cents, 64);
+  assert.equal(harvested.find((e) => e.agentId === "cc-55f6ec96")?.cents, 665);
+  assert.equal(harvested.find((e) => e.agentId === "bc-4936ea78")?.cents, 120);
+  const merged = loadFactoryCosts(dir);
+  assert.equal(merged.length, harvested.length);
+});
+

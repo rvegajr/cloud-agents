@@ -5,7 +5,7 @@
  */
 import { loadEnv } from "./lib/env.js";
 import { buildStateDir } from "./lib/build-app.js";
-import { defaultLedgerPath, formatCostBoard, loadCostLedger } from "./lib/cost-ledger.js";
+import { formatCostBoard, loadFactoryCosts } from "./lib/cost-ledger.js";
 
 loadEnv();
-console.log(formatCostBoard(loadCostLedger(defaultLedgerPath(buildStateDir()))));
+console.log(formatCostBoard(loadFactoryCosts(buildStateDir())));

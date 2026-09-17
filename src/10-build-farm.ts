@@ -23,7 +23,7 @@ import {
   runFarm,
 } from "./lib/farm.js";
 import { buildStateDir } from "./lib/build-app.js";
-import { defaultLedgerPath, formatCostBoard, loadCostLedger } from "./lib/cost-ledger.js";
+import { formatCostBoard, loadFactoryCosts } from "./lib/cost-ledger.js";
 
 loadEnv();
 const args = flags();
@@ -113,7 +113,7 @@ try {
   });
 
   console.log(`\n${formatFarmStatus(manifest)}`);
-  console.log(`\n${formatCostBoard(loadCostLedger(defaultLedgerPath(buildStateDir())))}`);
+  console.log(`\n${formatCostBoard(loadFactoryCosts(buildStateDir()))}`);
   console.log(`\nmanifest: .runs/${manifest.id}.json`);
   console.log("Resume one job: npm run build-app -- --resume <bc-id>");
   process.exit(farmExitCode(manifest));

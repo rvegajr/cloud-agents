@@ -1,5 +1,5 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 /**
  * Append-only factory ledger. COST is AI-agnostic: each provider is its own
@@ -179,9 +179,9 @@ function sortMeterIds(ids: string[]): string[] {
   });
 }
 
-export function formatMeterAmounts(split: MeterSplit, always: string[] = []): string {
-  const ids = sortMeterIds([...new Set([...Object.keys(split), ...always.map(normalizeMeter)])]);
-  if (!ids.length) return "(none)";
+export function formatMeterAmounts(split: MeterSplit): string {
+  const ids = sortMeterIds(Object.keys(split).filter((id) => (split[id] ?? 0) !== 0));
+  if (!ids.length) return "";
   return ids.map((id) => `${shortMeterLabel(id)} ${usdFromCents(split[id] ?? 0)}`).join(" · ");
 }
 
@@ -264,7 +264,7 @@ export function summarizeCost(
     project: opts.project,
     projectRuns: projectEntries.length,
     todayProjects: new Set(todayEntries.map((e) => e.project)).size,
-    last7DaysWithData: new Set(weekEntries.map((e) => e.day)).size || 1,
+    last7DaysWithData: new Set(weekEntries.map((e) => e.day)).size,
     projectByMeter: byMeter(projectEntries),
     todayByMeter: byMeter(todayEntries),
     last7ByMeter: byMeter(weekEntries),
@@ -275,17 +275,30 @@ export function summarizeCost(
 export function formatCostClose(c: CostClose): string {
   const thisRun =
     c.thisRunCents == null
-      ? `  this run:     unknown  ${meterLabel(c.thisRunMeter)}`
+      ? "  this run:     unknown"
       : `  this run:     ${usdFromCents(c.thisRunCents)}  ${meterLabel(c.thisRunMeter)}`;
-  const always = [c.thisRunMeter];
-  return [
-    "COST",
-    thisRun,
-    `  this project: ${formatMeterAmounts(c.projectByMeter, always)}  (${c.project} · ${c.projectRuns} recorded run${c.projectRuns === 1 ? "" : "s"})`,
-    `  today:        ${formatMeterAmounts(c.todayByMeter, always)}  (${c.todayProjects} project${c.todayProjects === 1 ? "" : "s"})`,
-    `  last 7 days:  ${formatMeterAmounts(c.last7ByMeter, always)}  (${c.last7DaysWithData} day${c.last7DaysWithData === 1 ? "" : "s"} with jobs)`,
-    `  if this pace holds: ${formatMeterAmounts(c.outlookByMeter, always)} this month`,
-  ].join("\n");
+  const lines = ["COST", thisRun];
+  const project = formatMeterAmounts(c.projectByMeter);
+  if (project) {
+    lines.push(
+      `  this project: ${project}  (${c.project} · ${c.projectRuns} recorded run${c.projectRuns === 1 ? "" : "s"})`,
+    );
+  }
+  const today = formatMeterAmounts(c.todayByMeter);
+  if (today) {
+    lines.push(
+      `  today:        ${today}  (${c.todayProjects} project${c.todayProjects === 1 ? "" : "s"})`,
+    );
+  }
+  const week = formatMeterAmounts(c.last7ByMeter);
+  if (week) {
+    lines.push(
+      `  last 7 days:  ${week}  (${c.last7DaysWithData} day${c.last7DaysWithData === 1 ? "" : "s"} with jobs)`,
+    );
+  }
+  const outlook = formatMeterAmounts(c.outlookByMeter);
+  if (outlook) lines.push(`  if this pace holds: ${outlook} this month`);
+  return lines.join("\n");
 }
 
 export function formatCostBoard(entries: CostEntry[], now = new Date()): string {
@@ -314,9 +327,122 @@ export function formatCostBoard(entries: CostEntry[], now = new Date()): string 
     thisRunMeter: entries[0]?.meter ?? "unknown:tracked",
     now,
   });
-  lines.push("", `All recorded: ${formatMeterAmounts(byMeter(entries))}`);
-  lines.push(`If the last ${close.last7DaysWithData}-day pace holds: ${formatMeterAmounts(close.outlookByMeter)} this month`);
+  const all = formatMeterAmounts(byMeter(entries));
+  if (all) lines.push("", `All recorded: ${all}`);
+  const outlook = formatMeterAmounts(close.outlookByMeter);
+  if (outlook) {
+    lines.push(`If the last ${close.last7DaysWithData}-day pace holds: ${outlook} this month`);
+  }
   return lines.join("\n");
+}
+
+function costKey(e: CostEntry): string {
+  if (e.agentId) return `${normalizeMeter(e.meter)}:${e.agentId}`;
+  return `${normalizeMeter(e.meter)}:${e.project}:${e.at}:${e.cents}`;
+}
+
+export function mergeCostEntries(ledger: CostEntry[], harvested: CostEntry[]): CostEntry[] {
+  const byId = new Map<string, CostEntry>();
+  for (const e of harvested) byId.set(costKey(e), e);
+  for (const e of ledger) byId.set(costKey(e), e);
+  return [...byId.values()].sort((a, b) => a.at.localeCompare(b.at) || a.project.localeCompare(b.project));
+}
+
+function isScratchRepo(repo?: string): boolean {
+  if (!repo) return false;
+  const n = repo.replace(/\\/g, "/");
+  return n.includes("/private/tmp/") || n.startsWith("/tmp/") || n.includes("scratchpad") || n.includes("/var/folders/");
+}
+
+function roundCents(n: number): number {
+  return Math.round(n);
+}
+
+/**
+ * Read cents already sitting in .runs (farm manifests, Claude records, build
+ * records that stored chargedCents). Slack dated json never stored usage, so
+ * those jobs stay out until a live getUsage close writes the ledger.
+ */
+export function harvestRunCosts(stateDir: string): CostEntry[] {
+  if (!existsSync(stateDir)) return [];
+  const out: CostEntry[] = [];
+  for (const name of readdirSync(stateDir)) {
+    if (!name.endsWith(".json") || name === "max-usage.json") continue;
+    const file = join(stateDir, name);
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(file, "utf8"));
+    } catch {
+      continue;
+    }
+    if (!raw || typeof raw !== "object") continue;
+    const data = raw as Record<string, unknown>;
+    const mtime = statSync(file).mtime.toISOString();
+
+    if (name.startsWith("farm-") && Array.isArray(data.jobs)) {
+      const at = typeof data.updatedAt === "string" ? data.updatedAt : typeof data.createdAt === "string" ? data.createdAt : mtime;
+      for (const job of data.jobs) {
+        if (!job || typeof job !== "object") continue;
+        const j = job as Record<string, unknown>;
+        if (typeof j.cents !== "number" || !Number.isFinite(j.cents) || j.cents <= 0) continue;
+        const repo = typeof j.repo === "string" ? j.repo : undefined;
+        const project =
+          (typeof j.repoName === "string" && j.repoName) || projectFromRepo(repo);
+        out.push({
+          at,
+          day: calendarDay(new Date(at)),
+          project,
+          meter: "cursor:billed",
+          cents: roundCents(j.cents),
+          source: "farm",
+          agentId: typeof j.agentId === "string" ? j.agentId : undefined,
+          repo,
+        });
+      }
+      continue;
+    }
+
+    if (name.startsWith("claude-") && typeof data.apiEquivalentUsd === "number" && data.apiEquivalentUsd > 0) {
+      const repo = typeof data.repo === "string" ? data.repo : undefined;
+      if (isScratchRepo(repo)) continue;
+      const cents = roundCents(data.apiEquivalentUsd * 100);
+      if (cents <= 0) continue;
+      const engine = typeof data.engine === "string" ? data.engine : "claude";
+      out.push({
+        at: mtime,
+        day: calendarDay(new Date(mtime)),
+        project: projectFromRepo(repo),
+        meter: meterForEngine(engine),
+        cents,
+        source: "build-app",
+        agentId: typeof data.agentId === "string" ? data.agentId : undefined,
+        repo,
+      });
+      continue;
+    }
+
+    if (name.startsWith("build-") && typeof data.chargedCents === "number" && data.chargedCents > 0) {
+      const repo = typeof data.repo === "string" ? data.repo : undefined;
+      const engine = typeof data.engine === "string" ? data.engine : undefined;
+      const at = typeof data.updatedAt === "string" ? data.updatedAt : mtime;
+      const agentId = typeof data.agentId === "string" ? data.agentId : undefined;
+      out.push({
+        at,
+        day: calendarDay(new Date(at)),
+        project: projectFromRepo(repo),
+        meter: meterForEngine(engine ?? (agentId?.startsWith("cc-") ? "claude" : "cursor")),
+        cents: roundCents(data.chargedCents),
+        source: "build-app",
+        agentId,
+        repo,
+      });
+    }
+  }
+  return out;
+}
+
+export function loadFactoryCosts(stateDir: string): CostEntry[] {
+  return mergeCostEntries(loadCostLedger(defaultLedgerPath(stateDir)), harvestRunCosts(stateDir));
 }
 
 export function recordJobCost(opts: {
@@ -359,7 +485,7 @@ export function closeJobCost(opts: {
   repo?: string;
 }): { entry?: CostEntry; close: string } {
   if (opts.cents != null) return recordJobCost({ ...opts, cents: opts.cents });
-  const entries = loadCostLedger(defaultLedgerPath(opts.stateDir));
+  const entries = loadFactoryCosts(opts.stateDir);
   return {
     close: formatCostClose(
       summarizeCost(entries, {

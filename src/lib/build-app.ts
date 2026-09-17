@@ -35,6 +35,7 @@ export interface BuildRecord {
   sessionId?: string;
   apiEquivalentUsd?: number;
   prUrl?: string;
+  chargedCents?: number;
 }
 
 export interface RunBuildAppOpts {
@@ -352,6 +353,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
     const chargedCents = await usage();
     if (lastPr) record.prUrl = lastPr;
     record.state = final;
+    if (chargedCents != null) record.chargedCents = chargedCents;
     saveBuildRecord(record, stateDir);
     await close();
     let costClose: string | undefined;
