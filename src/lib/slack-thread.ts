@@ -4,7 +4,7 @@
  * and no Bolt — tests can drive these with plain objects.
  */
 
-export const AGENT_ID_RE = /\bagent:\s*(bc-[a-z0-9-]+)/i;
+export const AGENT_ID_RE = /\bagent:\s*((?:bc|cc)-[a-z0-9-]+)/i;
 
 export function findAgentId(messages: Array<{ text?: string | null } | undefined>): string | undefined {
   for (const m of messages) {

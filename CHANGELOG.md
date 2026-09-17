@@ -23,6 +23,12 @@ npm run deploy                        # stamp the commit, then ship
 
 ### Added
 
+- **Claude Max engine (`ENGINE=claude`).** `src/lib/engine-claude.ts` clones the
+  repo, runs `@anthropic-ai/claude-agent-sdk` `query()`, refuses
+  `ANTHROPIC_API_KEY`, and stops on Max `credits_required` instead of buying
+  extra usage. `npm run build-app -- --engine claude`. Slack uses Max only for
+  `SLACK_CLAUDE_USER_IDS`; everyone else stays on Cursor.
+
 - **Jobs HTTP API on the Slack process.** `GET /health`, `GET /v1/projects`,
   `POST /v1/jobs` (same mention CLI, Slack progress), `POST /v1/mentions`
   (Dispatcher posts `@CloudAgents …`). Slack does not fire `app_mention` for

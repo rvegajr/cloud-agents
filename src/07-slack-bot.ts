@@ -3,7 +3,7 @@
  *
  * Socket Mode (no public URL) plus an optional HTTP control plane on
  * JOBS_API_PORT / PORT. The Slack thread is still the database: the first
- * reply contains `agent: bc-...`, and a later @mention in the same thread
+ * reply contains `agent: bc-...` or `agent: cc-...`, and a later @mention in the same thread
  * resumes that agent.
  *
  * A second Slack app (slack-dispatcher-manifest.json) can post mentions on
@@ -27,6 +27,7 @@ import {
 } from "./lib/slack-cli.js";
 import { formatVersion } from "./lib/version.js";
 import { selectModel } from "./lib/model.js";
+import { parseClaudeUserIds } from "./lib/engine-claude.js";
 import {
   isDriverBot,
   parseAllowlist,
@@ -65,6 +66,7 @@ const jobsToken = process.env.JOBS_API_TOKEN?.trim() || "";
 const maxConcurrent = Number(process.env.SLACK_MAX_CONCURRENT ?? "2") || 2;
 const cursorUserId = process.env.SLACK_CURSOR_USER_ID?.trim() || "";
 const githubToken = process.env.GITHUB_TOKEN?.trim() || "";
+const claudeUserIds = parseClaudeUserIds(process.env.SLACK_CLAUDE_USER_IDS);
 const docsUrl =
   process.env.SLACK_DOCS_URL?.trim() || "https://github.com/rvegajr/cloud-agents/blob/main/ARTICLE-SLACK.md";
 
@@ -156,6 +158,7 @@ try {
     docsUrl,
     lookupChannelName: async (_client, channel) => lookupChannelName(app.client, channel),
     store,
+    claudeUserIds,
   });
 
   type BoltClient = typeof app.client;
@@ -233,6 +236,11 @@ try {
   if (cursorUserId) console.log(`  mentions of Cursor's app (${cursorUserId}) get a pointer to ${botHandle}`);
   if (driverBotIds.length) console.log(`  dispatcher bots: ${driverBotIds.join(", ")}`);
   else console.log("  dispatcher bots: none (set SLACK_DRIVER_BOT_IDS to accept API-posted mentions)");
+  console.log(
+    claudeUserIds.length
+      ? `  Claude Max Slack users: ${claudeUserIds.join(", ")} (everyone else stays on Cursor)`
+      : "  Claude Max Slack: off (set SLACK_CLAUDE_USER_IDS to your U… id for the solo path)",
+  );
   console.log(
     githubToken
       ? "  PRs: marked ready for review when the verifier passes (GITHUB_TOKEN set)"

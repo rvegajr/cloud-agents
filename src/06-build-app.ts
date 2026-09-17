@@ -3,19 +3,14 @@
  *
  *   spec  ->  [ iterate: next milestone -> verify -> commit ]*  ->  finish
  *
- * One cloud agent, one conversation, one branch, one PR that grows with every
- * milestone. The loop in src/lib/build-loop.ts decides when to stop:
- *   - the finish gate reports complete            -> exit 0
- *   - a milestone is blocked on a human           -> exit 3, resume after you act
- *   - the same milestone stalls repeatedly        -> intervene once, then exit 4
- *   - iteration budget exhausted                  -> exit 4, resume to continue
- *
- * State is persisted to .runs/build-<agentId>.json after every turn, so a
- * killed process, a laptop lid, or a budget stop can all be resumed:
+ * One conversation, one branch, one PR that grows with every milestone.
+ * `--engine cursor` (default) uses a Cursor Cloud Agent. `--engine claude`
+ * clones locally and runs the Anthropic Agent SDK against Max.
  *
  *   npm run build-app -- --idea-file ideas/example-snippet-vault.md --repo https://github.com/you/snippet-vault
- *   npm run build-app -- --idea "A CLI that ..." --create-repo my-cli
+ *   npm run build-app -- --engine claude --idea-file ideas/example-snippet-vault.md --repo https://github.com/you/snippet-vault
  *   npm run build-app -- --resume bc-xxxx
+ *   npm run build-app -- --resume cc-xxxx
  */
 import { Agent } from "@cursor/sdk";
 import { execFileSync } from "node:child_process";
@@ -25,6 +20,7 @@ import { loadEnv, env, flags } from "./lib/env.js";
 import { selectModel } from "./lib/model.js";
 import { resolveApiKey } from "./lib/auth.js";
 import { runBuildLoop, type LoopState, type SendFn } from "./lib/build-loop.js";
+import { createClaudeHandle, isClaudeAgentId, MaxExhausted, parseEngine } from "./lib/engine-claude.js";
 import { reportStartupFailure } from "./lib/report.js";
 import { printStream } from "./lib/stream.js";
 
@@ -43,10 +39,19 @@ interface BuildRecord {
   idea: string;
   state: LoopState;
   updatedAt: string;
+  engine?: "cursor" | "claude";
+  workspace?: string;
+  sessionId?: string;
+  apiEquivalentUsd?: number;
 }
 
 function stateFile(agentId: string) {
   return resolve(stateDir, `build-${agentId}.json`);
+}
+
+function save(record: BuildRecord) {
+  record.updatedAt = new Date().toISOString();
+  writeFileSync(stateFile(record.agentId), JSON.stringify(record, null, 2));
 }
 
 function createRepo(name: string): string {
@@ -63,62 +68,106 @@ function banner(title: string) {
 }
 
 try {
-  const apiKey = await resolveApiKey();
-  const model = selectModel();
-
+  const engine = parseEngine(args.engine);
   let record: BuildRecord;
-  let agent;
+  let send: SendFn;
+  let close: () => Promise<void> = async () => {};
 
   if (args.resume) {
     const file = stateFile(args.resume);
     if (!existsSync(file)) throw new Error(`No saved state at ${file}. Resume needs a build started by this script.`);
     record = JSON.parse(readFileSync(file, "utf8")) as BuildRecord;
     if (record.state.phase === "stopped") record.state.phase = record.state.history.length ? "iterate" : "spec";
-    agent = await Agent.resume(record.agentId, { apiKey });
-    console.log(`resuming ${record.agentId} at phase=${record.state.phase} iteration=${record.state.iteration}`);
+    const resumeEngine = record.engine ?? (isClaudeAgentId(record.agentId) ? "claude" : "cursor");
+    console.log(`resuming ${record.agentId} engine=${resumeEngine} phase=${record.state.phase} iteration=${record.state.iteration}`);
+    if (resumeEngine === "claude") {
+      const handle = await createClaudeHandle({
+        repo: record.repo,
+        ref: record.ref,
+        agentId: record.agentId,
+        autoCreatePR: true,
+      });
+      send = handle.send;
+    } else {
+      const apiKey = await resolveApiKey();
+      const agent = await Agent.resume(record.agentId, { apiKey });
+      close = async () => {
+        await agent.close();
+      };
+      send = async (prompt, opts) => {
+        const run = await agent.send(prompt, opts?.mode ? { mode: opts.mode } : {});
+        console.log(`run: ${run.id}`);
+        await printStream(run, { text: true, tools: true });
+        const r = await run.wait();
+        const pr = r.git?.branches.find((b) => b.prUrl)?.prUrl;
+        if (pr) console.log(`PR: ${pr}`);
+        return { status: r.status, result: r.result, runId: run.id };
+      };
+    }
   } else {
     const idea = args.idea ?? (args["idea-file"] ? readFileSync(resolve(process.cwd(), args["idea-file"]), "utf8") : undefined);
     if (!idea?.trim()) {
-      console.error('usage: npm run build-app -- (--idea "..." | --idea-file path) (--repo url | --create-repo name) [--max-iterations N]');
+      console.error(
+        'usage: npm run build-app -- [--engine cursor|claude] (--idea "..." | --idea-file path) (--repo url | --create-repo name) [--max-iterations N]',
+      );
       process.exit(1);
     }
     const repo = args.repo ?? (args["create-repo"] ? createRepo(args["create-repo"]) : env("TARGET_REPO"));
     const ref = args.ref ?? process.env.TARGET_REF ?? "main";
 
-    agent = await Agent.create({
-      apiKey,
-      model,
-      cloud: {
-        repos: [{ url: repo, startingRef: ref }],
-        autoCreatePR: true,
-        skipReviewerRequest: true,
-        metadata: { kit: "cloud-agents", brief: "build-app", idea: idea.trim().slice(0, 60) },
-      },
-    });
-    record = {
-      agentId: agent.agentId,
-      repo,
-      ref,
-      idea: idea.trim(),
-      state: { phase: "spec", iteration: 0, runIds: [], history: [] },
-      updatedAt: new Date().toISOString(),
-    };
-    writeFileSync(stateFile(agent.agentId), JSON.stringify(record, null, 2));
-    console.log(`agent: ${agent.agentId}`);
-    console.log(`repo:  ${repo}@${ref}`);
-    console.log(`state: ${stateFile(agent.agentId)}`);
+    if (engine === "claude") {
+      const handle = await createClaudeHandle({ repo, ref, autoCreatePR: true });
+      record = {
+        agentId: handle.agentId,
+        repo,
+        ref,
+        idea: idea.trim(),
+        engine: "claude",
+        state: { phase: "spec", iteration: 0, runIds: [], history: [] },
+        updatedAt: new Date().toISOString(),
+      };
+      save(record);
+      send = handle.send;
+    } else {
+      const apiKey = await resolveApiKey();
+      const agent = await Agent.create({
+        apiKey,
+        model: selectModel(),
+        cloud: {
+          repos: [{ url: repo, startingRef: ref }],
+          autoCreatePR: true,
+          skipReviewerRequest: true,
+          metadata: { kit: "cloud-agents", brief: "build-app", idea: idea.trim().slice(0, 60) },
+        },
+      });
+      close = async () => {
+        await agent.close();
+      };
+      record = {
+        agentId: agent.agentId,
+        repo,
+        ref,
+        idea: idea.trim(),
+        engine: "cursor",
+        state: { phase: "spec", iteration: 0, runIds: [], history: [] },
+        updatedAt: new Date().toISOString(),
+      };
+      save(record);
+      send = async (prompt, opts) => {
+        const run = await agent.send(prompt, opts?.mode ? { mode: opts.mode } : {});
+        console.log(`run: ${run.id}`);
+        await printStream(run, { text: true, tools: true });
+        const r = await run.wait();
+        const pr = r.git?.branches.find((b) => b.prUrl)?.prUrl;
+        if (pr) console.log(`PR: ${pr}`);
+        return { status: r.status, result: r.result, runId: run.id };
+      };
+    }
+    console.log(`agent:  ${record.agentId}`);
+    console.log(`engine: ${record.engine ?? engine}`);
+    console.log(`repo:   ${repo}@${ref}`);
+    console.log(`state:  ${stateFile(record.agentId)}`);
   }
-
-  const a = agent;
-  const send: SendFn = async (prompt, opts) => {
-    const run = await a.send(prompt, opts?.mode ? { mode: opts.mode } : {});
-    console.log(`run: ${run.id}`);
-    await printStream(run, { text: true, tools: true });
-    const r = await run.wait();
-    const pr = r.git?.branches.find((b) => b.prUrl)?.prUrl;
-    if (pr) console.log(`PR: ${pr}`);
-    return { status: r.status, result: r.result, runId: run.id };
-  };
 
   const final = await runBuildLoop(
     send,
@@ -132,8 +181,7 @@ try {
       log: (line) => banner(line),
       onState: (state) => {
         record.state = state;
-        record.updatedAt = new Date().toISOString();
-        writeFileSync(stateFile(record.agentId), JSON.stringify(record, null, 2));
+        save(record);
       },
     },
     record.state,
@@ -156,10 +204,16 @@ try {
     console.log(`\nContinue with: npm run build-app -- --resume ${record.agentId} --max-iterations ${maxIterations + 6}`);
   }
 
-  await a.close();
+  await close();
   const code =
     final.stopReason === "complete" ? 0 : final.stopReason === "blocked" ? 3 : final.stopReason === "run-failed" ? 2 : 4;
   process.exit(code);
 } catch (err) {
+  if (err instanceof MaxExhausted) {
+    console.error(err.message);
+    if (err.resetsAt) console.error(`resets at ${new Date(err.resetsAt * 1000).toISOString()}`);
+    console.error("Resume on Cursor: npm run build-app -- --engine cursor --idea-file <same idea>");
+    process.exit(4);
+  }
   process.exit(reportStartupFailure(err));
 }

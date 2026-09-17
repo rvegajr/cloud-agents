@@ -29,6 +29,7 @@ import { printStream } from "./stream.js";
 import type { JobRecord, JobStore, JobsBody } from "./jobs-http.js";
 import { mentionText } from "./jobs-http.js";
 import { selectModel } from "./model.js";
+import { createClaudeHandle, slackUsesClaude } from "./engine-claude.js";
 
 export interface SlackClient {
   chat: {
@@ -71,6 +72,8 @@ export interface SlackJobsConfig {
   docsUrl: string;
   lookupChannelName: (client: SlackClient, channel: string) => Promise<string | undefined>;
   store: JobStore;
+  /** Slack user ids allowed to spend the owner's Claude Max plan. Empty = Cursor for everyone. */
+  claudeUserIds: string[];
 }
 
 function wrap(agent: SDKAgent): AgentHandle {
@@ -261,9 +264,34 @@ export function createSlackJobs(cfg: SlackJobsConfig) {
         threadMessages = replies.messages ?? [];
       }
       const existingId = findAgentId(threadMessages);
+      const enginePick = slackUsesClaude({
+        user: args.user,
+        allowlist: cfg.claudeUserIds,
+        existingId,
+      });
+      if (enginePick === "denied") {
+        await post(
+          "This thread is on Claude Max, which only the allowlisted Slack user may continue. Anyone else: start a new thread (it will use Cursor).",
+        );
+        if (jobId) cfg.store.patch(jobId, { status: "failed", error: "claude max is solo-only" });
+        await react("hourglass_flowing_sand", "remove");
+        return;
+      }
+      if (enginePick === "claude") console.log(`engine=claude user=${args.user ?? ""}`);
 
       const runtime: JobRuntime = {
         create: async ({ repo: r, ref: startingRef, autoCreatePR, model: modelId }) => {
+          if (enginePick === "claude") {
+            const handle = await createClaudeHandle({
+              repo: r,
+              ref: startingRef,
+              autoCreatePR: autoCreatePR ?? cli.options.autopr ?? true,
+              model: modelId ?? cli.options.model,
+            });
+            console.log(`created ${handle.agentId} (claude) for ${r}@${startingRef} project=${cli.project?.name ?? "(channel)"}`);
+            if (jobId) cfg.store.patch(jobId, { agentId: handle.agentId });
+            return handle;
+          }
           const agent = await Agent.create({
             ...cfg.creds,
             model: selectModel(modelId ?? cli.options.model ?? cfg.defaultModel.id),
@@ -290,6 +318,18 @@ export function createSlackJobs(cfg: SlackJobsConfig) {
           return wrap(agent);
         },
         resume: async (agentId) => {
+          if (enginePick === "claude") {
+            const handle = await createClaudeHandle({
+              repo,
+              ref,
+              agentId,
+              autoCreatePR: cli.options.autopr ?? true,
+              model: cli.options.model,
+            });
+            console.log(`resumed ${agentId} (claude)`);
+            if (jobId) cfg.store.patch(jobId, { agentId });
+            return handle;
+          }
           const agent = await Agent.resume(agentId, cfg.creds);
           closer = async () => {
             await agent.close();
