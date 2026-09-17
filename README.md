@@ -186,7 +186,13 @@ echo '{"command":"git push --force origin x"}' | node target-repo-kit/.cursor/ho
 npm run build-app -- --idea-file ideas/example-snippet-vault.md --repo https://github.com/you/snippet-vault
 npm run build-app -- --idea "A CLI that turns a CSV into a SQLite db" --create-repo csv2sqlite
 npm run build-app -- --resume bc-xxxx                       # continue after a stop
+npm run build-app -- --engine claude --idea-file ideas/example-snippet-vault.md --create-repo sv-claude
+npm run build-app -- --resume cc-xxxx                       # Claude handle from the previous run
 ```
+
+`--engine cursor` (default) is a Cursor Cloud Agent: a hosted VM, a `bc-…` id, billed per token. `--engine claude` clones onto **this machine** (or `WORK_ROOT`), runs the Anthropic Agent SDK against your Max plan, and opens a `claude/…` draft PR. Resume ids are `cc-…`. Doctor fails if `ANTHROPIC_API_KEY` is set or if `claude auth status` is anything but `apiKeySource=none`.
+
+Slack is independent of `ENGINE`. Only Slack member ids in `SLACK_CLAUDE_USER_IDS` spend Max; everyone else stays on Cursor. Leave that variable empty on a shared bot. Details: `ARTICLE-CLAUDE-MAX.md`.
 
 This is steps 3 and 4 turned into a loop that runs until the app is done:
 
@@ -274,7 +280,7 @@ A channel whose name starts with a project (`#api-bugs`, `#web-agent-test`,
 any suffix) selects that project, so you can omit the name.
 Paste a jam.dev URL or a sentence; the bot fetches the recording, triages it
 into a brief, runs plan → implement → verify, and posts the PR. A later
-@mention in that thread resumes the same `bc-` agent.
+@mention in that thread resumes the same `bc-` or `cc-` agent.
 
 **The bot cannot deploy.** It holds no Vercel or Railway credential, and there is
 no `deploy` verb: merging the PR is the only trigger. The deploy card you see in

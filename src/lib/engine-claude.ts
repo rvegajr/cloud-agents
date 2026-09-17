@@ -44,6 +44,7 @@ export function claudeAllowedForSlackUser(user: string | undefined, allowlist: s
 /**
  * Slack uses Claude only when the mentioning user is allowlisted.
  * A `cc-…` thread stays on Claude, but only that allowlist may continue it.
+ * A `bc-…` thread stays on Cursor even if the mentioner is allowlisted.
  */
 export function slackUsesClaude(opts: {
   user: string | undefined;
@@ -51,8 +52,38 @@ export function slackUsesClaude(opts: {
   existingId?: string;
 }): "claude" | "cursor" | "denied" {
   const allowed = claudeAllowedForSlackUser(opts.user, opts.allowlist);
-  if (opts.existingId && isClaudeAgentId(opts.existingId)) return allowed ? "claude" : "denied";
+  if (opts.existingId) {
+    if (isClaudeAgentId(opts.existingId)) return allowed ? "claude" : "denied";
+    return "cursor";
+  }
   return allowed ? "claude" : "cursor";
+}
+
+/** `claude auth status` JSON: null / missing / "none" means Max (or a login) is paying. */
+export function claudeApiKeySourceFromAuth(raw: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) return "unparseable";
+    try {
+      parsed = JSON.parse(m[0]);
+    } catch {
+      return "unparseable";
+    }
+  }
+  if (!parsed || typeof parsed !== "object") return "unparseable";
+  const src = (parsed as { apiKeySource?: unknown }).apiKeySource;
+  if (src == null || src === "" || src === "none") return "none";
+  return String(src);
+}
+
+/** True when a shell-profile line would export ANTHROPIC_API_KEY (comments ignored). */
+export function profileLineExportsAnthropicKey(line: string): boolean {
+  const t = line.trim();
+  if (!t || t.startsWith("#")) return false;
+  return /(?:^|[\s;])(?:export\s+)?ANTHROPIC_API_KEY=/.test(t);
 }
 
 /** Subprocess env: model credential only. No Slack, GitHub, Jam, or API keys. */

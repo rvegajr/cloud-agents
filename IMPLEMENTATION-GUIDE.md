@@ -156,9 +156,16 @@ npm run status         # account, models, connected repos
 
 Set in `.env`: `CURSOR_MODEL` (default `composer-2.5`), `TARGET_REPO`,
 `TARGET_REF` — the *integration* branch, which in many repos is `develop`, not
-`main`.
+`main`. Leave `ENGINE` at `cursor` unless you are running the build loop on
+Claude Max on a box you own (`ARTICLE-CLAUDE-MAX.md`). Do not set
+`SLACK_CLAUDE_USER_IDS` on a shared Slack bot.
 
 **Verify:** `npm run doctor -- --phase A`
+
+Phase A also checks that `ANTHROPIC_API_KEY` is unset, that the usual shell
+profiles do not export it, and that `claude auth status` reports
+`apiKeySource=none`. Those three are how this kit keeps Max from silently
+becoming API billing.
 
 **Human gate:** connecting GitHub to Cursor. Go to
 [cursor.com/agents](https://cursor.com/agents), connect GitHub, grant the target

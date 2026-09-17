@@ -4,10 +4,12 @@ import {
   MaxExhausted,
   authenticatedCloneUrl,
   claudeAllowedForSlackUser,
+  claudeApiKeySourceFromAuth,
   isClaudeAgentId,
   makeClaudeSend,
   parseClaudeUserIds,
   parseEngine,
+  profileLineExportsAnthropicKey,
   publicGithubUrl,
   scrubbedEnv,
   slackUsesClaude,
@@ -46,7 +48,20 @@ test("slackUsesClaude denies continuing a Max thread for everyone else", () => {
   assert.equal(slackUsesClaude({ user: "U0ACEL", allowlist: ["U0ME"] }), "cursor");
   assert.equal(slackUsesClaude({ user: "U0ACEL", allowlist: ["U0ME"], existingId: "cc-1" }), "denied");
   assert.equal(slackUsesClaude({ user: "U0ME", allowlist: ["U0ME"], existingId: "cc-1" }), "claude");
-  assert.equal(slackUsesClaude({ user: "U0ME", allowlist: ["U0ME"], existingId: "bc-1" }), "claude");
+  assert.equal(slackUsesClaude({ user: "U0ME", allowlist: ["U0ME"], existingId: "bc-1" }), "cursor");
+});
+
+test("claudeApiKeySourceFromAuth treats null and none as Max", () => {
+  assert.equal(claudeApiKeySourceFromAuth('{"apiKeySource":null}'), "none");
+  assert.equal(claudeApiKeySourceFromAuth('{"apiKeySource":"none"}'), "none");
+  assert.equal(claudeApiKeySourceFromAuth('{"apiKeySource":"ANTHROPIC_API_KEY"}'), "ANTHROPIC_API_KEY");
+  assert.equal(claudeApiKeySourceFromAuth("not json"), "unparseable");
+});
+
+test("profileLineExportsAnthropicKey ignores comments", () => {
+  assert.equal(profileLineExportsAnthropicKey("export ANTHROPIC_API_KEY=dummy-anthropic-key"), true);
+  assert.equal(profileLineExportsAnthropicKey("# export ANTHROPIC_API_KEY=dummy-anthropic-key"), false);
+  assert.equal(profileLineExportsAnthropicKey("export GEMINI_API_KEY=x"), false);
 });
 
 test("clone URL never leaves the token in the public origin", () => {
@@ -58,9 +73,9 @@ test("clone URL never leaves the token in the public origin", () => {
 
 test("scrubbedEnv drops API keys and Slack tokens", () => {
   const saved = { ...process.env };
-  process.env.ANTHROPIC_API_KEY = "sk-ant-api03-secret";
-  process.env.SLACK_BOT_TOKEN = "xoxb-secret";
-  process.env.GITHUB_TOKEN = "ghp-secret";
+  process.env.ANTHROPIC_API_KEY = "dummy-anthropic-key";
+  process.env.SLACK_BOT_TOKEN = "dummy-slack-bot-token";
+  process.env.GITHUB_TOKEN = "dummy-github-token";
   process.env.CLAUDE_CODE_OAUTH_TOKEN = "oauth-ok";
   try {
     const env = scrubbedEnv();

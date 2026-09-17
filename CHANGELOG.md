@@ -27,7 +27,9 @@ npm run deploy                        # stamp the commit, then ship
   repo, runs `@anthropic-ai/claude-agent-sdk` `query()`, refuses
   `ANTHROPIC_API_KEY`, and stops on Max `credits_required` instead of buying
   extra usage. `npm run build-app -- --engine claude`. Slack uses Max only for
-  `SLACK_CLAUDE_USER_IDS`; everyone else stays on Cursor.
+  `SLACK_CLAUDE_USER_IDS`; everyone else stays on Cursor. A `bc-…` Slack thread
+  stays on Cursor even if the mentioner is allowlisted. `npm run doctor` runs
+  `claude auth status` and fails unless `apiKeySource` is `none`.
 
 - **Jobs HTTP API on the Slack process.** `GET /health`, `GET /v1/projects`,
   `POST /v1/jobs` (same mention CLI, Slack progress), `POST /v1/mentions`

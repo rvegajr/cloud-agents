@@ -59,7 +59,7 @@ next thing.
 hit, keep going and pay API rates for the overage. It can auto-recharge. This is
 the $1,545.80 stream. It is a feature, and it was on.
 
-**Console API key.** `sk-ant-api03-…` from platform.claude.com. Pure
+**Console API key.** A `sk-ant-api03` key from platform.claude.com. Pure
 pay-as-you-go, billed to a credit balance that auto-recharges when it runs low.
 This is the $2,501.74 stream. A Max plan does nothing for an API key, and an
 API key does nothing for a Max plan; they are two accounts that happen to share
@@ -149,14 +149,14 @@ is against the terms.
 
 **Direction one: Claude Code → LiteLLM → Anthropic with an API key.** This is
 what `ANTHROPIC_BASE_URL=https://llm.noctusoft.com` does. LiteLLM authenticates
-upstream with the `sk-ant-api03` key in its config. Every token bills the API
+upstream with a Console API key in its config. Every token bills the API
 account. You have taken the flat-rate tool and routed it through the metered
 door. This is a strictly worse version of the `.zshrc` mistake, with a proxy
 in the middle.
 
 **Direction two: Claude Code → LiteLLM → Anthropic forwarding the Max OAuth
 bearer.** LiteLLM documents this (`forward_llm_provider_auth_headers: true`;
-the proxy pins the `sk-ant-oat…` bearer to the Anthropic provider and forwards
+the proxy pins an OAuth bearer to the Anthropic provider and forwards
 it). It works mechanically. Three reasons not to:
 
 1. It buys nothing. Max is not per-token, so LiteLLM's budgets, spend logs and

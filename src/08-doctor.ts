@@ -23,7 +23,12 @@ import { loadEnv, flags } from "./lib/env.js";
 import { resolveApiKey } from "./lib/auth.js";
 import { parseProjects } from "./lib/slack-cli.js";
 import { selectModel } from "./lib/model.js";
-import { parseClaudeUserIds, parseEngine } from "./lib/engine-claude.js";
+import {
+  claudeApiKeySourceFromAuth,
+  parseClaudeUserIds,
+  parseEngine,
+  profileLineExportsAnthropicKey,
+} from "./lib/engine-claude.js";
 import { parseAllowlist, parseBotIds, parseChannelRepos } from "./lib/slack-thread.js";
 import { formatVersion, versionInfo } from "./lib/version.js";
 import {
@@ -161,8 +166,10 @@ async function checkCursor(): Promise<void> {
   }
 }
 
-function checkClaudeEngine(): void {
+async function checkClaudeEngine(): Promise<void> {
   const engine = parseEngine();
+  const users = parseClaudeUserIds(process.env.SLACK_CLAUDE_USER_IDS);
+  const wantsClaude = engine === "claude" || users.length > 0;
   add("A", "claude", "ENGINE", engine === "claude" ? "pass" : "skip", `CLI default ENGINE=${engine}`);
   if (envVar("ANTHROPIC_API_KEY")) {
     add(
@@ -176,14 +183,78 @@ function checkClaudeEngine(): void {
   } else {
     add("A", "claude", "ANTHROPIC_API_KEY", "pass", "unset");
   }
-  const users = parseClaudeUserIds(process.env.SLACK_CLAUDE_USER_IDS);
+
+  const home = homedir();
+  const profiles = [".zshrc", ".zprofile", ".zshenv", ".bashrc", ".bash_profile", ".profile"];
+  const exporting: string[] = [];
+  for (const rel of profiles) {
+    const path = join(home, rel);
+    if (!existsSync(path)) continue;
+    const body = readFileSync(path, "utf8");
+    if (body.split(/\r?\n/).some(profileLineExportsAnthropicKey)) exporting.push(`~/${rel}`);
+  }
+  if (exporting.length) {
+    add(
+      "A",
+      "claude",
+      "shell profile",
+      "fail",
+      `${exporting.join(", ")} export ANTHROPIC_API_KEY (interactive claude bills the API)`,
+      "comment or remove that export; keep product keys in project .env files",
+    );
+  } else {
+    add("A", "claude", "shell profile", "pass", "no ANTHROPIC_API_KEY export in the usual profile files");
+  }
+
   if (users.length) add("A", "claude", "Slack Max users", "pass", users.join(", "));
   else add("A", "claude", "Slack Max users", "skip", "SLACK_CLAUDE_USER_IDS empty — Slack stays on Cursor");
   if (envVar("CLAUDE_CODE_OAUTH_TOKEN")) add("A", "claude", "oauth token", "pass", "CLAUDE_CODE_OAUTH_TOKEN set");
   else if (engine === "claude") {
-    add("A", "claude", "oauth token", "warn", "ENGINE=claude but no CLAUDE_CODE_OAUTH_TOKEN", "run `claude setup-token` on this box and put the token in .env");
+    add(
+      "A",
+      "claude",
+      "oauth token",
+      "warn",
+      "ENGINE=claude but no CLAUDE_CODE_OAUTH_TOKEN",
+      "run `claude setup-token` on this box and put the token in .env",
+    );
   } else {
     add("A", "claude", "oauth token", "skip", "not required unless ENGINE=claude or SLACK_CLAUDE_USER_IDS is set");
+  }
+
+  const auth = await run("claude", ["auth", "status"], 20_000);
+  if (auth.out.startsWith("cannot spawn") || (!auth.ok && !auth.out)) {
+    add(
+      "A",
+      "claude",
+      "claude auth status",
+      wantsClaude ? "fail" : "skip",
+      "claude CLI not on PATH",
+      "install Claude Code and run `claude auth login`; ENGINE=claude needs it",
+    );
+    return;
+  }
+  const source = claudeApiKeySourceFromAuth(auth.out);
+  if (source === "none") {
+    add("A", "claude", "claude auth status", "pass", "apiKeySource=none (Max / subscription, not the API)");
+  } else if (source === "unparseable") {
+    add(
+      "A",
+      "claude",
+      "claude auth status",
+      wantsClaude ? "fail" : "warn",
+      "could not parse `claude auth status`",
+      "run `claude auth status` yourself; you want apiKeySource none",
+    );
+  } else {
+    add(
+      "A",
+      "claude",
+      "claude auth status",
+      "fail",
+      `apiKeySource=${source}; this bills the API, not Max`,
+      "unset ANTHROPIC_API_KEY, open a new shell, run `claude auth status` until apiKeySource is none",
+    );
   }
 }
 
@@ -647,7 +718,7 @@ const gates = [
 
 if (want("A")) await checkHygiene();
 if (want("A")) await checkCursor();
-if (want("A")) checkClaudeEngine();
+if (want("A")) await checkClaudeEngine();
 if (want("B")) {
   await checkGit();
   checkTargetRepoKit();
