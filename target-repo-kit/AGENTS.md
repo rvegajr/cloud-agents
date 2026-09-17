@@ -43,4 +43,4 @@ One paragraph. What it does, who uses it, what "working" looks like.
 2. New behavior has a test.
 3. User-facing behavior is documented (README or docs/).
 4. Working tree is clean and all commits have clear messages.
-5. Last lines of the job are COST: Cursor billed on Cursor work, Claude Max API-eq on Claude/hybrid work, never one combined dollar. If usage is missing: `COST this run: unknown`.
+5. Last lines of the job are COST on that AI's own meter (never one combined dollar). If usage is missing: `COST this run: unknown`.

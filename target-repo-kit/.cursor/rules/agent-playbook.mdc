@@ -15,4 +15,4 @@ Never: Opus/GPT as the Cursor model, Fast on, `ANTHROPIC_API_KEY` in the shell, 
 
 ## Close
 
-Last lines of every job are COST. Cursor billed and Claude Max stay on separate meters. If cents are unknown, write `COST this run: unknown`.
+Last lines of every job are COST. Every AI provider is its own meter. If cents are unknown, write `COST this run: unknown`.

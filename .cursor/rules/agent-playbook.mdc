@@ -22,8 +22,8 @@ This repo **is** the factory (`npm run build-farm`, `build-app`, Slack bot).
 
 ## Close (last lines of every job)
 
-Write COST last. Cursor billed and Claude Max stay on **separate** meters — never add them into one number. `npm run cost-board`. Never omit it.
+Write COST last. Every AI provider is its own meter — never add them into one number. Log `COST running` as spend arrives; close with the board. `npm run cost-board`. Never omit it.
 
-- Cursor job (farm, Slack, Composer VM): **Cursor billed** from `chargedCents` (the invoice).
-- Claude Code / Max / hybrid job: **Claude Max API-eq** (not a Cursor charge). Track it anyway.
-- If usage is missing: `COST this run: unknown` on that meter.
+- Whatever engine is running, record it (`cursor:billed`, `claude:api-eq`, `local:local`, or a new slug). Do not fold an unknown AI into Cursor.
+- Billed meters use the invoice (`chargedCents`). API-eq / local / tracked still get a line.
+- Missing usage: `COST this run: unknown` on that meter.

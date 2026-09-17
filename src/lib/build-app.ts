@@ -21,7 +21,7 @@ import {
   type CursorAppGrant,
 } from "./github.js";
 import { printStream, type StreamOptions } from "./stream.js";
-import { centsForMeter, closeJobCost, meterForEngine, projectFromRepo, type CostMeter } from "./cost-ledger.js";
+import { centsForMeter, closeJobCost, formatRunningCost, meterForEngine, projectFromRepo, type CostMeterId } from "./cost-ledger.js";
 
 export interface BuildRecord {
   agentId: string;
@@ -157,7 +157,7 @@ function cursorSend(agent: SDKAgent, stream: StreamOptions | undefined, log: (li
   };
 }
 
-async function usageCents(agent: SDKAgent, meter: CostMeter): Promise<number | undefined> {
+async function usageCents(agent: SDKAgent, meter: CostMeterId): Promise<number | undefined> {
   try {
     const u = await agent.getUsage();
     return centsForMeter(meter, { chargedCents: u.cost?.chargedCents, rawCostCents: u.cost?.rawCostCents });
@@ -192,10 +192,22 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
   let close: () => Promise<void> = async () => {};
   let usage: () => Promise<number | undefined> = async () => undefined;
   let lastPr: string | undefined;
+  let meter = meterForEngine(engine);
+  let lastRunningCents: number | undefined;
 
   const wrapSend = (inner: SendFn): SendFn => async (prompt, o) => {
     const turn = await inner(prompt, o);
     if (turn.prUrl) lastPr = turn.prUrl;
+    try {
+      const cents = await usage();
+      if (cents != null && cents !== lastRunningCents) {
+        const line = formatRunningCost(cents, meter);
+        if (line) log(line);
+        lastRunningCents = cents;
+      }
+    } catch {
+      /* keep going; COST close still runs at the end */
+    }
     return turn;
   };
 
@@ -208,6 +220,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
         ? engineOfRecord(record.agentId, record.engine ?? "claude")
         : "cursor";
       log(`resuming ${record.agentId} engine=${resumeEngine} phase=${record.state.phase} iteration=${record.state.iteration}`);
+      meter = meterForEngine(resumeEngine);
       if (isLocalWorkspaceEngine(resumeEngine)) {
         const handle = await createEngineHandle(resumeEngine, {
           repo: record.repo,
@@ -218,7 +231,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
         send = wrapSend(handle.send);
         usage = async () => {
           const u = await handle.getUsage?.();
-          return centsForMeter(meterForEngine(resumeEngine), u ?? {});
+          return centsForMeter(meter, u ?? {});
         };
       } else {
         const apiKey = opts.apiKey ?? (await resolveApiKey());
@@ -227,7 +240,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
           await agent.close();
         };
         send = wrapSend(cursorSend(agent, opts.stream, log));
-        usage = () => usageCents(agent, "cursor-charged");
+        usage = () => usageCents(agent, meter);
       }
     } else {
       const idea =
@@ -277,10 +290,11 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
           updatedAt: new Date().toISOString(),
         };
         saveBuildRecord(record, stateDir);
+        meter = meterForEngine(engine);
         send = wrapSend(handle.send);
         usage = async () => {
           const u = await handle.getUsage?.();
-          return centsForMeter(meterForEngine(engine), u ?? {});
+          return centsForMeter(meter, u ?? {});
         };
       } else {
         const apiKey = opts.apiKey ?? (await resolveApiKey());
@@ -307,8 +321,9 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
           updatedAt: new Date().toISOString(),
         };
         saveBuildRecord(record, stateDir);
+        meter = meterForEngine(record.engine ?? engine);
         send = wrapSend(cursorSend(agent, opts.stream, log));
-        usage = () => usageCents(agent, "cursor-charged");
+        usage = () => usageCents(agent, meter);
       }
       log(`agent:  ${record.agentId}`);
       log(`engine: ${record.engine ?? engine}`);
@@ -345,7 +360,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
         stateDir,
         project: projectFromRepo(record.repo),
         cents: chargedCents,
-        meter: meterForEngine(record.engine ?? engine),
+        meter,
         source: opts.costSource ?? "build-app",
         agentId: record.agentId,
         repo: record.repo,

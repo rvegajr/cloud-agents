@@ -18,8 +18,7 @@ Kit for efficient generation. Factory commands live in this repo.
 
 ## Close
 
-Last lines of every job are COST. Cursor billed and Claude Max stay on separate meters — never one combined dollar figure. `npm run cost-board`. Do not end a report without it.
+Last lines of every job are COST. Every AI provider is its own meter — never one combined dollar. Log running cost as spend arrives. `npm run cost-board`. Do not end a report without it.
 
-- Cursor (farm, Slack, Composer): the invoice (`chargedCents`).
-- Claude Code / Max / hybrid: Claude API-eq, not a Cursor charge. Track it anyway.
+- Record whichever engine is running. Do not fold an unknown AI into Cursor.
 - Missing usage: `COST this run: unknown`.

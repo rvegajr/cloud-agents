@@ -1,5 +1,5 @@
 /**
- * Print the factory cost board: Cursor billed vs Claude Max, by day and project.
+ * Print the factory cost board: each AI provider on its own meter, by day and project.
  *
  *   npm run cost-board
  */

@@ -8,7 +8,7 @@ import {
   type VerifyReport,
 } from "./pipeline.js";
 import { buildStateDir } from "./build-app.js";
-import { centsForMeter, closeJobCost, meterFromAgentId, meterLabel, projectFromRepo, usdFromCents } from "./cost-ledger.js";
+import { centsForMeter, closeJobCost, formatRunningCost, meterFromAgentId, meterLabel, projectFromRepo, usdFromCents } from "./cost-ledger.js";
 
 /**
  * Turn a Slack request into a cloud-agent job. Slack-agnostic aside from the
@@ -274,7 +274,19 @@ async function runAndReport(
   };
   const out = await runPipeline(handle.send, brief, {
     ref,
-    onPhase: (phase) => runtime.post(labels[phase] ?? phase),
+    onPhase: async (phase) => {
+      const meter = meterFromAgentId(handle.agentId);
+      let line = labels[phase] ?? phase;
+      if (handle.getUsage) {
+        try {
+          const running = formatRunningCost(centsForMeter(meter, await handle.getUsage()), meter);
+          if (running) line = `${line}\n${running}`;
+        } catch {
+          /* still post the phase */
+        }
+      }
+      await runtime.post(line);
+    },
   });
 
   if (out.status === "failed") {

@@ -2,45 +2,60 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 /**
- * Append-only factory ledger. Every job's last written lines are a COST close
- * from this file. Cursor billed dollars and Claude Max API-eq never share a
- * single number — two meters, always tracked.
+ * Append-only factory ledger. COST is AI-agnostic: each provider is its own
+ * meter (`cursor:billed`, `claude:api-eq`, `local:local`, or any future slug).
+ * Meters are never summed into one dollar figure.
  */
 
-export type CostMeter = "cursor-charged" | "claude-max" | "local";
+export type CostKind = "billed" | "api-eq" | "local" | "tracked";
+export type CostMeterId = `${string}:${CostKind}` | string;
+/** @deprecated use CostMeterId — kept so callers type-check */
+export type CostMeter = CostMeterId;
+
+export interface ParsedMeter {
+  id: CostMeterId;
+  provider: string;
+  kind: CostKind;
+}
 
 export interface CostEntry {
   at: string;
   day: string;
   project: string;
-  meter: CostMeter;
+  meter: CostMeterId;
   cents: number;
   source: "build-app" | "farm" | "slack" | "pipeline";
   agentId?: string;
   repo?: string;
 }
 
+export type MeterSplit = Record<string, number>;
+
 export interface CostClose {
   thisRunCents: number | null;
-  thisRunMeter: CostMeter;
+  thisRunMeter: CostMeterId;
   project: string;
   projectRuns: number;
-  projectCursorCents: number;
-  projectClaudeCents: number;
-  projectLocalCents: number;
-  todayCursorCents: number;
-  todayClaudeCents: number;
-  todayLocalCents: number;
   todayProjects: number;
-  last7CursorCents: number;
-  last7ClaudeCents: number;
-  last7LocalCents: number;
   last7DaysWithData: number;
-  monthOutlookCursorCents: number;
-  monthOutlookClaudeCents: number;
+  projectByMeter: MeterSplit;
+  todayByMeter: MeterSplit;
+  last7ByMeter: MeterSplit;
+  outlookByMeter: MeterSplit;
 }
 
 const TZ = "America/Chicago";
+
+const ALIASES: Record<string, CostMeterId> = {
+  "cursor-charged": "cursor:billed",
+  cursor: "cursor:billed",
+  "claude-max": "claude:api-eq",
+  "max-api-eq": "claude:api-eq",
+  claude: "claude:api-eq",
+  local: "local:local",
+};
+
+const KIND_RANK: Record<CostKind, number> = { billed: 0, "api-eq": 1, local: 2, tracked: 3 };
 
 export function calendarDay(at: Date = new Date(), timeZone = TZ): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -65,29 +80,58 @@ export function defaultLedgerPath(stateDir: string): string {
   return resolve(stateDir, "cost-ledger.jsonl");
 }
 
-export function normalizeMeter(meter: string | undefined): CostMeter {
-  if (meter === "claude-max" || meter === "max-api-eq" || meter === "claude") return "claude-max";
-  if (meter === "local") return "local";
-  return "cursor-charged";
+function slug(raw: string): string {
+  return raw.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
 }
 
-export function meterForEngine(engine: string | undefined): CostMeter {
-  if (engine === "claude" || engine === "hybrid") return "claude-max";
-  if (engine === "local") return "local";
-  return "cursor-charged";
+function parseKind(raw: string): CostKind {
+  const k = raw.toLowerCase();
+  if (k === "billed" || k === "charged" || k === "invoice") return "billed";
+  if (k === "api-eq" || k === "max" || k === "equivalent") return "api-eq";
+  if (k === "local" || k === "ollama") return "local";
+  return "tracked";
 }
 
-export function meterFromAgentId(agentId: string | undefined): CostMeter {
-  return agentId?.startsWith("cc-") ? "claude-max" : "cursor-charged";
+export function parseMeter(raw: string | undefined): ParsedMeter {
+  const s = (raw ?? "").trim().toLowerCase();
+  const aliased = ALIASES[s];
+  const id = aliased ?? (() => {
+    if (!s) return "unknown:tracked";
+    const colon = s.indexOf(":");
+    if (colon > 0) return `${slug(s.slice(0, colon))}:${parseKind(s.slice(colon + 1))}`;
+    return `${slug(s)}:tracked`;
+  })();
+  const colon = id.indexOf(":");
+  const provider = colon > 0 ? id.slice(0, colon) : id;
+  const kind = parseKind(colon > 0 ? id.slice(colon + 1) : "tracked");
+  return { id, provider, kind };
 }
 
-/** Cursor invoice vs Claude API-eq. Do not swap these. */
+export function normalizeMeter(meter: string | undefined): CostMeterId {
+  return parseMeter(meter).id;
+}
+
+export function meterForEngine(engine: string | undefined): CostMeterId {
+  const e = (engine ?? "cursor").trim().toLowerCase();
+  if (e === "cursor") return "cursor:billed";
+  if (e === "claude" || e === "hybrid") return "claude:api-eq";
+  if (e === "local") return "local:local";
+  return normalizeMeter(`${e}:tracked`);
+}
+
+export function meterFromAgentId(agentId: string | undefined): CostMeterId {
+  if (agentId?.startsWith("cc-")) return "claude:api-eq";
+  if (agentId?.startsWith("bc-")) return "cursor:billed";
+  return "unknown:tracked";
+}
+
+/** Billed meters use the invoice; everyone else uses API-eq / list. */
 export function centsForMeter(
-  meter: CostMeter,
+  meter: string,
   u: { chargedCents?: number; rawCostCents?: number },
 ): number | undefined {
-  const m = normalizeMeter(meter);
-  if (m === "cursor-charged") {
+  const { kind } = parseMeter(meter);
+  if (kind === "billed") {
     if (u.chargedCents != null) return u.chargedCents;
     if (u.rawCostCents != null) return u.rawCostCents;
     return undefined;
@@ -97,38 +141,76 @@ export function centsForMeter(
   return undefined;
 }
 
-export function meterLabel(meter: CostMeter): string {
-  const m = normalizeMeter(meter);
-  if (m === "claude-max") return "Claude Max API-eq (not a Cursor charge)";
-  if (m === "local") return "local (no card charge)";
-  return "Cursor billed";
+function titleProvider(provider: string): string {
+  if (provider === "claude") return "Claude";
+  if (provider === "cursor") return "Cursor";
+  if (provider === "openai") return "OpenAI";
+  return provider.replace(/(^|-)([a-z])/g, (_, d: string, c: string) => `${d}${c.toUpperCase()}`);
 }
 
-function usdMeters(cursor: number, claude: number, local = 0): string {
-  const parts = [`Cursor ${usdFromCents(cursor)}`, `Claude ${usdFromCents(claude)}`];
-  if (local) parts.push(`local ${usdFromCents(local)}`);
-  return parts.join(" · ");
+export function meterLabel(meter: string): string {
+  const { provider, kind } = parseMeter(meter);
+  const name = titleProvider(provider);
+  if (kind === "billed") return `${name} billed`;
+  if (kind === "api-eq") return `${name} API-eq (not a card charge)`;
+  if (kind === "local") return `${name} (no card charge)`;
+  return `${name} (tracked)`;
 }
 
-function splitCents(xs: CostEntry[]): { cursor: number; claude: number; local: number } {
-  let cursor = 0;
-  let claude = 0;
-  let local = 0;
+export function shortMeterLabel(meter: string): string {
+  const { provider, kind } = parseMeter(meter);
+  const name = titleProvider(provider);
+  if (kind === "billed") return `${name} billed`;
+  if (kind === "api-eq") return `${name} API-eq`;
+  if (kind === "tracked") return `${name} tracked`;
+  return name;
+}
+
+export function formatRunningCost(cents: number | undefined | null, meter: string): string | undefined {
+  if (cents == null) return undefined;
+  return `COST running: ${usdFromCents(cents)}  ${meterLabel(meter)}`;
+}
+
+function sortMeterIds(ids: string[]): string[] {
+  return [...ids].sort((a, b) => {
+    const pa = parseMeter(a);
+    const pb = parseMeter(b);
+    return pa.provider.localeCompare(pb.provider) || KIND_RANK[pa.kind] - KIND_RANK[pb.kind];
+  });
+}
+
+export function formatMeterAmounts(split: MeterSplit, always: string[] = []): string {
+  const ids = sortMeterIds([...new Set([...Object.keys(split), ...always.map(normalizeMeter)])]);
+  if (!ids.length) return "(none)";
+  return ids.map((id) => `${shortMeterLabel(id)} ${usdFromCents(split[id] ?? 0)}`).join(" · ");
+}
+
+function byMeter(xs: CostEntry[]): MeterSplit {
+  const out: MeterSplit = {};
   for (const e of xs) {
     const m = normalizeMeter(e.meter);
-    if (m === "claude-max") claude += e.cents;
-    else if (m === "local") local += e.cents;
-    else cursor += e.cents;
+    out[m] = (out[m] ?? 0) + e.cents;
   }
-  return { cursor, claude, local };
+  return out;
 }
 
-function monthOutlook(week: CostEntry[], meter: CostMeter): number {
-  const rows = week.filter((e) => normalizeMeter(e.meter) === meter);
-  if (!rows.length) return 0;
-  const days = new Set(rows.map((e) => e.day)).size || 1;
-  const sum = rows.reduce((n, e) => n + e.cents, 0);
-  return Math.round((sum / days) * 30);
+function monthOutlookByMeter(week: CostEntry[]): MeterSplit {
+  const grouped = new Map<string, CostEntry[]>();
+  for (const e of week) {
+    const m = normalizeMeter(e.meter);
+    grouped.set(m, [...(grouped.get(m) ?? []), e]);
+  }
+  const out: MeterSplit = {};
+  for (const [m, rows] of grouped) {
+    const days = new Set(rows.map((e) => e.day)).size || 1;
+    const sum = rows.reduce((n, e) => n + e.cents, 0);
+    out[m] = Math.round((sum / days) * 30);
+  }
+  return out;
+}
+
+function totalCents(split: MeterSplit): number {
+  return Object.values(split).reduce((n, v) => n + v, 0);
 }
 
 export function loadCostLedger(file: string): CostEntry[] {
@@ -164,7 +246,7 @@ export function appendCostEntry(file: string, entry: Omit<CostEntry, "at" | "day
 
 export function summarizeCost(
   entries: CostEntry[],
-  opts: { project: string; thisRunCents: number | null; thisRunMeter: CostMeter; now?: Date },
+  opts: { project: string; thisRunCents: number | null; thisRunMeter: string; now?: Date },
 ): CostClose {
   const now = opts.now ?? new Date();
   const today = calendarDay(now);
@@ -175,28 +257,18 @@ export function summarizeCost(
   const projectEntries = entries.filter((e) => e.project === opts.project);
   const todayEntries = entries.filter((e) => e.day === today);
   const weekEntries = entries.filter((e) => e.day >= day7 && e.day <= today);
-  const project = splitCents(projectEntries);
-  const todaySplit = splitCents(todayEntries);
-  const week = splitCents(weekEntries);
 
   return {
     thisRunCents: opts.thisRunCents,
     thisRunMeter: normalizeMeter(opts.thisRunMeter),
     project: opts.project,
     projectRuns: projectEntries.length,
-    projectCursorCents: project.cursor,
-    projectClaudeCents: project.claude,
-    projectLocalCents: project.local,
-    todayCursorCents: todaySplit.cursor,
-    todayClaudeCents: todaySplit.claude,
-    todayLocalCents: todaySplit.local,
     todayProjects: new Set(todayEntries.map((e) => e.project)).size,
-    last7CursorCents: week.cursor,
-    last7ClaudeCents: week.claude,
-    last7LocalCents: week.local,
     last7DaysWithData: new Set(weekEntries.map((e) => e.day)).size || 1,
-    monthOutlookCursorCents: monthOutlook(weekEntries, "cursor-charged"),
-    monthOutlookClaudeCents: monthOutlook(weekEntries, "claude-max"),
+    projectByMeter: byMeter(projectEntries),
+    todayByMeter: byMeter(todayEntries),
+    last7ByMeter: byMeter(weekEntries),
+    outlookByMeter: monthOutlookByMeter(weekEntries),
   };
 }
 
@@ -205,14 +277,14 @@ export function formatCostClose(c: CostClose): string {
     c.thisRunCents == null
       ? `  this run:     unknown  ${meterLabel(c.thisRunMeter)}`
       : `  this run:     ${usdFromCents(c.thisRunCents)}  ${meterLabel(c.thisRunMeter)}`;
-  const outlook = `Cursor ${usdFromCents(c.monthOutlookCursorCents)} / Claude ${usdFromCents(c.monthOutlookClaudeCents)}`;
+  const always = [c.thisRunMeter];
   return [
     "COST",
     thisRun,
-    `  this project: ${usdMeters(c.projectCursorCents, c.projectClaudeCents, c.projectLocalCents)}  (${c.project} · ${c.projectRuns} recorded run${c.projectRuns === 1 ? "" : "s"})`,
-    `  today:        ${usdMeters(c.todayCursorCents, c.todayClaudeCents, c.todayLocalCents)}  (${c.todayProjects} project${c.todayProjects === 1 ? "" : "s"})`,
-    `  last 7 days:  ${usdMeters(c.last7CursorCents, c.last7ClaudeCents, c.last7LocalCents)}  (${c.last7DaysWithData} day${c.last7DaysWithData === 1 ? "" : "s"} with jobs)`,
-    `  if this pace holds: ${outlook} this month`,
+    `  this project: ${formatMeterAmounts(c.projectByMeter, always)}  (${c.project} · ${c.projectRuns} recorded run${c.projectRuns === 1 ? "" : "s"})`,
+    `  today:        ${formatMeterAmounts(c.todayByMeter, always)}  (${c.todayProjects} project${c.todayProjects === 1 ? "" : "s"})`,
+    `  last 7 days:  ${formatMeterAmounts(c.last7ByMeter, always)}  (${c.last7DaysWithData} day${c.last7DaysWithData === 1 ? "" : "s"} with jobs)`,
+    `  if this pace holds: ${formatMeterAmounts(c.outlookByMeter, always)} this month`,
   ].join("\n");
 }
 
@@ -226,33 +298,24 @@ export function formatCostBoard(entries: CostEntry[], now = new Date()): string 
     byProject.set(e.project, [...(byProject.get(e.project) ?? []), e]);
   }
   const days = [...byDay.keys()].sort((a, b) => a.localeCompare(b));
-  const projects = [...byProject.entries()].sort((a, b) => {
-    const as = splitCents(a[1]);
-    const bs = splitCents(b[1]);
-    return bs.cursor + bs.claude - (as.cursor + as.claude);
-  });
-  const lines = ["COST board", "", "Cursor billed and Claude Max stay on separate meters.", "", "By day:"];
+  const projects = [...byProject.entries()].sort((a, b) => totalCents(byMeter(b[1])) - totalCents(byMeter(a[1])));
+  const lines = ["COST board", "", "Each AI provider is its own meter. Do not add them into one number.", "", "By day:"];
   for (const day of days) {
-    const s = splitCents(byDay.get(day) ?? []);
     const mark = day === today ? "  (today)" : "";
-    lines.push(`  ${day}${mark}  ${usdMeters(s.cursor, s.claude, s.local)}`);
+    lines.push(`  ${day}${mark}  ${formatMeterAmounts(byMeter(byDay.get(day) ?? []))}`);
   }
   lines.push("", "By project:");
   for (const [project, rows] of projects) {
-    const s = splitCents(rows);
-    lines.push(`  ${usdMeters(s.cursor, s.claude, s.local)}  ${project}`);
+    lines.push(`  ${formatMeterAmounts(byMeter(rows))}  ${project}`);
   }
-  const all = splitCents(entries);
   const close = summarizeCost(entries, {
     project: projects[0]?.[0] ?? "unknown",
     thisRunCents: null,
-    thisRunMeter: "cursor-charged",
+    thisRunMeter: entries[0]?.meter ?? "unknown:tracked",
     now,
   });
-  lines.push("", `All recorded: ${usdMeters(all.cursor, all.claude, all.local)}`);
-  lines.push(
-    `If the last ${close.last7DaysWithData}-day pace holds: Cursor ${usdFromCents(close.monthOutlookCursorCents)} / Claude ${usdFromCents(close.monthOutlookClaudeCents)} this month`,
-  );
+  lines.push("", `All recorded: ${formatMeterAmounts(byMeter(entries))}`);
+  lines.push(`If the last ${close.last7DaysWithData}-day pace holds: ${formatMeterAmounts(close.outlookByMeter)} this month`);
   return lines.join("\n");
 }
 
@@ -260,7 +323,7 @@ export function recordJobCost(opts: {
   stateDir: string;
   project: string;
   cents: number;
-  meter: CostMeter;
+  meter: string;
   source: CostEntry["source"];
   agentId?: string;
   repo?: string;
@@ -269,7 +332,7 @@ export function recordJobCost(opts: {
   const entry = appendCostEntry(file, {
     project: opts.project,
     cents: opts.cents,
-    meter: opts.meter,
+    meter: normalizeMeter(opts.meter),
     source: opts.source,
     agentId: opts.agentId,
     repo: opts.repo,
@@ -290,7 +353,7 @@ export function closeJobCost(opts: {
   stateDir: string;
   project: string;
   cents: number | undefined | null;
-  meter: CostMeter;
+  meter: string;
   source: CostEntry["source"];
   agentId?: string;
   repo?: string;
