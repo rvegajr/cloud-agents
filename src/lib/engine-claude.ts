@@ -308,14 +308,12 @@ export async function createClaudeHandle(args: {
     send: async (prompt, opts) => {
       const turn = await send(prompt, opts);
       if (opts?.mode === "agent" && args.autoCreatePR !== false && !rec.prUrl) {
-        const dirty = git(rec.cwd, ["status", "--porcelain"]);
-        if (dirty) {
-          try {
-            rec.prUrl = pushAndOpenPr(rec.cwd, `claude: ${rec.branch}`);
-            saveClaudeRecord(rec);
-          } catch (err) {
-            console.error("claude PR open failed", err);
-          }
+        try {
+          rec.prUrl = pushAndOpenPr(rec.cwd, `claude: ${rec.branch}`);
+          saveClaudeRecord(rec);
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err);
+          console.error("claude PR open failed", redactGitSecrets(detail));
         }
       }
       return { ...turn, prUrl: rec.prUrl };
