@@ -11,6 +11,7 @@ import {
   parseEngine,
   profileLineExportsAnthropicKey,
   publicGithubUrl,
+  redactGitSecrets,
   scrubbedEnv,
   slackUsesClaude,
 } from "./engine-claude.js";
@@ -62,6 +63,13 @@ test("profileLineExportsAnthropicKey ignores comments", () => {
   assert.equal(profileLineExportsAnthropicKey("export ANTHROPIC_API_KEY=dummy-anthropic-key"), true);
   assert.equal(profileLineExportsAnthropicKey("# export ANTHROPIC_API_KEY=dummy-anthropic-key"), false);
   assert.equal(profileLineExportsAnthropicKey("export GEMINI_API_KEY=x"), false);
+});
+
+test("redactGitSecrets strips token-shaped GitHub credentials", () => {
+  assert.equal(
+    redactGitSecrets("fatal: https://x-access-token:gho_notarealtoken@github.com/org/repo.git"),
+    "fatal: https://x-access-token:<redacted>@github.com/org/repo.git",
+  );
 });
 
 test("clone URL never leaves the token in the public origin", () => {

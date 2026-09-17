@@ -113,7 +113,8 @@ try {
       process.exit(1);
     }
     const repo = args.repo ?? (args["create-repo"] ? createRepo(args["create-repo"]) : env("TARGET_REPO"));
-    const ref = args.ref ?? process.env.TARGET_REF ?? "main";
+    // New GitHub repos only have main. TARGET_REF is the Slack integration branch (often develop).
+    const ref = args.ref ?? (args["create-repo"] ? "main" : (process.env.TARGET_REF ?? "main"));
 
     if (engine === "claude") {
       const handle = await createClaudeHandle({ repo, ref, autoCreatePR: true });

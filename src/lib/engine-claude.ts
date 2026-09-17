@@ -196,13 +196,26 @@ function saveClaudeRecord(rec: ClaudeRecord): void {
   writeFileSync(recordPath(rec.agentId), `${JSON.stringify(rec, null, 2)}\n`);
 }
 
+export function redactGitSecrets(text: string): string {
+  return text
+    .replace(/x-access-token:[^@\s]+@/gi, "x-access-token:<redacted>@")
+    .replace(/\bgho_[A-Za-z0-9_]+/g, "gho_<redacted>")
+    .replace(/\bghp_[A-Za-z0-9_]+/g, "ghp_<redacted>")
+    .replace(/\bghu_[A-Za-z0-9_]+/g, "ghu_<redacted>");
+}
+
 export function cloneWorkspace(repo: string, ref: string, root = process.env.WORK_ROOT?.trim() || join(tmpdir(), "cloud-agents-work")): string {
   mkdirSync(root, { recursive: true });
   const dir = mkdtempSync(join(root, "build-"));
   const token = process.env.GITHUB_TOKEN?.trim();
-  execFileSync("git", ["clone", "--branch", ref, "--depth", "50", authenticatedCloneUrl(repo, token), dir], {
-    stdio: "inherit",
-  });
+  try {
+    execFileSync("git", ["clone", "--branch", ref, "--depth", "50", authenticatedCloneUrl(repo, token), dir], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? redactGitSecrets(err.message) : "git clone failed";
+    throw new Error(`git clone failed for ${publicGithubUrl(repo)}@${ref}: ${detail}`);
+  }
   execFileSync("git", ["remote", "set-url", "origin", publicGithubUrl(repo)], { cwd: dir, stdio: "inherit" });
   return dir;
 }
