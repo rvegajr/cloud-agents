@@ -22,6 +22,8 @@ import {
   parseMaxUsd,
   runFarm,
 } from "./lib/farm.js";
+import { buildStateDir } from "./lib/build-app.js";
+import { defaultLedgerPath, formatCostBoard, loadCostLedger } from "./lib/cost-ledger.js";
 
 loadEnv();
 const args = flags();
@@ -81,6 +83,7 @@ try {
         engine: "cursor",
         cursorApp: "require",
         stream: { text: false, tools: true, prefix: `[${spec.repoName}]` },
+        costSource: "farm",
         log: (line) => {
           for (const l of line.split("\n")) console.log(`[${spec.repoName}] ${l}`);
         },
@@ -96,6 +99,7 @@ try {
         };
       }
       console.log(`[${spec.repoName}] RESULT: ${result.stopReason}${result.prUrl ? ` ${result.prUrl}` : ""}`);
+      if (result.costClose) console.log(`[${spec.repoName}]\n${result.costClose}`);
       return {
         status: result.stopReason === "complete" ? "done" : "failed",
         repo: result.repo,
@@ -109,6 +113,7 @@ try {
   });
 
   console.log(`\n${formatFarmStatus(manifest)}`);
+  console.log(`\n${formatCostBoard(loadCostLedger(defaultLedgerPath(buildStateDir())))}`);
   console.log(`\nmanifest: .runs/${manifest.id}.json`);
   console.log("Resume one job: npm run build-app -- --resume <bc-id>");
   process.exit(farmExitCode(manifest));

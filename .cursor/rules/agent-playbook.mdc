@@ -1,0 +1,29 @@
+---
+description: Efficient generation playbook for this factory kit
+alwaysApply: true
+---
+
+# Efficient generation
+
+This repo **is** the factory (`npm run build-farm`, `build-app`, Slack bot).
+
+## Door
+
+- `bc-…` → `npm run build-app -- --resume bc-…`. Never a second job.
+- Existing product → Slack `@CloudAgents`. Never farm a new repo for it.
+- New independent idea → `ideas/ready/*.md` then `npm run build-farm`, or `--engine hybrid`.
+
+## Meters
+
+- Farm and Slack: `composer-2.5`, Fast off. `FARM_MAX_USD` caps a wave.
+- Hybrid: Max plans, local types, 85% ceiling, never extra usage.
+- Empty `SLACK_CLAUDE_USER_IDS`. No `ANTHROPIC_API_KEY` in the shell.
+- Resume failed farm jobs. Do not re-farm. Do not raise concurrency until `complete`.
+
+## Close (last lines of every job)
+
+Write COST last. Cursor billed and Claude Max stay on **separate** meters — never add them into one number. `npm run cost-board`. Never omit it.
+
+- Cursor job (farm, Slack, Composer VM): **Cursor billed** from `chargedCents` (the invoice).
+- Claude Code / Max / hybrid job: **Claude Max API-eq** (not a Cursor charge). Track it anyway.
+- If usage is missing: `COST this run: unknown` on that meter.

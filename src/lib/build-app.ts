@@ -21,6 +21,7 @@ import {
   type CursorAppGrant,
 } from "./github.js";
 import { printStream, type StreamOptions } from "./stream.js";
+import { centsForMeter, closeJobCost, meterForEngine, projectFromRepo, type CostMeter } from "./cost-ledger.js";
 
 export interface BuildRecord {
   agentId: string;
@@ -54,6 +55,7 @@ export interface RunBuildAppOpts {
   cursorApp?: "warn" | "require";
   grantCursorApp?: (repoUrl: string) => Promise<CursorAppGrant>;
   createRepoFn?: (name: string) => string;
+  costSource?: "build-app" | "farm" | "pipeline";
 }
 
 export interface BuildAppResult {
@@ -65,6 +67,7 @@ export interface BuildAppResult {
   stopReason: StopReason | "startup-failed";
   state?: LoopState;
   chargedCents?: number;
+  costClose?: string;
   error?: string;
   grant?: CursorAppGrant;
 }
@@ -124,7 +127,6 @@ export function printBuildResult(result: BuildAppResult, log: (line: string) => 
     if (state.finish.known_gaps?.length) log(`known gaps:\n  - ${state.finish.known_gaps.join("\n  - ")}`);
   }
   if (result.prUrl) log(`PR: ${result.prUrl}`);
-  if (result.chargedCents != null) log(`cost: $${(result.chargedCents / 100).toFixed(2)}`);
   const blocked = state?.history.find((h) => h.blocked);
   if (blocked && result.agentId) {
     log(
@@ -137,6 +139,7 @@ export function printBuildResult(result: BuildAppResult, log: (line: string) => 
   ) {
     log(`\nContinue with: npm run build-app -- --resume ${result.agentId}`);
   }
+  log(`\n${result.costClose ?? "COST\n  this run:     unknown"}`);
 }
 
 function cursorSend(agent: SDKAgent, stream: StreamOptions | undefined, log: (line: string) => void): SendFn {
@@ -154,10 +157,10 @@ function cursorSend(agent: SDKAgent, stream: StreamOptions | undefined, log: (li
   };
 }
 
-async function usageCents(agent: SDKAgent): Promise<number | undefined> {
+async function usageCents(agent: SDKAgent, meter: CostMeter): Promise<number | undefined> {
   try {
     const u = await agent.getUsage();
-    return u.cost?.chargedCents ?? u.cost?.rawCostCents;
+    return centsForMeter(meter, { chargedCents: u.cost?.chargedCents, rawCostCents: u.cost?.rawCostCents });
   } catch {
     return undefined;
   }
@@ -215,7 +218,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
         send = wrapSend(handle.send);
         usage = async () => {
           const u = await handle.getUsage?.();
-          return u?.chargedCents ?? u?.rawCostCents;
+          return centsForMeter(meterForEngine(resumeEngine), u ?? {});
         };
       } else {
         const apiKey = opts.apiKey ?? (await resolveApiKey());
@@ -224,7 +227,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
           await agent.close();
         };
         send = wrapSend(cursorSend(agent, opts.stream, log));
-        usage = () => usageCents(agent);
+        usage = () => usageCents(agent, "cursor-charged");
       }
     } else {
       const idea =
@@ -277,7 +280,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
         send = wrapSend(handle.send);
         usage = async () => {
           const u = await handle.getUsage?.();
-          return u?.chargedCents ?? u?.rawCostCents;
+          return centsForMeter(meterForEngine(engine), u ?? {});
         };
       } else {
         const apiKey = opts.apiKey ?? (await resolveApiKey());
@@ -305,7 +308,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
         };
         saveBuildRecord(record, stateDir);
         send = wrapSend(cursorSend(agent, opts.stream, log));
-        usage = () => usageCents(agent);
+        usage = () => usageCents(agent, "cursor-charged");
       }
       log(`agent:  ${record.agentId}`);
       log(`engine: ${record.engine ?? engine}`);
@@ -336,6 +339,20 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
     record.state = final;
     saveBuildRecord(record, stateDir);
     await close();
+    let costClose: string | undefined;
+    try {
+      costClose = closeJobCost({
+        stateDir,
+        project: projectFromRepo(record.repo),
+        cents: chargedCents,
+        meter: meterForEngine(record.engine ?? engine),
+        source: opts.costSource ?? "build-app",
+        agentId: record.agentId,
+        repo: record.repo,
+      }).close;
+    } catch {
+      /* ledger is optional */
+    }
     return {
       agentId: record.agentId,
       repo: record.repo,
@@ -345,6 +362,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
       stopReason: final.stopReason,
       state: final,
       chargedCents,
+      costClose,
     };
   } catch (err) {
     try {

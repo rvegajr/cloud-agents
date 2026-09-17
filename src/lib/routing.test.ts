@@ -93,5 +93,9 @@ test("mergeMaxUsage keeps the seven-day sample over a five-hour one", () => {
 
 test("formatMaxUsage", () => {
   assert.equal(formatMaxUsage(undefined), "Max usage: no current sample");
-  assert.match(formatMaxUsage({ utilization: 0.42, rateLimitType: "seven_day", resetsAt: later, observedAt: "" }), /42% of seven day, resets 2026-09-17T13:00Z/);
+  const future = Math.floor(Date.now() / 1000) + 3600;
+  assert.match(
+    formatMaxUsage({ utilization: 0.42, rateLimitType: "seven_day", resetsAt: future, observedAt: "" }),
+    /42% of seven day, resets \d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z/,
+  );
 });

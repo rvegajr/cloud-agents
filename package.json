@@ -18,6 +18,7 @@
     "status": "tsx src/05-status.ts",
     "build-app": "tsx src/06-build-app.ts",
     "build-farm": "tsx src/10-build-farm.ts",
+    "cost-board": "tsx src/11-cost-board.ts",
     "doctor": "tsx src/08-doctor.ts",
     "stamp": "tsx src/09-stamp-version.ts",
     "deploy": "tsx src/09-stamp-version.ts --railway && railway up",

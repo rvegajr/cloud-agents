@@ -252,6 +252,7 @@ fake agent; that is how it was verified.
 ```bash
 npm run build-farm -- --ideas-dir ideas/ready --create-repos --concurrency 5 --max-usd 10
 npm run build-farm -- --status
+npm run cost-board
 ```
 
 Each markdown file in the directory (not `TEMPLATE.md`) is one independent app:
@@ -259,6 +260,11 @@ create a private GitHub repo named after the file, grant the Cursor GitHub App i
 the install is "Selected repositories", then `Agent.create` a Cloud Agent and run
 the same spec → iterate → finish loop as `build-app`. Composer/Grok, Fast off.
 **Engine is always `cursor`.** Do not point this at Slack or Max.
+
+Every job's last lines are COST. Cursor billed dollars (the invoice) and Claude
+Max API-eq stay on separate meters — `npm run cost-board` splits them. Do not
+add them into one number. A Claude/hybrid job still records Claude even though
+it is not a Cursor charge.
 
 `--concurrency` is how many VMs run at once (start at 5; probe with 3 before
 raising). `--max-usd` / `FARM_MAX_USD` stops *starting* more jobs once charged
@@ -509,6 +515,7 @@ cloud-agents/
     05-status.ts                 account, models, repos, agents, usage
     06-build-app.ts              idea -> spec -> milestones loop -> release gate
     10-build-farm.ts             N idea files -> N Cursor VMs in a pool, dollar cap
+    11-cost-board.ts             day/project COST ledger and monthly outlook
     07-slack-bot.ts              Bolt Socket Mode; @mention -> pipeline
     08-doctor.ts                 read-only preflight: every credential, scope, grant
     09-stamp-version.ts          stamp the commit into BUILD_INFO before a deploy
@@ -522,6 +529,7 @@ cloud-agents/
       build-loop.ts              the loop: phases, stall/block detection, resumable state
       build-app.ts               one idea -> one engine loop (CLI + farm)
       farm.ts                    concurrency pool, FARM_MAX_USD, farm-*.json manifest
+      cost-ledger.ts             this-run / project / today COST close and outlook
       farm.test.ts
       engine-claude.ts           Max engine: clone, Agent SDK query(), cc- ids
       engine-claude.test.ts

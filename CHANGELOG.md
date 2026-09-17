@@ -17,6 +17,13 @@ npm run deploy                        # stamp the commit, then ship
 
 ### Added
 
+- **COST close on every job.** The last lines of `build-app`, farm jobs, and
+  Slack threads are this-run dollars, this-project total, today, last 7 days,
+  and a monthly outlook if that pace holds. Append-only `.runs/cost-ledger.jsonl`;
+  `npm run cost-board` prints the day/project board. **Cursor billed** (the
+  invoice) and **Claude Max API-eq** (not a Cursor charge) stay on separate
+  meters and are never summed into one number. A job still closes with COST
+  when usage is unknown.
 - **Cursor farm (`npm run build-farm`).** One markdown file per app under
   `--ideas-dir`; a concurrency pool of Cursor Cloud Agents (Fast off); a
   `FARM_MAX_USD` cap; `.runs/farm-*.json` as the review board. Always

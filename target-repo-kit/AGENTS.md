@@ -36,9 +36,11 @@ One paragraph. What it does, who uses it, what "working" looks like.
 - Do not modify `.github/workflows/` or deployment config without being asked explicitly.
 - Do not add runtime dependencies without stating why in the PR description.
 - Do not commit secrets, `.env` files, or generated artifacts.
+- Do not switch the Cloud Agent to Fast, Opus, or GPT. Composer 2.5, Fast off. Resume a `bc-` id; do not start a second job. Extra Max usage is never bought.
 
 ## Definition of done for any change
 1. Typecheck, lint, and tests pass locally.
 2. New behavior has a test.
 3. User-facing behavior is documented (README or docs/).
 4. Working tree is clean and all commits have clear messages.
+5. Last lines of the job are COST: Cursor billed on Cursor work, Claude Max API-eq on Claude/hybrid work, never one combined dollar. If usage is missing: `COST this run: unknown`.

@@ -7,6 +7,8 @@ import {
   type PipelineSend,
   type VerifyReport,
 } from "./pipeline.js";
+import { buildStateDir } from "./build-app.js";
+import { centsForMeter, closeJobCost, meterFromAgentId, meterLabel, projectFromRepo, usdFromCents } from "./cost-ledger.js";
 
 /**
  * Turn a Slack request into a cloud-agent job. Slack-agnostic aside from the
@@ -67,15 +69,39 @@ export function formatQuestions(questions: string[]): string {
   return `Need a bit more to write a brief:\n${body}\n\nReply in this thread and mention me.`;
 }
 
-async function usageLine(handle: AgentHandle): Promise<string | undefined> {
-  if (!handle.getUsage) return undefined;
-  try {
-    const snap = await handle.getUsage();
-    const line = formatUsage(snap);
-    return line || undefined;
-  } catch {
-    return undefined;
+async function postCostClose(runtime: JobRuntime, handle: AgentHandle, repo?: string): Promise<string> {
+  const meter = meterFromAgentId(handle.agentId);
+  let cents: number | undefined;
+  let tokens: number | undefined;
+  if (handle.getUsage) {
+    try {
+      const u = await handle.getUsage();
+      cents = centsForMeter(meter, u);
+      tokens = u.totalTokens;
+    } catch {
+      /* still close */
+    }
   }
+  let close: string;
+  try {
+    close = closeJobCost({
+      stateDir: buildStateDir(),
+      project: projectFromRepo(repo),
+      cents,
+      meter,
+      source: "slack",
+      agentId: handle.agentId,
+      repo,
+    }).close;
+  } catch {
+    close =
+      cents == null
+        ? `COST\n  this run:     unknown  ${meterLabel(meter)}`
+        : `COST\n  this run:     ${usdFromCents(cents)}  ${meterLabel(meter)}`;
+  }
+  if (tokens) close += `\n  tokens:      ${tokens.toLocaleString()}`;
+  await runtime.post(close);
+  return close;
 }
 
 function parseTriage(text: string | undefined): TriageReport | undefined {
@@ -123,10 +149,9 @@ export async function startJob(
 
   let triageTurn = await handle.send(triagePrompt, { mode: "plan" });
   if (triageTurn.status !== "finished") {
-    const line = await usageLine(handle);
     const error = `Triage did not finish (status=${triageTurn.status})`;
     await runtime.post(error);
-    if (line) await runtime.post(line);
+    const line = await postCostClose(runtime, handle, input.repo);
     await record(handle, { repo: input.repo, brief: input.request, status: triageTurn.status });
     return { kind: "failed", agentId: handle.agentId, error, usageLine: line };
   }
@@ -141,20 +166,18 @@ export async function startJob(
       { mode: "agent" },
     );
     if (triageTurn.status !== "finished") {
-      const line = await usageLine(handle);
       const error = `Triage JSON retry did not finish (status=${triageTurn.status})`;
       await runtime.post(error);
-      if (line) await runtime.post(line);
+      const line = await postCostClose(runtime, handle, input.repo);
       await record(handle, { repo: input.repo, brief: input.request, status: triageTurn.status });
       return { kind: "failed", agentId: handle.agentId, error, usageLine: line };
     }
     triage = parseTriage(triageTurn.result);
   }
   if (!triage) {
-    const line = await usageLine(handle);
     const error = "Triage did not return a parseable JSON block.";
     await runtime.post(error);
-    if (line) await runtime.post(line);
+    const line = await postCostClose(runtime, handle, input.repo);
     await record(handle, { repo: input.repo, brief: input.request, status: "unparseable-triage" });
     return { kind: "failed", agentId: handle.agentId, error, usageLine: line };
   }
@@ -163,17 +186,16 @@ export async function startJob(
     const questions = (triage.questions ?? []).filter((q) => q.trim());
     const asked = questions.length ? questions : ["What should change, and how would we know it worked?"];
     await runtime.post(formatQuestions(asked));
-    const line = await usageLine(handle);
+    const line = await postCostClose(runtime, handle, input.repo);
     await record(handle, { repo: input.repo, brief: input.request, status: "need-info" });
     return { kind: "need-info", agentId: handle.agentId, questions: asked, title: triage.title, usageLine: line };
   }
 
   const brief = triage.brief?.trim();
   if (!brief) {
-    const line = await usageLine(handle);
     const error = "Triage said ready but did not include a brief.";
     await runtime.post(error);
-    if (line) await runtime.post(line);
+    const line = await postCostClose(runtime, handle, input.repo);
     return { kind: "failed", agentId: handle.agentId, error, usageLine: line };
   }
 
@@ -194,21 +216,19 @@ export async function continueJob(
   });
   const turn = await handle.send(prompt, { mode: "agent" });
   if (turn.status !== "finished") {
-    const line = await usageLine(handle);
     const error = `Follow-up did not finish (status=${turn.status})`;
     await runtime.post(error);
     if (turn.prUrl) await runtime.post(`PR: ${turn.prUrl}`);
-    if (line) await runtime.post(line);
+    const line = await postCostClose(runtime, handle, input.repo);
     await record(handle, { repo: input.repo, status: turn.status, prUrl: turn.prUrl });
     return { kind: "failed", agentId: handle.agentId, error, prUrl: turn.prUrl, usageLine: line };
   }
 
   const json = extractJsonBlock<FollowupJson>(turn.result);
   if (isVerifyReport(json)) {
-    const line = await usageLine(handle);
     const prUrl = turn.prUrl;
     await runtime.post(formatVerifyReport(json, prUrl));
-    if (line) await runtime.post(line);
+    const line = await postCostClose(runtime, handle, input.repo);
     await record(handle, {
       repo: input.repo,
       brief: input.message,
@@ -223,7 +243,7 @@ export async function continueJob(
     const questions = (json.questions ?? []).filter((q) => q.trim());
     const asked = questions.length ? questions : ["What should change, and how would we know it worked?"];
     await runtime.post(formatQuestions(asked));
-    const line = await usageLine(handle);
+    const line = await postCostClose(runtime, handle, input.repo);
     await record(handle, { repo: input.repo, status: "need-info" });
     return { kind: "need-info", agentId: handle.agentId, questions: asked, title: json.title, usageLine: line };
   }
@@ -232,11 +252,10 @@ export async function continueJob(
     return runAndReport(handle, json.brief, input.repo ?? "", input.ref, runtime);
   }
 
-  const line = await usageLine(handle);
   const error = "Follow-up did not return a parseable JSON report.";
   await runtime.post(error);
   if (turn.prUrl) await runtime.post(`PR: ${turn.prUrl}`);
-  if (line) await runtime.post(line);
+  const line = await postCostClose(runtime, handle, input.repo);
   await record(handle, { repo: input.repo, status: "unparseable-followup", prUrl: turn.prUrl });
   return { kind: "failed", agentId: handle.agentId, error, prUrl: turn.prUrl, usageLine: line };
 }
@@ -258,18 +277,17 @@ async function runAndReport(
     onPhase: (phase) => runtime.post(labels[phase] ?? phase),
   });
 
-  const line = await usageLine(handle);
-
   if (out.status === "failed") {
     await runtime.post(`${out.phase} did not finish (status=${out.last.status}).`);
     if (out.prUrl) await runtime.post(`PR: ${out.prUrl}`);
-    if (line) await runtime.post(line);
     await record(handle, { repo, brief, prUrl: out.prUrl, status: out.last.status, runIds: out.runIds });
+    const line = await postCostClose(runtime, handle, repo);
     return { kind: "failed", agentId: handle.agentId, error: `${out.phase} did not finish`, prUrl: out.prUrl, usageLine: line };
   }
 
   if (out.status === "plan-only") {
     await record(handle, { repo, brief, status: "plan-only", runIds: out.runIds });
+    const line = await postCostClose(runtime, handle, repo);
     return { kind: "failed", agentId: handle.agentId, error: "Pipeline stopped after plan.", usageLine: line };
   }
 
@@ -286,7 +304,6 @@ async function runAndReport(
   } else if (out.prUrl && !out.done) {
     await runtime.post("PR left as draft: the verifier did not report done, so it is not auto-merge eligible.");
   }
-  if (line) await runtime.post(line);
   await record(handle, {
     repo,
     brief,
@@ -294,5 +311,6 @@ async function runAndReport(
     status: out.done ? "done" : "not-done",
     runIds: out.runIds,
   });
+  const line = await postCostClose(runtime, handle, repo);
   return { kind: "done", agentId: handle.agentId, report: out.report, prUrl: out.prUrl, usageLine: line };
 }
