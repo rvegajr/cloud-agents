@@ -83,3 +83,162 @@ export async function markPullRequestReady(
   );
   return "marked";
 }
+
+export interface GithubRepoRef {
+  owner: string;
+  repo: string;
+}
+
+/** https://github.com/owner/repo or …/repo.git — not a PR URL. */
+export function parseGithubRepoUrl(url: string): GithubRepoRef | undefined {
+  const m = /^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(url.trim());
+  if (!m) return undefined;
+  if (m[2] === "pull") return undefined;
+  return { owner: m[1]!, repo: m[2]! };
+}
+
+export function cursorAppSlugs(env: NodeJS.ProcessEnv = process.env): string[] {
+  const raw = env.CURSOR_GITHUB_APP_SLUG?.trim();
+  if (raw) return raw.split(/[,\s]+/).map((s) => s.toLowerCase()).filter(Boolean);
+  return ["cursor"];
+}
+
+export function installationIsCursor(appSlug: string | undefined, slugs: string[]): boolean {
+  const s = (appSlug ?? "").toLowerCase();
+  if (!s) return false;
+  return slugs.some((want) => s === want || s.includes(want));
+}
+
+export type GhExec = (file: string, args: string[], opts?: { encoding?: BufferEncoding }) => string;
+
+export function resolveGithubToken(
+  env: NodeJS.ProcessEnv = process.env,
+  exec: GhExec | undefined = undefined,
+): string | undefined {
+  const fromEnv = env.GITHUB_TOKEN?.trim() || env.GH_TOKEN?.trim();
+  if (fromEnv) return fromEnv;
+  if (!exec) return undefined;
+  try {
+    const t = exec("gh", ["auth", "token"], { encoding: "utf8" }).trim();
+    return t || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export type CursorAppGrant =
+  | { status: "inherited"; installationId: number }
+  | { status: "added"; installationId: number }
+  | { status: "already"; installationId: number }
+  | { status: "missing-app" }
+  | { status: "forbidden"; detail: string }
+  | { status: "unknown"; detail: string }
+  | { status: "no-token" }
+  | { status: "not-a-github-repo"; detail: string };
+
+interface InstallationList {
+  installations?: Array<{
+    id: number;
+    app_slug?: string;
+    repository_selection?: string;
+  }>;
+}
+
+function ghHeaders(token: string): Record<string, string> {
+  return {
+    authorization: `Bearer ${token}`,
+    accept: "application/vnd.github+json",
+    "x-github-api-version": "2022-11-28",
+    "user-agent": "cloud-agents-farm",
+  };
+}
+
+/**
+ * After `gh repo create`, new repos are invisible to Cursor unless the GitHub App
+ * is installed with "All repositories" or this repo is added to a selected-repo
+ * install. Call this before Agent.create so a farm wave does not pay for a VM
+ * that cannot clone.
+ */
+export async function grantCursorGithubApp(
+  repoUrl: string,
+  opts: {
+    token?: string;
+    fetchImpl?: typeof fetch;
+    slugs?: string[];
+  } = {},
+): Promise<CursorAppGrant> {
+  const token = opts.token?.trim();
+  if (!token) return { status: "no-token" };
+  const ref = parseGithubRepoUrl(repoUrl);
+  if (!ref) return { status: "not-a-github-repo", detail: repoUrl };
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const slugs = opts.slugs ?? cursorAppSlugs();
+
+  const listRes = await fetchImpl("https://api.github.com/user/installations?per_page=100", {
+    headers: ghHeaders(token),
+  });
+  if (listRes.status === 401 || listRes.status === 403) {
+    const body = await listRes.text();
+    return {
+      status: "unknown",
+      detail: `list installations HTTP ${listRes.status}${body ? `: ${body.slice(0, 180)}` : ""}`,
+    };
+  }
+  if (!listRes.ok) {
+    return { status: "unknown", detail: `list installations HTTP ${listRes.status}` };
+  }
+  const list = (await listRes.json()) as InstallationList;
+  const inst = (list.installations ?? []).find((i) => installationIsCursor(i.app_slug, slugs));
+  if (!inst) return { status: "missing-app" };
+  if (inst.repository_selection === "all") {
+    return { status: "inherited", installationId: inst.id };
+  }
+
+  const repoRes = await fetchImpl(`https://api.github.com/repos/${ref.owner}/${ref.repo}`, {
+    headers: ghHeaders(token),
+  });
+  if (!repoRes.ok) {
+    return { status: "forbidden", detail: `repo lookup HTTP ${repoRes.status}` };
+  }
+  const repo = (await repoRes.json()) as { id?: number };
+  if (!repo.id) return { status: "forbidden", detail: "repo lookup had no id" };
+
+  const addRes = await fetchImpl(
+    `https://api.github.com/user/installations/${inst.id}/repositories/${repo.id}`,
+    { method: "PUT", headers: ghHeaders(token) },
+  );
+  if (addRes.status === 204 || addRes.status === 200) {
+    return { status: "added", installationId: inst.id };
+  }
+  if (addRes.status === 422) {
+    return { status: "already", installationId: inst.id };
+  }
+  const body = await addRes.text();
+  return { status: "forbidden", detail: `add repo HTTP ${addRes.status}${body ? `: ${body.slice(0, 200)}` : ""}` };
+}
+
+/** True when we *know* Cursor cannot clone this new repo. Unknown/no-token still boot the VM. */
+export function cursorAppGrantBlocksCreate(grant: CursorAppGrant): boolean {
+  return grant.status === "missing-app" || grant.status === "forbidden" || grant.status === "not-a-github-repo";
+}
+
+export function formatCursorAppGrant(grant: CursorAppGrant): string {
+  switch (grant.status) {
+    case "inherited":
+      return "Cursor GitHub App covers this repo (installation is All repositories).";
+    case "added":
+      return "Added this repo to the Cursor GitHub App installation.";
+    case "already":
+      return "Repo was already on the Cursor GitHub App installation.";
+    case "missing-app":
+      return "No Cursor GitHub App installation on this account. Connect GitHub at cursor.com/agents and prefer All repositories so new farm repos inherit access.";
+    case "no-token":
+      return "No GitHub token; cannot grant the Cursor GitHub App. Set GITHUB_TOKEN or `gh auth login`, then grant the repo at cursor.com/agents.";
+    case "unknown":
+      return `Could not list GitHub App installations (${grant.detail}). A classic gh token cannot do this. Install the Cursor GitHub App with All repositories so new farm repos inherit access, or grant each repo at cursor.com/agents.`;
+    case "not-a-github-repo":
+      return `Not a github.com repo URL (${grant.detail}).`;
+    case "forbidden":
+      return `Could not add this repo to the Cursor GitHub App (${grant.detail}). Grant it at cursor.com/agents or install the app with All repositories.`;
+  }
+}

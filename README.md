@@ -194,7 +194,17 @@ npm run build-app -- --resume cc-xxxx                       # Claude handle from
 
 `--engine cursor` (default) is a Cursor Cloud Agent: a hosted VM, a `bc-…` id, billed per token. `--engine claude` clones onto **this machine** (or `WORK_ROOT`), runs the Anthropic Agent SDK against your Max plan, and opens a `claude/…` draft PR. Resume ids are `cc-…`. Doctor fails if `ANTHROPIC_API_KEY` is set or if `claude auth status` is anything but `apiKeySource=none`.
 
-Slack is independent of `ENGINE`. Only Slack member ids in `SLACK_CLAUDE_USER_IDS` spend Max; everyone else stays on Cursor. Leave that variable empty on a shared bot. Details: `ARTICLE-CLAUDE-MAX.md`.
+`--engine hybrid` keeps the same clone, ids, and PR, but only the **plan** turn runs on Max. A local Ollama model (`LOCAL_MODEL`, driven by the qwen-code CLI or aider inside the clone) does the implement and verify turns, and Max comes back for one rescue turn only if the local verifier does not report `done`. Before every Max turn the engine reads the last utilization the Agent SDK reported (`.runs/max-usage.json`); at or above `MAX_UTILIZATION_CEILING` (85%) the turn is diverted to `LOCAL_PLANNER_MODEL` or the job stops, never buying extra usage. `--engine local` is Ollama only. The measured basis for this split is in `~/Dev/local-coding-evals/results/2026-09-17/RESULTS.md`: with a plan written the way `prompts/01-plan.md` now asks for it, every local model tested passed every check; without one, most did not.
+
+```bash
+ollama pull qwen3-coder-next            # 52 GB; or qwen3.6:35b-coding (23 GB)
+npm i -g @qwen-code/qwen-code           # the local executor's harness (or: pipx install aider-chat, LOCAL_RUNNER=aider)
+ENGINE=hybrid LOCAL_MODEL=qwen3-coder-next npm run doctor -- --phase A
+npm run max-usage                        # 5-hour and 7-day windows; seeds the routing sample
+npm run pipeline -- --engine hybrid --brief example-health-endpoint --repo https://github.com/you/repo
+```
+
+Slack is independent of `ENGINE`. Only Slack member ids in `SLACK_CLAUDE_USER_IDS` spend Max; everyone else stays on Cursor. Those users get the Max-backed engine `ENGINE` names (`claude` when it is `cursor`). Leave that variable empty on a shared bot. Details: `ARTICLE-CLAUDE-MAX.md`.
 
 This is steps 3 and 4 turned into a loop that runs until the app is done:
 
@@ -236,6 +246,36 @@ from building forever.
 
 The loop logic has no SDK dependency, so its stop conditions are testable with a
 fake agent; that is how it was verified.
+
+### Many apps at once (Cursor farm)
+
+```bash
+npm run build-farm -- --ideas-dir ideas/ready --create-repos --concurrency 5 --max-usd 10
+npm run build-farm -- --status
+```
+
+Each markdown file in the directory (not `TEMPLATE.md`) is one independent app:
+create a private GitHub repo named after the file, grant the Cursor GitHub App if
+the install is "Selected repositories", then `Agent.create` a Cloud Agent and run
+the same spec → iterate → finish loop as `build-app`. Composer/Grok, Fast off.
+**Engine is always `cursor`.** Do not point this at Slack or Max.
+
+`--concurrency` is how many VMs run at once (start at 5; probe with 3 before
+raising). `--max-usd` / `FARM_MAX_USD` stops *starting* more jobs once charged
+usage hits the cap; in-flight loops finish. The scheduler is this Node process:
+laptop sleep kills the wave. The VMs and `.runs/build-bc-….json` survive;
+resume with `npm run build-app -- --resume bc-xxxx`. The farm board is
+`.runs/farm-*.json`.
+
+**GitHub App inheritance.** New repos are invisible to Cursor unless the GitHub
+App at [cursor.com/agents](https://cursor.com/agents) (GitHub settings) is
+installed with **All repositories**, or each new repo is added to a selected-repo
+install. The farm does that add via the API (`GITHUB_TOKEN` or `gh auth`) and
+**refuses to boot a VM** if it cannot. Org/user installs set to All repositories
+need no per-repo step.
+
+Put one idea per file, five or fewer Must-haves, no shared repos (PRs would
+conflict). `ideas/ready/` has three tiny CLI ideas for a first 3-wide probe.
 
 **First live run** (`ideas/example-snippet-vault.md`, `composer-2.5`): 6
 milestones, 6 iterations, 0 stalls, about 45 minutes, about $4.57 in tokens, 19
@@ -411,8 +451,7 @@ Things that are deliberately **not** in the prompts:
   `issues.labeled` and pass the issue body as the brief. The kit's exit codes
   are already CI-friendly. `startJob` / `continueJob` in `src/lib/slack-fix.ts`
   are Slack-agnostic aside from the `post` callback.
-- **Parallel briefs.** `Agent.create()` is cheap; launch one agent per brief with
-  `Promise.all`, collect the PR URLs. Keep briefs independent so PRs do not conflict.
+- **Parallel briefs.** `Agent.create()` is cheap; `npm run build-farm -- --ideas-dir ideas/ready --create-repos` launches one Cursor VM per idea file with a concurrency pool and a dollar cap. Keep briefs independent so PRs do not conflict.
 - **Review loop.** After the PR is open, a second agent (or the same one via
   `resume`) reads the PR comments with `gh` and addresses them. That is the
   feedback arrow in the diagram; Slack step 8 is the same arrow from a thread.
@@ -452,6 +491,7 @@ cloud-agents/
   ideas/
     TEMPLATE.md                  what an app idea file needs
     example-snippet-vault.md     a runnable example idea
+    ready/                       farm inventory: one .md per independent app
   prompts/
     oneshot.md                   single-pass wrapper (step 2)
     01-plan.md  02-implement.md  03-verify.md     the pipeline phases (step 3)
@@ -468,6 +508,7 @@ cloud-agents/
     04-resume.ts                 pick up a bc- agent later
     05-status.ts                 account, models, repos, agents, usage
     06-build-app.ts              idea -> spec -> milestones loop -> release gate
+    10-build-farm.ts             N idea files -> N Cursor VMs in a pool, dollar cap
     07-slack-bot.ts              Bolt Socket Mode; @mention -> pipeline
     08-doctor.ts                 read-only preflight: every credential, scope, grant
     09-stamp-version.ts          stamp the commit into BUILD_INFO before a deploy
@@ -479,8 +520,15 @@ cloud-agents/
       slack-fix.ts               startJob / continueJob
       slack-thread.ts            agent id in thread, allowlist, dedupe
       build-loop.ts              the loop: phases, stall/block detection, resumable state
+      build-app.ts               one idea -> one engine loop (CLI + farm)
+      farm.ts                    concurrency pool, FARM_MAX_USD, farm-*.json manifest
+      farm.test.ts
       engine-claude.ts           Max engine: clone, Agent SDK query(), cc- ids
       engine-claude.test.ts
+      engine-local.ts            hybrid/local engines: Ollama executor via qwen-code or aider, Claude rescue
+      engine-local.test.ts
+      routing.ts                 which tier takes which turn; Max utilization ceiling
+      routing.test.ts
       doctor.ts                  verdict model, scope diffing, credential shape checks
       doctor.test.ts
       version.ts                 BUILD_INFO -> version.json -> git -> package.json

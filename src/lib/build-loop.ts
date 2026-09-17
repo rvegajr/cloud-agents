@@ -11,6 +11,7 @@ export interface TurnResult {
   status: "finished" | "error" | "cancelled";
   result?: string;
   runId?: string;
+  prUrl?: string;
 }
 
 export type SendFn = (prompt: string, opts?: { mode?: "agent" | "plan" }) => Promise<TurnResult>;

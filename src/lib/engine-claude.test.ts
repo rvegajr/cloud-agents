@@ -9,7 +9,10 @@ import {
   makeClaudeSend,
   parseClaudeUserIds,
   parseEngine,
+  planUsageSamples,
   profileLineExportsAnthropicKey,
+  rateLimitSamples,
+  samplePlanUsage,
   publicGithubUrl,
   redactGitSecrets,
   scrubbedEnv,
@@ -174,4 +177,54 @@ test("makeClaudeSend returns the result text on success", async () => {
     if (saved === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = saved;
   }
+});
+
+test("planUsageSamples converts /usage windows to routing samples", () => {
+  const s = planUsageSamples(
+    {
+      rate_limits_available: true,
+      rate_limits: {
+        five_hour: { utilization: 12.5, resets_at: "2026-09-17T15:00:00Z" },
+        seven_day: { utilization: 88, resets_at: "2026-09-20T00:00:00Z" },
+      },
+    },
+    "now",
+  );
+  assert.equal(s.length, 2);
+  assert.deepEqual(s[1], { status: "allowed", utilization: 0.88, rateLimitType: "seven_day", resetsAt: Date.parse("2026-09-20T00:00:00Z") / 1000, observedAt: "now" });
+  assert.equal(s[0]!.utilization, 0.125);
+  assert.deepEqual(planUsageSamples({ rate_limits_available: false, rate_limits: null }), []);
+  assert.deepEqual(planUsageSamples({ rate_limits_available: true, rate_limits: { seven_day: { utilization: null, resets_at: null } } }), []);
+});
+
+test("samplePlanUsage is a no-op without the experimental method and swallows its errors", async () => {
+  const got: unknown[] = [];
+  assert.equal(await samplePlanUsage({}, (u) => got.push(u)), false);
+  assert.equal(await samplePlanUsage(null, (u) => got.push(u)), false);
+  const boom = { usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => { throw new Error("nope"); } };
+  assert.equal(await samplePlanUsage(boom, (u) => got.push(u)), false);
+  const ok = {
+    usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => ({
+      rate_limits_available: true,
+      rate_limits: { seven_day: { utilization: 40, resets_at: "2026-09-20T00:00:00Z" } },
+    }),
+  };
+  assert.equal(await samplePlanUsage(ok, (u) => got.push(u)), true);
+  assert.equal(got.length, 1);
+});
+
+test("rateLimitSamples reads every unified window and marks rejection as full", () => {
+  const info = {
+    status: "allowed",
+    resetsAt: 1789662000,
+    rateLimitType: "five_hour",
+    unifiedWindows: { five_hour: { utilization: 0.04, resetsAt: 1789662000 }, seven_day: { utilization: 0.05, resetsAt: 1790082000 } },
+  } as unknown as Parameters<typeof rateLimitSamples>[0];
+  const s = rateLimitSamples(info, "t");
+  assert.deepEqual(s.map((x) => [x.rateLimitType, x.utilization, x.resetsAt]), [["five_hour", 0.04, 1789662000], ["seven_day", 0.05, 1790082000]]);
+  const legacy = rateLimitSamples({ status: "allowed_warning", utilization: 0.9, rateLimitType: "seven_day", resetsAt: 5 }, "t");
+  assert.deepEqual(legacy, [{ status: "allowed_warning", utilization: 0.9, rateLimitType: "seven_day", resetsAt: 5, observedAt: "t" }]);
+  const rejected = rateLimitSamples({ status: "rejected", rateLimitType: "seven_day", resetsAt: 9 }, "t");
+  assert.equal(rejected.at(-1)!.utilization, 1);
+  assert.equal(rateLimitSamples({ status: "allowed", unifiedWindows: { seven_day: { utilization: 42 } } } as never, "t")[0]!.utilization, 0.42);
 });

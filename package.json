@@ -17,11 +17,13 @@
     "resume": "tsx src/04-resume.ts",
     "status": "tsx src/05-status.ts",
     "build-app": "tsx src/06-build-app.ts",
+    "build-farm": "tsx src/10-build-farm.ts",
     "doctor": "tsx src/08-doctor.ts",
     "stamp": "tsx src/09-stamp-version.ts",
     "deploy": "tsx src/09-stamp-version.ts --railway && railway up",
     "slack": "tsx src/07-slack-bot.ts",
-    "start": "tsx src/07-slack-bot.ts"
+    "start": "tsx src/07-slack-bot.ts",
+    "max-usage": "tsx tools/max-usage.mts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.273",

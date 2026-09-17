@@ -3,12 +3,13 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { query, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { query, type Options, type SDKMessage, type SDKRateLimitInfo } from "@anthropic-ai/claude-agent-sdk";
 import type { SendFn, TurnResult } from "./build-loop.js";
 import type { AgentHandle } from "./slack-fix.js";
 import { parseAllowlist } from "./slack-thread.js";
+import { saveMaxUsage, type MaxUsage } from "./routing.js";
 
-export type EngineName = "cursor" | "claude";
+export type EngineName = "cursor" | "claude" | "hybrid" | "local";
 
 export class MaxExhausted extends Error {
   constructor(public resetsAt?: number) {
@@ -19,7 +20,13 @@ export class MaxExhausted extends Error {
 
 export function parseEngine(raw?: string): EngineName {
   const v = (raw ?? process.env.ENGINE ?? "cursor").trim().toLowerCase();
-  return v === "claude" ? "claude" : "cursor";
+  if (v === "claude" || v === "hybrid" || v === "local") return v;
+  return "cursor";
+}
+
+/** Engines whose workspace is a local clone driven by this process (not a Cursor VM). */
+export function isLocalWorkspaceEngine(engine: EngineName): engine is "claude" | "hybrid" | "local" {
+  return engine !== "cursor";
 }
 
 export function isClaudeAgentId(id: string | undefined): boolean {
@@ -128,16 +135,90 @@ export function authenticatedCloneUrl(repo: string, token?: string): string {
 
 export type ClaudeQueryFn = (params: { prompt: string; options?: Options }) => AsyncIterable<SDKMessage>;
 
+/** The experimental `/usage` control request, when the query object offers it. */
+type PlanUsageWindow = { utilization: number | null; resets_at: string | null } | null | undefined;
+type UsageCapable = {
+  usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: (opts?: { skipBehaviors?: boolean }) => Promise<{
+    rate_limits_available: boolean;
+    rate_limits: { five_hour?: PlanUsageWindow; seven_day?: PlanUsageWindow } | null;
+  }>;
+};
+
+/** Convert the `/usage` windows (0-100, ISO reset) to routing samples (0-1, epoch seconds). */
+export function planUsageSamples(
+  res: { rate_limits_available: boolean; rate_limits: { five_hour?: PlanUsageWindow; seven_day?: PlanUsageWindow } | null },
+  observedAt = new Date().toISOString(),
+): MaxUsage[] {
+  if (!res.rate_limits_available || !res.rate_limits) return [];
+  const out: MaxUsage[] = [];
+  for (const type of ["five_hour", "seven_day"] as const) {
+    const w = res.rate_limits[type];
+    if (!w || typeof w.utilization !== "number") continue;
+    const reset = w.resets_at ? Date.parse(w.resets_at) : NaN;
+    out.push({
+      status: "allowed",
+      utilization: Math.min(Math.max(w.utilization, 0), 100) / 100,
+      rateLimitType: type,
+      resetsAt: Number.isFinite(reset) ? Math.floor(reset / 1000) : undefined,
+      observedAt,
+    });
+  }
+  return out;
+}
+
+/**
+ * Routing samples from one `rate_limit_event`. The typed fields describe the
+ * window that changed; `unifiedWindows` (present on current CLIs, not yet in
+ * the type) carries every window's utilization as a 0-1 fraction.
+ */
+export function rateLimitSamples(info: SDKRateLimitInfo, observedAt = new Date().toISOString()): MaxUsage[] {
+  const out: MaxUsage[] = [];
+  const windows = (info as { unifiedWindows?: Record<string, { utilization?: number; resetsAt?: number } | undefined> }).unifiedWindows;
+  for (const type of ["five_hour", "seven_day"] as const) {
+    const w = windows?.[type];
+    if (!w || typeof w.utilization !== "number") continue;
+    const u = w.utilization > 1 ? w.utilization / 100 : w.utilization;
+    out.push({ status: info.status, utilization: u, rateLimitType: type, resetsAt: w.resetsAt, observedAt });
+  }
+  if (!out.length || info.status === "rejected") {
+    out.push({
+      status: info.status,
+      utilization: info.status === "rejected" ? 1 : info.utilization,
+      rateLimitType: info.rateLimitType,
+      resetsAt: info.resetsAt,
+      observedAt,
+    });
+  }
+  return out;
+}
+
+/** Ask the live query for the plan windows; silent when the SDK or plan does not offer them. */
+export async function samplePlanUsage(q: unknown, onSample: (u: MaxUsage) => void): Promise<boolean> {
+  const fn = (q as UsageCapable | null)?.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
+  if (typeof fn !== "function") return false;
+  try {
+    const res = await fn.call(q, { skipBehaviors: true });
+    const samples = planUsageSamples(res);
+    for (const u of samples) onSample(u);
+    return samples.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export function makeClaudeSend(opts: {
   cwd: string;
   model?: string;
   sessionId?: string;
   onSession?: (id: string) => void;
   onCost?: (usd: number) => void;
+  /** Every rate-limit sample the SDK reports, exhausted or not. Handles pass `saveMaxUsage` so routing can read them. */
+  onRateLimit?: (usage: MaxUsage) => void;
   queryFn?: ClaudeQueryFn;
 }): SendFn {
   let sessionId = opts.sessionId;
   const run = opts.queryFn ?? query;
+  const onRateLimit = opts.onRateLimit ?? (() => {});
   return async (prompt, o): Promise<TurnResult> => {
     assertClaudeCredential();
     let result: string | undefined;
@@ -163,6 +244,7 @@ export function makeClaudeSend(opts: {
       }
       if (m.type === "rate_limit_event") {
         const info = m.rate_limit_info;
+        for (const u of rateLimitSamples(info)) onRateLimit(u);
         if (info.errorCode === "credits_required" || info.status === "rejected" || info.isUsingOverage || info.overageInUse) {
           throw new MaxExhausted(info.resetsAt);
         }
@@ -186,6 +268,12 @@ export interface ClaudeRecord {
   branch: string;
   apiEquivalentUsd: number;
   prUrl?: string;
+  /** Absent on records written before the hybrid engine existed: those are plain Claude. */
+  engine?: "claude" | "hybrid" | "local";
+  /** Hybrid/local only: outputs of earlier turns, replayed to the memoryless local model. */
+  transcript?: { kind: string; tier: "claude" | "local"; result: string }[];
+  localTurns?: number;
+  localSeconds?: number;
 }
 
 function recordsDir(): string {
@@ -204,7 +292,7 @@ export function loadClaudeRecord(agentId: string): ClaudeRecord | undefined {
   return JSON.parse(readFileSync(path, "utf8")) as ClaudeRecord;
 }
 
-function saveClaudeRecord(rec: ClaudeRecord): void {
+export function saveClaudeRecord(rec: ClaudeRecord): void {
   writeFileSync(recordPath(rec.agentId), `${JSON.stringify(rec, null, 2)}\n`);
 }
 
@@ -244,8 +332,34 @@ export function pushAndOpenPr(cwd: string, title: string): string {
   return url;
 }
 
-function git(cwd: string, args: string[]): string {
+export function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+}
+
+/** Open (or re-open on a fresh box) the clone behind a cc- record. Shared by the Claude and hybrid engines. */
+export function openClaudeWorkspace(args: { repo: string; ref: string; agentId?: string }): ClaudeRecord {
+  if (args.agentId) {
+    const loaded = loadClaudeRecord(args.agentId);
+    if (!loaded) throw new Error(`No Claude workspace for ${args.agentId}. Start a new job rather than resume.`);
+    if (!existsSync(loaded.cwd)) {
+      loaded.cwd = cloneWorkspace(loaded.repo, loaded.ref);
+      try {
+        execFileSync("git", ["fetch", "origin", loaded.branch], { cwd: loaded.cwd, stdio: "inherit" });
+        execFileSync("git", ["checkout", loaded.branch], { cwd: loaded.cwd, stdio: "inherit" });
+      } catch {
+        execFileSync("git", ["checkout", "-b", loaded.branch], { cwd: loaded.cwd, stdio: "inherit" });
+      }
+      saveClaudeRecord(loaded);
+    }
+    return loaded;
+  }
+  const agentId = newClaudeAgentId();
+  const cwd = cloneWorkspace(args.repo, args.ref);
+  const branch = `claude/${agentId.slice(3, 11)}`;
+  execFileSync("git", ["checkout", "-b", branch], { cwd, stdio: "inherit" });
+  const rec: ClaudeRecord = { agentId, cwd, repo: publicGithubUrl(args.repo), ref: args.ref, branch, apiEquivalentUsd: 0 };
+  saveClaudeRecord(rec);
+  return rec;
 }
 
 export async function createClaudeHandle(args: {
@@ -257,36 +371,7 @@ export async function createClaudeHandle(args: {
   queryFn?: ClaudeQueryFn;
 }): Promise<AgentHandle> {
   assertClaudeCredential();
-  let rec: ClaudeRecord;
-  if (args.agentId) {
-    const loaded = loadClaudeRecord(args.agentId);
-    if (!loaded) throw new Error(`No Claude workspace for ${args.agentId}. Start a new job rather than resume.`);
-    rec = loaded;
-    if (!existsSync(rec.cwd)) {
-      rec.cwd = cloneWorkspace(rec.repo, rec.ref);
-      try {
-        execFileSync("git", ["fetch", "origin", rec.branch], { cwd: rec.cwd, stdio: "inherit" });
-        execFileSync("git", ["checkout", rec.branch], { cwd: rec.cwd, stdio: "inherit" });
-      } catch {
-        execFileSync("git", ["checkout", "-b", rec.branch], { cwd: rec.cwd, stdio: "inherit" });
-      }
-      saveClaudeRecord(rec);
-    }
-  } else {
-    const agentId = newClaudeAgentId();
-    const cwd = cloneWorkspace(args.repo, args.ref);
-    const branch = `claude/${agentId.slice(3, 11)}`;
-    execFileSync("git", ["checkout", "-b", branch], { cwd, stdio: "inherit" });
-    rec = {
-      agentId,
-      cwd,
-      repo: publicGithubUrl(args.repo),
-      ref: args.ref,
-      branch,
-      apiEquivalentUsd: 0,
-    };
-    saveClaudeRecord(rec);
-  }
+  const rec = openClaudeWorkspace(args);
 
   const send = makeClaudeSend({
     cwd: rec.cwd,
@@ -299,6 +384,9 @@ export async function createClaudeHandle(args: {
     onCost: (usd) => {
       rec.apiEquivalentUsd += usd;
       saveClaudeRecord(rec);
+    },
+    onRateLimit: (u) => {
+      saveMaxUsage(u);
     },
     queryFn: args.queryFn,
   });

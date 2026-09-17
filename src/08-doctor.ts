@@ -31,6 +31,8 @@ import {
 } from "./lib/engine-claude.js";
 import { parseAllowlist, parseBotIds, parseChannelRepos } from "./lib/slack-thread.js";
 import { formatVersion, versionInfo } from "./lib/version.js";
+import { localConfigFromEnv, modelIsPulled, ollamaModels } from "./lib/engine-local.js";
+import { formatMaxUsage, loadMaxUsage, policyFromEnv, usageIsCurrent } from "./lib/routing.js";
 import {
   classifyGitHubToken,
   collectRepoRefs,
@@ -166,11 +168,57 @@ async function checkCursor(): Promise<void> {
   }
 }
 
+/** ENGINE=hybrid|local: the Ollama executor and the Max ceiling it protects. */
+async function checkLocalEngine(): Promise<void> {
+  const engine = parseEngine();
+  const wantsLocal = engine === "hybrid" || engine === "local" || Boolean(envVar("LOCAL_MODEL"));
+  if (!wantsLocal) {
+    add("A", "local", "executor", "skip", "ENGINE is not hybrid|local and LOCAL_MODEL is unset");
+    return;
+  }
+  const cfg = localConfigFromEnv();
+  let pulled: string[] | undefined;
+  try {
+    pulled = await ollamaModels(cfg.host);
+    add("A", "local", "ollama", "pass", `${cfg.host} (${pulled.length} models)`);
+  } catch (err) {
+    add("A", "local", "ollama", "fail", `${cfg.host}: ${msg(err)}`, "start it: `ollama serve` (or brew services start ollama); set OLLAMA_HOST for a remote box");
+  }
+  if (pulled) {
+    for (const [label, model] of [["LOCAL_MODEL", cfg.model], ["LOCAL_PLANNER_MODEL", cfg.plannerModel]] as const) {
+      if (label === "LOCAL_PLANNER_MODEL" && model === cfg.model) continue;
+      if (modelIsPulled(model, pulled)) add("A", "local", label, "pass", model);
+      else add("A", "local", label, "fail", `${model} not pulled`, `ollama pull ${model}`);
+    }
+  }
+  const bin = cfg.runner === "aider" ? "aider" : "qwen";
+  const ver = await run(bin, ["--version"], 20_000);
+  if (ver.ok) add("A", "local", "runner", "pass", `${bin} ${ver.out.split("\n")[0]?.trim() ?? ""}`);
+  else {
+    add(
+      "A",
+      "local",
+      "runner",
+      "fail",
+      `${bin} not on PATH`,
+      bin === "qwen" ? "npm i -g @qwen-code/qwen-code (or LOCAL_RUNNER=aider)" : "pipx install aider-chat (or LOCAL_RUNNER=qwen)",
+    );
+  }
+  if (engine === "hybrid") {
+    const policy = policyFromEnv("hybrid");
+    const usage = loadMaxUsage();
+    const line = formatMaxUsage(usage);
+    if (!usageIsCurrent(usage)) add("A", "local", "max ceiling", "warn", `${line}; ceiling ${(policy.ceiling * 100).toFixed(0)}%`, "run `npm run max-usage` (one trivial Max turn) or any Claude turn; until then every plan turn is allowed");
+    else if (usage.utilization >= policy.ceiling) add("A", "local", "max ceiling", "warn", `${line}; at/over the ${(policy.ceiling * 100).toFixed(0)}% ceiling, plans will ${policy.overCeiling === "stop" ? "stop" : `run on ${cfg.plannerModel}`}`);
+    else add("A", "local", "max ceiling", "pass", `${line}; ceiling ${(policy.ceiling * 100).toFixed(0)}%`);
+  }
+}
+
 async function checkClaudeEngine(): Promise<void> {
   const engine = parseEngine();
   const users = parseClaudeUserIds(process.env.SLACK_CLAUDE_USER_IDS);
-  const wantsClaude = engine === "claude" || users.length > 0;
-  add("A", "claude", "ENGINE", engine === "claude" ? "pass" : "skip", `CLI default ENGINE=${engine}`);
+  const wantsClaude = engine === "claude" || engine === "hybrid" || users.length > 0;
+  add("A", "claude", "ENGINE", wantsClaude ? "pass" : "skip", `CLI default ENGINE=${engine}`);
   if (envVar("ANTHROPIC_API_KEY")) {
     add(
       "A",
@@ -209,13 +257,13 @@ async function checkClaudeEngine(): Promise<void> {
   if (users.length) add("A", "claude", "Slack Max users", "pass", users.join(", "));
   else add("A", "claude", "Slack Max users", "skip", "SLACK_CLAUDE_USER_IDS empty — Slack stays on Cursor");
   if (envVar("CLAUDE_CODE_OAUTH_TOKEN")) add("A", "claude", "oauth token", "pass", "CLAUDE_CODE_OAUTH_TOKEN set");
-  else if (engine === "claude") {
+  else if (engine === "claude" || engine === "hybrid") {
     add(
       "A",
       "claude",
       "oauth token",
       "warn",
-      "ENGINE=claude but no CLAUDE_CODE_OAUTH_TOKEN",
+      `ENGINE=${engine} but no CLAUDE_CODE_OAUTH_TOKEN`,
       "run `claude setup-token` on this box and put the token in .env",
     );
   } else {
@@ -719,6 +767,7 @@ const gates = [
 if (want("A")) await checkHygiene();
 if (want("A")) await checkCursor();
 if (want("A")) await checkClaudeEngine();
+if (want("A")) await checkLocalEngine();
 if (want("B")) {
   await checkGit();
   checkTargetRepoKit();

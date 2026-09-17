@@ -15,6 +15,47 @@ npm run deploy                        # stamp the commit, then ship
 
 ## [Unreleased]
 
+### Added
+
+- **Cursor farm (`npm run build-farm`).** One markdown file per app under
+  `--ideas-dir`; a concurrency pool of Cursor Cloud Agents (Fast off); a
+  `FARM_MAX_USD` cap; `.runs/farm-*.json` as the review board. Always
+  `ENGINE=cursor`. After `gh repo create`, the kit grants the Cursor GitHub App
+  (All repositories inherit; Selected repositories get a PUT) and will not boot
+  a VM if the grant fails. `src/lib/farm.ts`, `src/10-build-farm.ts`. The
+  one-idea loop lives in `src/lib/build-app.ts` so the existing
+  `npm run build-app` CLI and the farm share it. First 3-wide probe (17 Sep
+  2026, `ideas/ready`, concurrency 3): three VMs CREATING together;
+  [farm-json-lines #1](https://github.com/rvegajr/farm-json-lines/pull/1),
+  [farm-slugify #1](https://github.com/rvegajr/farm-slugify/pull/1); iso-week
+  had no PR. Charged **$1.00**. All three later `run-failed` mid-loop (resume
+  `bc-…`). A classic `gh` token cannot list GitHub App installations; All
+  repositories still inherited. Do not raise concurrency until a wave
+  finishes `complete`.
+- **Hybrid and local engines** (`--engine hybrid|local`, `ENGINE=`). Same
+  three sends, same `cc-` records and `claude/…` branches as the Claude engine,
+  but the implement and verify turns run on a local Ollama model driven by
+  qwen-code (or aider) inside the clone, and Claude Max is spent on the plan
+  only, plus one rescue turn when the local verifier does not report done.
+  `src/lib/engine-local.ts`. The planning prompt gains an "Executor profile"
+  section so Max writes plans a memoryless local model can follow verbatim;
+  the local model gets the last three turn outputs replayed as context.
+- **Max usage ceiling.** `makeClaudeSend` now reports every `rate_limit_event`
+  (including the per-window `unifiedWindows` utilization the CLI sends) and the
+  handles record it to `.runs/max-usage.json`. Hybrid routing
+  reads it before each Claude turn and, at or above `MAX_UTILIZATION_CEILING`
+  (default 85%), diverts the turn to `LOCAL_PLANNER_MODEL` or stops
+  (`HYBRID_OVER_CEILING`). Extra usage is never bought. `src/lib/routing.ts`.
+- `npm run max-usage` prints the 5-hour and 7-day Max windows and records the
+  sample for routing, for one trivial Max turn. `tools/max-usage.mts`.
+- `npm run pipeline -- --engine claude|hybrid|local` runs the plan/implement/
+  verify CLI on a local clone; it was Cursor-only.
+- Doctor phase A gains a `local` group: Ollama reachable, `LOCAL_MODEL` pulled,
+  runner on PATH, and the last Max usage sample.
+- New env: `OLLAMA_HOST`, `LOCAL_MODEL`, `LOCAL_PLANNER_MODEL`, `LOCAL_RUNNER`,
+  `LOCAL_TURN_TIMEOUT_MIN`, `MAX_UTILIZATION_CEILING`, `HYBRID_OVER_CEILING`,
+  `HYBRID_PLAN`, `HYBRID_IMPLEMENT`, `HYBRID_VERIFY`, `HYBRID_RESCUE`.
+
 ### Changed
 
 - **Composer Fast is off.** Every `Agent.create` / `Agent.prompt` now sends

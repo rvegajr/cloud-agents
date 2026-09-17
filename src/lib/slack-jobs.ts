@@ -29,7 +29,8 @@ import { printStream } from "./stream.js";
 import type { JobRecord, JobStore, JobsBody } from "./jobs-http.js";
 import { mentionText } from "./jobs-http.js";
 import { selectModel } from "./model.js";
-import { createClaudeHandle, slackUsesClaude } from "./engine-claude.js";
+import { parseEngine, slackUsesClaude } from "./engine-claude.js";
+import { createEngineHandle, engineOfRecord } from "./engine-local.js";
 
 export interface SlackClient {
   chat: {
@@ -277,18 +278,22 @@ export function createSlackJobs(cfg: SlackJobsConfig) {
         await react("hourglass_flowing_sand", "remove");
         return;
       }
-      if (enginePick === "claude") console.log(`engine=claude user=${args.user ?? ""}`);
+      // Allowlisted users get whatever ENGINE names among the Max-backed engines
+      // (claude, hybrid, local); ENGINE=cursor still means plain claude for them.
+      const envEngine = parseEngine();
+      const maxEngine = envEngine === "cursor" ? "claude" : envEngine;
+      if (enginePick === "claude") console.log(`engine=${maxEngine} user=${args.user ?? ""}`);
 
       const runtime: JobRuntime = {
         create: async ({ repo: r, ref: startingRef, autoCreatePR, model: modelId }) => {
           if (enginePick === "claude") {
-            const handle = await createClaudeHandle({
+            const handle = await createEngineHandle(maxEngine, {
               repo: r,
               ref: startingRef,
               autoCreatePR: autoCreatePR ?? cli.options.autopr ?? true,
               model: modelId ?? cli.options.model,
             });
-            console.log(`created ${handle.agentId} (claude) for ${r}@${startingRef} project=${cli.project?.name ?? "(channel)"}`);
+            console.log(`created ${handle.agentId} (${maxEngine}) for ${r}@${startingRef} project=${cli.project?.name ?? "(channel)"}`);
             if (jobId) cfg.store.patch(jobId, { agentId: handle.agentId });
             return handle;
           }
@@ -319,14 +324,15 @@ export function createSlackJobs(cfg: SlackJobsConfig) {
         },
         resume: async (agentId) => {
           if (enginePick === "claude") {
-            const handle = await createClaudeHandle({
+            const recEngine = engineOfRecord(agentId, maxEngine);
+            const handle = await createEngineHandle(recEngine, {
               repo,
               ref,
               agentId,
               autoCreatePR: cli.options.autopr ?? true,
               model: cli.options.model,
             });
-            console.log(`resumed ${agentId} (claude)`);
+            console.log(`resumed ${agentId} (${recEngine})`);
             if (jobId) cfg.store.patch(jobId, { agentId });
             return handle;
           }
