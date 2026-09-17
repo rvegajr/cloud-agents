@@ -200,6 +200,9 @@ export function parseMentionCli(
   const named = IDENT_RE.test(first) ? ctx.projects.get(first) : undefined;
 
   if (named) {
+    if (isVersionToken(rest)) {
+      return { kind: "version", project: named, request: "", options, explicitHelp: true };
+    }
     if (isHelpToken(rest)) {
       return { kind: "project-usage", project: named, request: "", options, explicitHelp: rest !== "" };
     }
@@ -291,7 +294,7 @@ export function formatGlobalUsage(opts: {
   lines.push("options:");
   lines.push("  branch=<name>        base branch (default: the project's)");
   lines.push("  autopr=true|false    open a PR when done (default: true)");
-  lines.push("  model=<id>           override CURSOR_MODEL");
+  lines.push("  model=<id>           override CURSOR_MODEL (Fast is always off)");
   lines.push("");
   lines.push(`${bot}                 this usage`);
   lines.push(`${bot} <project>       options for that project`);

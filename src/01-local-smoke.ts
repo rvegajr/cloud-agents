@@ -9,7 +9,8 @@
  *   npm run smoke -- --prompt "List the prompt templates in this repo and what each is for"
  */
 import { Agent } from "@cursor/sdk";
-import { loadEnv, env, flags } from "./lib/env.js";
+import { loadEnv, flags } from "./lib/env.js";
+import { selectModel } from "./lib/model.js";
 import { resolveApiKey } from "./lib/auth.js";
 import { reportResult, reportStartupFailure } from "./lib/report.js";
 
@@ -24,7 +25,7 @@ try {
   const apiKey = await resolveApiKey();
   const result = await Agent.prompt(prompt, {
     apiKey,
-    model: { id: env("CURSOR_MODEL", "composer-2.5") },
+    model: selectModel(),
     local: { cwd: process.cwd() },
   });
   console.log(result.result ?? "(no final text)");

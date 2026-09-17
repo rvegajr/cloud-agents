@@ -411,6 +411,10 @@ Transcripts and cost live in
 Download a zip of `main` from
 [the v1.0.0 release](https://github.com/rvegajr/snippet-vault/releases/tag/v1.0.0).
 
+The same idea, rerun 17 September 2026 with Fast off and a Claude Max twin:
+Cursor **$1.20 / 13.5 min**, Claude **$6.65 API-equivalent / 16.2 min**, both
+`complete`. [ARTICLE-CLAUDE-MAX-RESULTS.md](ARTICLE-CLAUDE-MAX-RESULTS.md).
+
 ---
 
 ## Step 8: The one thing the agent cannot do for you

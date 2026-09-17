@@ -7,6 +7,8 @@ export interface StreamOptions {
   tools?: boolean;
   /** Print reasoning text. Default false: noisy, and cloud models may not emit it. */
   thinking?: boolean;
+  /** Prepended to status/tool/usage lines (farm runs interleave otherwise). */
+  prefix?: string;
 }
 
 /**
@@ -15,7 +17,8 @@ export interface StreamOptions {
  * you observe, waiting is how you get the answer.
  */
 export async function printStream(run: Run, opts: StreamOptions = {}): Promise<void> {
-  const { text = true, tools = true, thinking = false } = opts;
+  const { text = true, tools = true, thinking = false, prefix } = opts;
+  const tag = prefix ? `${prefix} ` : "";
   let lastWasText = false;
 
   const nl = () => {
@@ -45,16 +48,18 @@ export async function printStream(run: Run, opts: StreamOptions = {}): Promise<v
       case "tool_call":
         if (!tools) break;
         nl();
-        console.log(`\x1b[36m[tool]\x1b[0m ${event.name} ${event.status}${summarizeArgs(event.args)}`);
+        console.log(`${tag}\x1b[36m[tool]\x1b[0m ${event.name} ${event.status}${summarizeArgs(event.args)}`);
         break;
       case "status":
         nl();
-        console.log(`\x1b[33m[status]\x1b[0m ${event.status}${event.message ? ` - ${event.message}` : ""}`);
+        console.log(
+          `${tag}\x1b[33m[status]\x1b[0m ${event.status}${event.message ? ` - ${event.message}` : ""}`,
+        );
         break;
       case "usage":
         nl();
         console.log(
-          `\x1b[2m[usage] in=${event.usage.inputTokens} out=${event.usage.outputTokens} total=${event.usage.totalTokens}\x1b[0m`,
+          `${tag}\x1b[2m[usage] in=${event.usage.inputTokens} out=${event.usage.outputTokens} total=${event.usage.totalTokens}\x1b[0m`,
         );
         break;
       default:

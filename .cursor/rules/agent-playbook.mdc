@@ -1,0 +1,29 @@
+---
+description: Efficient generation playbook for this factory kit
+alwaysApply: true
+---
+
+# Efficient generation
+
+This repo **is** the factory (`npm run build-farm`, `build-app`, Slack bot).
+
+## Door
+
+- `bc-…` → `npm run build-app -- --resume bc-…`. Never a second job.
+- Existing product → Slack `@CloudAgents`. Never farm a new repo for it.
+- New independent idea → `ideas/ready/*.md` then `npm run build-farm`, or `--engine hybrid`.
+
+## Meters
+
+- Farm and Slack: `composer-2.5`, Fast off. `FARM_MAX_USD` caps a wave.
+- Hybrid: Max plans, local types, 85% ceiling, never extra usage.
+- Empty `SLACK_CLAUDE_USER_IDS`. No `ANTHROPIC_API_KEY` in the shell.
+- Resume failed farm jobs. Do not re-farm. Do not raise concurrency until `complete`.
+
+## Close (last lines of every job)
+
+Write COST last. Every AI provider is its own meter — never add them into one number. Log `COST running` as spend arrives; close with the board. `npm run cost-board`. Never omit it.
+
+- Whatever engine is running, record it (`cursor:billed`, `claude:api-eq`, `local:local`, or a new slug). Do not fold an unknown AI into Cursor.
+- Billed meters use the invoice (`chargedCents`). API-eq / local / tracked still get a line.
+- Missing usage: `COST this run: unknown` on that meter.

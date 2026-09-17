@@ -22,8 +22,17 @@ import { Agent, Cursor } from "@cursor/sdk";
 import { loadEnv, flags } from "./lib/env.js";
 import { resolveApiKey } from "./lib/auth.js";
 import { parseProjects } from "./lib/slack-cli.js";
-import { parseAllowlist, parseChannelRepos } from "./lib/slack-thread.js";
+import { selectModel } from "./lib/model.js";
+import {
+  claudeApiKeySourceFromAuth,
+  parseClaudeUserIds,
+  parseEngine,
+  profileLineExportsAnthropicKey,
+} from "./lib/engine-claude.js";
+import { parseAllowlist, parseBotIds, parseChannelRepos } from "./lib/slack-thread.js";
 import { formatVersion, versionInfo } from "./lib/version.js";
+import { localConfigFromEnv, modelIsPulled, ollamaModels } from "./lib/engine-local.js";
+import { formatMaxUsage, loadMaxUsage, policyFromEnv, usageIsCurrent } from "./lib/routing.js";
 import {
   classifyGitHubToken,
   collectRepoRefs,
@@ -126,7 +135,7 @@ async function checkCursor(): Promise<void> {
   try {
     const models = await Cursor.models.list(creds);
     const ids = models.map((m) => m.id);
-    if (ids.includes(model)) add("A", "cursor", "model", "pass", model);
+    if (ids.includes(model)) add("A", "cursor", "model", "pass", `${model} (fast=${selectModel(model).params?.[0]?.value})`);
     else add("A", "cursor", "model", "fail", `CURSOR_MODEL=${model} is not available to this account`, `pick one of: ${ids.slice(0, 8).join(", ")}`);
   } catch (err) {
     add("A", "cursor", "model", "warn", `could not list models (${msg(err)})`, "retry; the key worked for Cursor.me so this is usually transient");
@@ -156,6 +165,144 @@ async function checkCursor(): Promise<void> {
     }
   } catch (err) {
     add("A", "cursor", "github grant", "fail", msg(err), "cursor.com/agents → connect GitHub");
+  }
+}
+
+/** ENGINE=hybrid|local: the Ollama executor and the Max ceiling it protects. */
+async function checkLocalEngine(): Promise<void> {
+  const engine = parseEngine();
+  const wantsLocal = engine === "hybrid" || engine === "local" || Boolean(envVar("LOCAL_MODEL"));
+  if (!wantsLocal) {
+    add("A", "local", "executor", "skip", "ENGINE is not hybrid|local and LOCAL_MODEL is unset");
+    return;
+  }
+  const cfg = localConfigFromEnv();
+  let pulled: string[] | undefined;
+  try {
+    pulled = await ollamaModels(cfg.host);
+    add("A", "local", "ollama", "pass", `${cfg.host} (${pulled.length} models)`);
+  } catch (err) {
+    add("A", "local", "ollama", "fail", `${cfg.host}: ${msg(err)}`, "start it: `ollama serve` (or brew services start ollama); set OLLAMA_HOST for a remote box");
+  }
+  if (pulled) {
+    for (const [label, model] of [["LOCAL_MODEL", cfg.model], ["LOCAL_PLANNER_MODEL", cfg.plannerModel]] as const) {
+      if (label === "LOCAL_PLANNER_MODEL" && model === cfg.model) continue;
+      if (modelIsPulled(model, pulled)) add("A", "local", label, "pass", model);
+      else add("A", "local", label, "fail", `${model} not pulled`, `ollama pull ${model}`);
+    }
+  }
+  const bin = cfg.runner === "aider" ? "aider" : "qwen";
+  const ver = await run(bin, ["--version"], 20_000);
+  if (ver.ok) add("A", "local", "runner", "pass", `${bin} ${ver.out.split("\n")[0]?.trim() ?? ""}`);
+  else {
+    add(
+      "A",
+      "local",
+      "runner",
+      "fail",
+      `${bin} not on PATH`,
+      bin === "qwen" ? "npm i -g @qwen-code/qwen-code (or LOCAL_RUNNER=aider)" : "pipx install aider-chat (or LOCAL_RUNNER=qwen)",
+    );
+  }
+  if (engine === "hybrid") {
+    const policy = policyFromEnv("hybrid");
+    const usage = loadMaxUsage();
+    const line = formatMaxUsage(usage);
+    if (!usageIsCurrent(usage)) add("A", "local", "max ceiling", "warn", `${line}; ceiling ${(policy.ceiling * 100).toFixed(0)}%`, "run `npm run max-usage` (one trivial Max turn) or any Claude turn; until then every plan turn is allowed");
+    else if (usage.utilization >= policy.ceiling) add("A", "local", "max ceiling", "warn", `${line}; at/over the ${(policy.ceiling * 100).toFixed(0)}% ceiling, plans will ${policy.overCeiling === "stop" ? "stop" : `run on ${cfg.plannerModel}`}`);
+    else add("A", "local", "max ceiling", "pass", `${line}; ceiling ${(policy.ceiling * 100).toFixed(0)}%`);
+  }
+}
+
+async function checkClaudeEngine(): Promise<void> {
+  const engine = parseEngine();
+  const users = parseClaudeUserIds(process.env.SLACK_CLAUDE_USER_IDS);
+  const wantsClaude = engine === "claude" || engine === "hybrid" || users.length > 0;
+  add("A", "claude", "ENGINE", wantsClaude ? "pass" : "skip", `CLI default ENGINE=${engine}`);
+  if (envVar("ANTHROPIC_API_KEY")) {
+    add(
+      "A",
+      "claude",
+      "ANTHROPIC_API_KEY",
+      "fail",
+      "set; ENGINE=claude would bill the API, not Max",
+      "unset ANTHROPIC_API_KEY in this shell and in the host env",
+    );
+  } else {
+    add("A", "claude", "ANTHROPIC_API_KEY", "pass", "unset");
+  }
+
+  const home = homedir();
+  const profiles = [".zshrc", ".zprofile", ".zshenv", ".bashrc", ".bash_profile", ".profile"];
+  const exporting: string[] = [];
+  for (const rel of profiles) {
+    const path = join(home, rel);
+    if (!existsSync(path)) continue;
+    const body = readFileSync(path, "utf8");
+    if (body.split(/\r?\n/).some(profileLineExportsAnthropicKey)) exporting.push(`~/${rel}`);
+  }
+  if (exporting.length) {
+    add(
+      "A",
+      "claude",
+      "shell profile",
+      "fail",
+      `${exporting.join(", ")} export ANTHROPIC_API_KEY (interactive claude bills the API)`,
+      "comment or remove that export; keep product keys in project .env files",
+    );
+  } else {
+    add("A", "claude", "shell profile", "pass", "no ANTHROPIC_API_KEY export in the usual profile files");
+  }
+
+  if (users.length) add("A", "claude", "Slack Max users", "pass", users.join(", "));
+  else add("A", "claude", "Slack Max users", "skip", "SLACK_CLAUDE_USER_IDS empty — Slack stays on Cursor");
+  if (envVar("CLAUDE_CODE_OAUTH_TOKEN")) add("A", "claude", "oauth token", "pass", "CLAUDE_CODE_OAUTH_TOKEN set");
+  else if (engine === "claude" || engine === "hybrid") {
+    add(
+      "A",
+      "claude",
+      "oauth token",
+      "warn",
+      `ENGINE=${engine} but no CLAUDE_CODE_OAUTH_TOKEN`,
+      "run `claude setup-token` on this box and put the token in .env",
+    );
+  } else {
+    add("A", "claude", "oauth token", "skip", "not required unless ENGINE=claude or SLACK_CLAUDE_USER_IDS is set");
+  }
+
+  const auth = await run("claude", ["auth", "status"], 20_000);
+  if (auth.out.startsWith("cannot spawn") || (!auth.ok && !auth.out)) {
+    add(
+      "A",
+      "claude",
+      "claude auth status",
+      wantsClaude ? "fail" : "skip",
+      "claude CLI not on PATH",
+      "install Claude Code and run `claude auth login`; ENGINE=claude needs it",
+    );
+    return;
+  }
+  const source = claudeApiKeySourceFromAuth(auth.out);
+  if (source === "none") {
+    add("A", "claude", "claude auth status", "pass", "apiKeySource=none (Max / subscription, not the API)");
+  } else if (source === "unparseable") {
+    add(
+      "A",
+      "claude",
+      "claude auth status",
+      wantsClaude ? "fail" : "warn",
+      "could not parse `claude auth status`",
+      "run `claude auth status` yourself; you want apiKeySource none",
+    );
+  } else {
+    add(
+      "A",
+      "claude",
+      "claude auth status",
+      "fail",
+      `apiKeySource=${source}; this bills the API, not Max`,
+      "unset ANTHROPIC_API_KEY, open a new shell, run `claude auth status` until apiKeySource is none",
+    );
   }
 }
 
@@ -338,6 +485,36 @@ async function checkSlack(): Promise<void> {
     if (info.ok) add("C", "slack", "cursor app pointer", "pass", `mentions of ${cursorUser} get a pointer to @${botUser}`);
     else add("C", "slack", "cursor app pointer", "warn", info.error ?? "not resolved", "leave SLACK_CURSOR_USER_ID empty unless Cursor's own app is installed too");
   }
+
+  const driverIds = parseBotIds(process.env.SLACK_DRIVER_BOT_IDS);
+  const driverToken = envVar("SLACK_DRIVER_TOKEN");
+  if (driverIds.length) {
+    add("C", "slack", "dispatcher bots", "pass", driverIds.join(", "));
+  } else if (driverToken) {
+    add("C", "slack", "dispatcher bots", "warn", "SLACK_DRIVER_TOKEN is set but SLACK_DRIVER_BOT_IDS is empty", "put the Dispatcher's B… id in SLACK_DRIVER_BOT_IDS or CloudAgents will ignore its mentions");
+  } else {
+    add("C", "slack", "dispatcher bots", "skip", "no SLACK_DRIVER_BOT_IDS — POST /v1/mentions and API-posted @mentions stay off");
+  }
+  if (driverToken) {
+    if (slackTokenKind(driverToken) !== "bot") {
+      add("C", "slack", "dispatcher token", "warn", "SLACK_DRIVER_TOKEN is not an xoxb- bot token", "install slack-dispatcher-manifest.json and copy that app's Bot User OAuth Token");
+    } else {
+      const driverAuth = await slack("auth.test", driverToken);
+      if (driverAuth.ok) {
+        const driverBot = typeof driverAuth.body.bot_id === "string" ? driverAuth.body.bot_id : "";
+        add("C", "slack", "dispatcher token", "pass", `@${String(driverAuth.body.user ?? "dispatcher")} ${driverBot}`);
+        if (driverBot && driverIds.length && !driverIds.includes(driverBot.toUpperCase())) {
+          add("C", "slack", "dispatcher id match", "fail", `${driverBot} is not in SLACK_DRIVER_BOT_IDS`, `set SLACK_DRIVER_BOT_IDS=${driverBot}`);
+        }
+      } else {
+        add("C", "slack", "dispatcher token", "fail", driverAuth.error ?? "rejected", "reinstall the Dispatcher app and copy its xoxb- token");
+      }
+    }
+  }
+
+  const jobsToken = envVar("JOBS_API_TOKEN");
+  if (jobsToken) add("C", "slack", "jobs API token", "pass", "JOBS_API_TOKEN set (Bearer for POST /v1/jobs)");
+  else add("C", "slack", "jobs API token", "skip", "no JOBS_API_TOKEN — HTTP /health can listen, POST /v1/jobs returns 401");
 
   // Retired settings, still sitting in a .env someone copied forward.
   for (const stale of ["SLACK_DEPLOYS", "SLACK_DEPLOYERS", "VERCEL_TOKEN", "VERCEL_TEAM_ID", "RAILWAY_API_TOKEN"]) {
@@ -589,6 +766,8 @@ const gates = [
 
 if (want("A")) await checkHygiene();
 if (want("A")) await checkCursor();
+if (want("A")) await checkClaudeEngine();
+if (want("A")) await checkLocalEngine();
 if (want("B")) {
   await checkGit();
   checkTargetRepoKit();

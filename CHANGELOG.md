@@ -15,6 +15,85 @@ npm run deploy                        # stamp the commit, then ship
 
 ## [Unreleased]
 
+### Added
+
+- **COST close on every job.** The last lines of `build-app`, farm jobs, and
+  Slack threads are this-run dollars, this-project total, today, last 7 days,
+  and a monthly outlook if that pace holds. Append-only `.runs/cost-ledger.jsonl`;
+  `npm run cost-board` prints the day/project board. Meters are **AI-agnostic**
+  (`cursor:billed`, `claude:api-eq`, `local:local`, or any future provider slug)
+  and are never summed into one number. `COST running` logs as spend arrives.
+  A job still closes with COST when usage is unknown.
+- **Cursor farm (`npm run build-farm`).** One markdown file per app under
+  `--ideas-dir`; a concurrency pool of Cursor Cloud Agents (Fast off); a
+  `FARM_MAX_USD` cap; `.runs/farm-*.json` as the review board. Always
+  `ENGINE=cursor`. After `gh repo create`, the kit grants the Cursor GitHub App
+  (All repositories inherit; Selected repositories get a PUT) and will not boot
+  a VM if the grant fails. `src/lib/farm.ts`, `src/10-build-farm.ts`. The
+  one-idea loop lives in `src/lib/build-app.ts` so the existing
+  `npm run build-app` CLI and the farm share it. First 3-wide probe (17 Sep
+  2026, `ideas/ready`, concurrency 3): three VMs CREATING together;
+  [farm-json-lines #1](https://github.com/rvegajr/farm-json-lines/pull/1),
+  [farm-slugify #1](https://github.com/rvegajr/farm-slugify/pull/1); iso-week
+  had no PR. Charged **$1.00**. All three later `run-failed` mid-loop (resume
+  `bc-…`). A classic `gh` token cannot list GitHub App installations; All
+  repositories still inherited. Do not raise concurrency until a wave
+  finishes `complete`.
+- **Hybrid and local engines** (`--engine hybrid|local`, `ENGINE=`). Same
+  three sends, same `cc-` records and `claude/…` branches as the Claude engine,
+  but the implement and verify turns run on a local Ollama model driven by
+  qwen-code (or aider) inside the clone, and Claude Max is spent on the plan
+  only, plus one rescue turn when the local verifier does not report done.
+  `src/lib/engine-local.ts`. The planning prompt gains an "Executor profile"
+  section so Max writes plans a memoryless local model can follow verbatim;
+  the local model gets the last three turn outputs replayed as context.
+- **Max usage ceiling.** `makeClaudeSend` now reports every `rate_limit_event`
+  (including the per-window `unifiedWindows` utilization the CLI sends) and the
+  handles record it to `.runs/max-usage.json`. Hybrid routing
+  reads it before each Claude turn and, at or above `MAX_UTILIZATION_CEILING`
+  (default 85%), diverts the turn to `LOCAL_PLANNER_MODEL` or stops
+  (`HYBRID_OVER_CEILING`). Extra usage is never bought. `src/lib/routing.ts`.
+- `npm run max-usage` prints the 5-hour and 7-day Max windows and records the
+  sample for routing, for one trivial Max turn. `tools/max-usage.mts`.
+- `npm run pipeline -- --engine claude|hybrid|local` runs the plan/implement/
+  verify CLI on a local clone; it was Cursor-only.
+- Doctor phase A gains a `local` group: Ollama reachable, `LOCAL_MODEL` pulled,
+  runner on PATH, and the last Max usage sample.
+- New env: `OLLAMA_HOST`, `LOCAL_MODEL`, `LOCAL_PLANNER_MODEL`, `LOCAL_RUNNER`,
+  `LOCAL_TURN_TIMEOUT_MIN`, `MAX_UTILIZATION_CEILING`, `HYBRID_OVER_CEILING`,
+  `HYBRID_PLAN`, `HYBRID_IMPLEMENT`, `HYBRID_VERIFY`, `HYBRID_RESCUE`.
+
+### Changed
+
+- **Composer Fast is off.** Every `Agent.create` / `Agent.prompt` now sends
+  `params: [{ id: "fast", value: "false" }]` so Composer 2.5 (and Grok) use
+  the regular rate card. Cursor's product default is Fast.
+
+### Added
+
+- **Claude Max engine (`ENGINE=claude`).** `src/lib/engine-claude.ts` clones the
+  repo, runs `@anthropic-ai/claude-agent-sdk` `query()`, refuses
+  `ANTHROPIC_API_KEY`, and stops on Max `credits_required` instead of buying
+  extra usage. `npm run build-app -- --engine claude`. Slack uses Max only for
+  `SLACK_CLAUDE_USER_IDS`; everyone else stays on Cursor. A `bc-…` Slack thread
+  stays on Cursor even if the mentioner is allowlisted. `npm run doctor` runs
+  `claude auth status` and fails unless `apiKeySource` is `none`.
+
+- **Snippet-vault A/B (17 September 2026).** Same idea file, both engines
+  `complete` in 6 iterations. Cursor composer-2.5 Fast off: **$1.20**, 13.5 min,
+  [sv-cursor #1](https://github.com/rvegajr/sv-cursor/pull/1). Claude Max Sonnet:
+  **$6.65** API-equivalent, 16.2 min, [sv-claude #1](https://github.com/rvegajr/sv-claude/pull/1).
+  Write-up: `ARTICLE-CLAUDE-MAX-RESULTS.md`. Slack stays on Cursor.
+
+- **Jobs HTTP API on the Slack process.** `GET /health`, `GET /v1/projects`,
+  `POST /v1/jobs` (same mention CLI, Slack progress), `POST /v1/mentions`
+  (Dispatcher posts `@CloudAgents …`). Slack does not fire `app_mention` for
+  bot-authored mentions, so allowlisted `SLACK_DRIVER_BOT_IDS` posts are
+  handled on the `message` event. Bearer `JOBS_API_TOKEN`. Slack's own user
+  token cannot mention this app; a second app from
+  `slack-dispatcher-manifest.json` can, when its `B…` id is in
+  `SLACK_DRIVER_BOT_IDS`.
+
 ## [0.2.0] — 2026-09-05
 
 The bot lost its ability to deploy and gained the ability to say what it is.

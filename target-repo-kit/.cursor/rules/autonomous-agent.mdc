@@ -18,4 +18,7 @@ You may be running with no human watching. Behave accordingly.
   you are not done.
 - Your final message will be read by a program and a tired human. Lead with the
   outcome, then what changed, then what you verified, then what you deliberately
-  did not do.
+  did not do. **Last lines are COST.** Whatever AI ran, record that provider's
+  meter (Cursor billed, Claude API-eq, local, or a new slug). Do not fold an
+  unknown model into Cursor. If you cannot read usage, write
+  `COST this run: unknown` anyway.

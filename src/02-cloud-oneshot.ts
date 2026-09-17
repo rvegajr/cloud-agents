@@ -10,6 +10,7 @@
  */
 import { Agent } from "@cursor/sdk";
 import { loadEnv, env, flags } from "./lib/env.js";
+import { selectModel } from "./lib/model.js";
 import { resolveApiKey } from "./lib/auth.js";
 import { buildPrompt, loadBrief } from "./lib/prompts.js";
 import { extractJsonBlock, reportResult, reportStartupFailure, saveRunRecord } from "./lib/report.js";
@@ -33,7 +34,7 @@ console.log(`PR:     ${autoCreatePR ? "auto-create" : "branch only"}\n`);
 try {
   await using agent = await Agent.create({
     apiKey: await resolveApiKey(),
-    model: { id: env("CURSOR_MODEL", "composer-2.5") },
+    model: selectModel(),
     cloud: {
       repos: [{ url: repo, startingRef: ref }],
       autoCreatePR,

@@ -2,9 +2,10 @@
 
 This file is written to be **executed by an AI agent**, with a human on hand for
 the steps only a human can do. `README.md` teaches the SDK, `ARTICLE.md` and
-`ARTICLE-SLACK.md` tell the story; this is the recipe. Every credential, every
-scope, every grant, in the order they are needed, with a command that proves each
-one before the next phase starts.
+`ARTICLE-SLACK.md` tell the story, `ARTICLE-CLAUDE-MAX.md` and
+`ARTICLE-CLAUDE-MAX-RESULTS.md` are the Max-plan move and the measured A/B; this
+is the recipe. Every credential, every scope, every grant, in the order they are
+needed, with a command that proves each one before the next phase starts.
 
 The proof command is `npm run doctor`. It is read-only: it never fires a deploy
 hook, never posts to Slack, never creates or mutates anything. Run it after every
@@ -156,9 +157,16 @@ npm run status         # account, models, connected repos
 
 Set in `.env`: `CURSOR_MODEL` (default `composer-2.5`), `TARGET_REPO`,
 `TARGET_REF` — the *integration* branch, which in many repos is `develop`, not
-`main`.
+`main`. Leave `ENGINE` at `cursor` unless you are running the build loop on
+Claude Max on a box you own (`ARTICLE-CLAUDE-MAX.md`). Do not set
+`SLACK_CLAUDE_USER_IDS` on a shared Slack bot.
 
 **Verify:** `npm run doctor -- --phase A`
+
+Phase A also checks that `ANTHROPIC_API_KEY` is unset, that the usual shell
+profiles do not export it, and that `claude auth status` reports
+`apiKeySource=none`. Those three are how this kit keeps Max from silently
+becoming API billing.
 
 **Human gate:** connecting GitHub to Cursor. Go to
 [cursor.com/agents](https://cursor.com/agents), connect GitHub, grant the target

@@ -4,7 +4,7 @@
  * and no Bolt — tests can drive these with plain objects.
  */
 
-export const AGENT_ID_RE = /\bagent:\s*(bc-[a-z0-9-]+)/i;
+export const AGENT_ID_RE = /\bagent:\s*((?:bc|cc)-[a-z0-9-]+)/i;
 
 export function findAgentId(messages: Array<{ text?: string | null } | undefined>): string | undefined {
   for (const m of messages) {
@@ -28,6 +28,27 @@ export function parseAllowlist(raw: string | undefined): string[] {
     .split(/[,\s]+/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+/** Bot ids (`B…`) allowed to @mention this app. Own id is never allowed. */
+export function parseBotIds(raw: string | undefined): string[] {
+  return parseAllowlist(raw)
+    .map((s) => s.toUpperCase())
+    .filter((s) => /^B[A-Z0-9]+$/.test(s));
+}
+
+/**
+ * Slack stamps `bot_id` on every app-authored message, including a second
+ * "dispatcher" app posting `<@CloudAgents> …`. Honour those, but never the
+ * bot's own id — Slack will not deliver a self-mention, and if it did we
+ * would loop.
+ */
+export function isDriverBot(botId: string | undefined, ownBotId: string, allowlist: string[]): boolean {
+  if (!botId) return false;
+  const id = botId.trim().toUpperCase();
+  const own = ownBotId.trim().toUpperCase();
+  if (!id || (own && id === own)) return false;
+  return allowlist.some((allowed) => allowed.toUpperCase() === id);
 }
 
 export interface RepoTarget {
