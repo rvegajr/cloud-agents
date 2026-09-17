@@ -441,6 +441,12 @@ Same idea, same prompts, same finish gate. Compare iterations to complete,
 `chargedCents` against `apiEquivalentUsd`, and how much of the weekly Max bar
 one app consumed. That last number is the one that matters.
 
+We ran this on 17 September 2026. Both engines finished `complete` in six
+iterations. Cursor (composer-2.5, Fast off) charged **$1.20** in 13.5 minutes.
+Claude Max (Sonnet) logged **$6.65** API-equivalent in 16.2 minutes and added
+nothing to a card. The write-up, PRs, stacks, and the reasons Slack still
+stays on Cursor are [ARTICLE-CLAUDE-MAX-RESULTS.md](ARTICLE-CLAUDE-MAX-RESULTS.md).
+
 ---
 
 ## Step 7: The budget you actually have
@@ -542,8 +548,8 @@ with the guard in place.
    Usage: extra-usage budget to zero. Two minutes.
 3. Console → API keys, Workspace: All. Delete keys you do not recognise. Note
    any key with a cost badge over a dollar and find what holds it. Ten minutes.
-4. `npm i @anthropic-ai/claude-agent-sdk`, paste the `engine-claude.ts` sketch,
-   wire `--engine claude` into `06-build-app.ts`, and run the snippet-vault
-   idea. The rest of the half hour, plus the build.
+4. `npm run build-app -- --engine claude --idea-file ideas/example-snippet-vault.md --create-repo sv-claude`
+   (and the Cursor twin with `--engine cursor`). The rest of the half hour, plus
+   the builds.
 
-The article after this one will have the A/B numbers from step 4.
+The measured A/B from that step is [ARTICLE-CLAUDE-MAX-RESULTS.md](ARTICLE-CLAUDE-MAX-RESULTS.md).

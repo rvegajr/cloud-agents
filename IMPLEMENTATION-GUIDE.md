@@ -2,9 +2,10 @@
 
 This file is written to be **executed by an AI agent**, with a human on hand for
 the steps only a human can do. `README.md` teaches the SDK, `ARTICLE.md` and
-`ARTICLE-SLACK.md` tell the story; this is the recipe. Every credential, every
-scope, every grant, in the order they are needed, with a command that proves each
-one before the next phase starts.
+`ARTICLE-SLACK.md` tell the story, `ARTICLE-CLAUDE-MAX.md` and
+`ARTICLE-CLAUDE-MAX-RESULTS.md` are the Max-plan move and the measured A/B; this
+is the recipe. Every credential, every scope, every grant, in the order they are
+needed, with a command that proves each one before the next phase starts.
 
 The proof command is `npm run doctor`. It is read-only: it never fires a deploy
 hook, never posts to Slack, never creates or mutates anything. Run it after every

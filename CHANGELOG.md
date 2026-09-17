@@ -31,6 +31,12 @@ npm run deploy                        # stamp the commit, then ship
   stays on Cursor even if the mentioner is allowlisted. `npm run doctor` runs
   `claude auth status` and fails unless `apiKeySource` is `none`.
 
+- **Snippet-vault A/B (17 September 2026).** Same idea file, both engines
+  `complete` in 6 iterations. Cursor composer-2.5 Fast off: **$1.20**, 13.5 min,
+  [sv-cursor #1](https://github.com/rvegajr/sv-cursor/pull/1). Claude Max Sonnet:
+  **$6.65** API-equivalent, 16.2 min, [sv-claude #1](https://github.com/rvegajr/sv-claude/pull/1).
+  Write-up: `ARTICLE-CLAUDE-MAX-RESULTS.md`. Slack stays on Cursor.
+
 - **Jobs HTTP API on the Slack process.** `GET /health`, `GET /v1/projects`,
   `POST /v1/jobs` (same mention CLI, Slack progress), `POST /v1/mentions`
   (Dispatcher posts `@CloudAgents …`). Slack does not fire `app_mention` for

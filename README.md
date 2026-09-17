@@ -12,6 +12,8 @@ orchestrator that creates, prompts, and resumes them.
 Read this file top to bottom once. Then run the numbered scripts in order.
 `ARTICLE.md` is the idea-to-app walkthrough; `ARTICLE-SLACK.md` is the Slack
 walkthrough, with a jam.dev recording as the preferred bug report.
+`ARTICLE-CLAUDE-MAX.md` is how the build loop moves onto a Claude Max plan;
+`ARTICLE-CLAUDE-MAX-RESULTS.md` is the snippet-vault A/B that measured it.
 `IMPLEMENTATION-GUIDE.md` is the same setup as a recipe an AI agent can execute:
 every credential and scope in the order it is needed, with the browser-only steps
 marked as human gates, and `npm run doctor` to prove each one. `CHANGELOG.md` is
@@ -253,6 +255,14 @@ that are now baked into the prompts:
   finding (53 seconds); `spec.md` now steers toward built-ins or latest-major
   native deps. **Always do one fresh-clone verification on your own machine.**
 
+**A/B, 17 September 2026** (same idea file, Fast off, Claude Max as the second
+engine): both `complete` in 6 iterations. Cursor charged **$1.20** in 13.5
+minutes ([sv-cursor #1](https://github.com/rvegajr/sv-cursor/pull/1)). Claude
+Max logged **$6.65** API-equivalent in 16.2 minutes and billed nothing extra
+([sv-claude #1](https://github.com/rvegajr/sv-claude/pull/1)). Write-up:
+[ARTICLE-CLAUDE-MAX-RESULTS.md](ARTICLE-CLAUDE-MAX-RESULTS.md). Slack stays on
+Cursor.
+
 ### Step 8: trigger from Slack
 
 ```bash
@@ -429,6 +439,8 @@ cloud-agents/
   README.md                      this guide
   ARTICLE.md                     walkthrough: idea -> app on a cloud agent
   ARTICLE-SLACK.md               walkthrough: Slack @mention -> PR
+  ARTICLE-CLAUDE-MAX.md          move the build loop onto a Max plan
+  ARTICLE-CLAUDE-MAX-RESULTS.md  snippet-vault A/B: Cursor $1.20 vs Max $6.65 API-eq
   IMPLEMENTATION-GUIDE.md        agent-executable recipe: credentials, phases, human gates
   CHANGELOG.md                   what changed between tags
   slack-app-manifest.json        paste at api.slack.com/apps
@@ -467,6 +479,8 @@ cloud-agents/
       slack-fix.ts               startJob / continueJob
       slack-thread.ts            agent id in thread, allowlist, dedupe
       build-loop.ts              the loop: phases, stall/block detection, resumable state
+      engine-claude.ts           Max engine: clone, Agent SDK query(), cc- ids
+      engine-claude.test.ts
       doctor.ts                  verdict model, scope diffing, credential shape checks
       doctor.test.ts
       version.ts                 BUILD_INFO -> version.json -> git -> package.json
