@@ -17,6 +17,61 @@ npm run deploy                        # stamp the commit, then ship
 
 ### Added
 
+- **`architect-crew-gate/`: the pattern in its own folder.** `THEORY.md` is the
+  claim, five principles, and operating instructions an AI or a person can act
+  on directly; `PATTERN.md` is
+  the repeatable, stack-agnostic specification for any job kind (build, change,
+  repair, maintain). Five artifacts with templates and machine-readable blocks
+  (`REQUIREMENTS.md` in EARS form, `QUALITY.md` as the standard and the rubric,
+  `DESIGN.md` as a per-consumer-port interface blueprint, `TASKS.md`,
+  `QA.md`), six stages with entry/exit rules and JSON contracts, the gate
+  contract, routing and budget, greenfield and brownfield application, a
+  per-stack quality-bar table, the by-hand procedure, failure modes, the
+  measurement protocol, and checklists. The seven prompts that drive it are in
+  `architect-crew-gate/prompts/` (`requirements`, `blueprint`, `task`, `qa`,
+  `qa-fix`, `review`, `review-fix`); `templates/` holds fill-in copies of the
+  five artifacts; `routing.ts` classifies the prompts (`requirements`,
+  `blueprint`, `task`, `qa`, `review` kinds; `HYBRID_QA`, `HYBRID_REVIEW`
+  tiers). **The loop is built**: `npm run build-app -- --loop blueprint`
+  (`BUILD_LOOP=blueprint`) runs `architect-crew-gate/src/blueprint-loop.ts`
+  over a real checkout (`src/io.ts`): requirements → blueprint (traceability
+  checked, suite must be red) → one gated crew turn per task, retried with the
+  gate's feedback → finish gate → QA executed in a fresh clone → independent
+  review in a fresh read-only session whose findings carry check commands the
+  orchestrator runs. Resume restarts at the stage that stopped. The gate now
+  reads `QUALITY.md`'s machine block (any stack) with `package.json` as the
+  fallback, and scopes ownership to a task's files. `npm run quality-review`
+  scores candidate repos blind against the same rubric (anonymised copies,
+  shuffled, fresh read-only Claude turns, medians, `.runs/quality-*.json`).
+  **UX layer**: stage 0 numbers the job's must-haves, requires workflows
+  (`W1..Wn`, end-to-end journeys with steps and requirement ids) and a
+  coverage map, and stops with `requirements-incomplete` when a must-have is
+  covered by no requirement or walked by no workflow (one retry first); stage
+  1 requires a browser test per browser-flow requirement and a QA scenario
+  per workflow; stage 4 gives the QA analyst a headless browser through
+  Playwright MCP (`QA_BROWSER=playwright`, default; `--mcp-config` on
+  qwen-code for that turn only, `mcpServers` on the Claude SDK), and the QA
+  prompt names the tools and demands the accessibility snapshot as evidence.
+- **Deterministic quality gate for local turns** (`architect-crew-gate/src/quality-gate.ts`),
+  run by the orchestrator, not a model, after every hybrid/local iterate/finish/
+  unblock turn in `createHybridHandle`. Five checks — ownership (a crew may
+  create a new test or tooling config, never modify an existing one), the
+  repo's own lint/typecheck/test/build scripts, hygiene (no `.qwen/`, `dist/`,
+  `*.db`, `.env` tracked), config/script tamper detection (catches an eslint
+  `varsIgnorePattern` bent around one variable), and a clean-clone start plus
+  a vacuous-suite probe (every `src/` file stubbed to throw; the suite must
+  fail). A failing gate is rewritten as feedback and retried
+  (`LOCAL_GATE_RETRIES`, default 2) before the turn counts as failed; only then
+  can the existing Claude rescue take over. Built to close the gap a blind
+  review found: an unguarded hybrid build scored 19/35 against 29/35 for
+  all-Claude on exactly the defects each rule targets. Named and written up in
+  `architect-crew-gate/ARTICLE.md`.
+- New repos are seeded once, before any turn: `AGENTS.md` (trimmed from
+  `target-repo-kit/`), a `QWEN.md` pointer (qwen-code's actual auto-loaded
+  context file), and a merged `.gitignore` with the hygiene patterns.
+- New env: `LOCAL_GATE` (0 disables), `LOCAL_GATE_RETRIES`, `LOCAL_GATE_START_SEC`,
+  `LOCAL_GATE_CMD_MIN`, `LOCAL_GATE_VACUOUS`, `LOCAL_GATE_START_EVERY`.
+
 - **COST close on every job.** The last lines of `build-app`, farm jobs, and
   Slack threads are this-run dollars, this-project total, today, last 7 days,
   and a monthly outlook if that pace holds. Append-only `.runs/cost-ledger.jsonl`;
@@ -66,6 +121,30 @@ npm run deploy                        # stamp the commit, then ship
 - New env: `OLLAMA_HOST`, `LOCAL_MODEL`, `LOCAL_PLANNER_MODEL`, `LOCAL_RUNNER`,
   `LOCAL_TURN_TIMEOUT_MIN`, `MAX_UTILIZATION_CEILING`, `HYBRID_OVER_CEILING`,
   `HYBRID_PLAN`, `HYBRID_IMPLEMENT`, `HYBRID_VERIFY`, `HYBRID_RESCUE`.
+
+### Fixed
+
+- **Local turns survive the qwen-code tool-call cap.** qwen-code halts any
+  turn at 100 tool calls (`turn_tool_call_cap`, not configurable). The first
+  hybrid slugify build died there with a finished milestone already on disk.
+  The local send now re-launches an interrupted turn (cap or timeout) with a
+  continuation note, `LOCAL_TURN_CONTINUATIONS` times (default 2), and the
+  hybrid engine rescues on Claude when a local turn still does not finish, not
+  only when a verify/finish report says not done.
+- **Resume keeps the spec.** A build stopped before its first iteration report
+  resumed into the spec phase and would have spent a second Max turn on a spec
+  it already had. Resume now goes to iterate whenever `state.spec` exists.
+- **A resumed build no longer double counts.** Ledger entries are cumulative
+  per agent (that is what `getUsage` returns) and the board already keeps the
+  latest per agent, but the COST close summed every entry, so one `--resume`
+  showed slug-hybrid at $1.06 for a single $0.53 spec. The close now
+  summarises the same deduplicated view as the board.
+- **Draft PRs actually open on local clones.** `gh pr create` refused every
+  Claude/hybrid branch with "you must first push the current branch" because
+  its pushed-branch check does not cope with the shallow clone whose origin
+  URL `cloneWorkspace` rewrites. `pushAndOpenPr` now passes `--head`/`--base`,
+  and the PR opens after the first turn that has commits ahead of the base
+  rather than only after an `agent`-mode turn (the spec turn has none).
 
 ### Changed
 

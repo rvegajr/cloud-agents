@@ -21,11 +21,12 @@ export interface PipelineTurn {
   result?: string;
   runId?: string;
   prUrl?: string;
+  gate?: import("../../architect-crew-gate/src/quality-gate.js").GateResult;
 }
 
 export type PipelineSend = (
   prompt: string,
-  opts?: { mode?: "agent" | "plan" },
+  opts?: { mode?: "agent" | "plan"; fresh?: boolean; cwd?: string; tier?: "claude" | "local" },
 ) => Promise<PipelineTurn>;
 
 export type PipelinePhase = "plan" | "implement" | "verify";

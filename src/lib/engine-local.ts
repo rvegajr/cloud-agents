@@ -1,11 +1,13 @@
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { promisify } from "node:util";
-import type { SendFn, TurnResult } from "./build-loop.js";
+import type { SendFn, SendOpts, TurnResult } from "./build-loop.js";
 import {
   assertClaudeCredential,
   createClaudeHandle,
   git,
+  hasCommitsAhead,
   loadClaudeRecord,
   makeClaudeSend,
   openClaudeWorkspace,
@@ -18,6 +20,16 @@ import {
   type EngineName,
 } from "./engine-claude.js";
 import { extractJsonBlock } from "./report.js";
+import { browserFromEnv, qwenMcpConfigArg, type McpStdioServer } from "../../architect-crew-gate/src/browser.js";
+import {
+  formatGateSummary,
+  gateConfigFromEnv,
+  gateFeedbackNote,
+  readPackageJson,
+  runQualityGate,
+  type GateConfig,
+  type GateResult,
+} from "../../architect-crew-gate/src/quality-gate.js";
 import {
   classifyPrompt,
   loadMaxUsage,
@@ -50,6 +62,8 @@ export interface LocalConfig {
   plannerModel: string;
   runner: LocalRunner;
   timeoutMs: number;
+  /** Re-launches of one turn after the runner is cut off (qwen-code caps a turn at 100 tool calls). */
+  continuations: number;
 }
 
 export function localConfigFromEnv(env: NodeJS.ProcessEnv = process.env): LocalConfig {
@@ -57,13 +71,32 @@ export function localConfigFromEnv(env: NodeJS.ProcessEnv = process.env): LocalC
   const model = env.LOCAL_MODEL?.trim() || "qwen3-coder-next";
   const runnerRaw = env.LOCAL_RUNNER?.trim().toLowerCase();
   const minutes = Number(env.LOCAL_TURN_TIMEOUT_MIN);
+  const cont = Number(env.LOCAL_TURN_CONTINUATIONS);
   return {
     host: /^https?:\/\//.test(host) ? host : `http://${host}`,
     model,
     plannerModel: env.LOCAL_PLANNER_MODEL?.trim() || model,
     runner: runnerRaw === "aider" ? "aider" : "qwen",
     timeoutMs: (Number.isFinite(minutes) && minutes > 0 ? minutes : 30) * 60_000,
+    continuations: Number.isFinite(cont) && cont >= 0 ? Math.floor(cont) : 2,
   };
+}
+
+/** The runner stopped the turn, not the model: its progress is on disk and the turn can continue. */
+export function wasInterrupted(out: { code: number; stderr: string; stdout: string }): boolean {
+  if (out.code === 0) return false;
+  if (out.code === 124 || out.code === 143) return true; // our timeout, SIGTERM
+  return /Loop detection halted|turn_tool_call_cap|maximum number of tool calls/i.test(`${out.stderr}\n${out.stdout}`);
+}
+
+export function continuationNote(attempt: number, seconds: number): string {
+  return (
+    `## Continuation (attempt ${attempt})\n\n` +
+    `Your previous attempt at this exact turn was cut off by the harness after ${seconds}s (it caps one turn at 100 tool calls). ` +
+    `Nothing was lost: the working tree holds that progress. Run \`git status\` and \`git log --oneline -5\` first, do not redo ` +
+    `finished work, and be economical with tool calls: batch shell commands, do not re-read files you just wrote, run the test ` +
+    `suite once at the end. Finish the turn and end with the required report.\n\n---\n\n`
+  );
 }
 
 export async function ollamaModels(host: string, fetchFn: typeof fetch = fetch): Promise<string[]> {
@@ -85,8 +118,12 @@ export interface LocalCommand {
   env: Record<string, string | undefined>;
 }
 
-/** The subprocess sees the login-scrubbed env plus only what the runner needs to reach Ollama. */
-export function buildLocalCommand(cfg: LocalConfig, model: string, prompt: string): LocalCommand {
+/**
+ * The subprocess sees the login-scrubbed env plus only what the runner needs to reach Ollama.
+ * `mcpServers` (qwen-code only) are handed over on the command line for this turn: the QA
+ * analyst's browser, never persisted in the checkout.
+ */
+export function buildLocalCommand(cfg: LocalConfig, model: string, prompt: string, extra: { mcpServers?: Record<string, McpStdioServer> } = {}): LocalCommand {
   const base = scrubbedEnv();
   delete base.OPENAI_API_KEY;
   delete base.OPENAI_BASE_URL;
@@ -108,9 +145,10 @@ export function buildLocalCommand(cfg: LocalConfig, model: string, prompt: strin
       env: { ...base, OLLAMA_API_BASE: cfg.host },
     };
   }
+  const mcp = extra.mcpServers && Object.keys(extra.mcpServers).length ? ["--mcp-config", qwenMcpConfigArg(extra.mcpServers)] : [];
   return {
     file: "qwen",
-    args: ["--auth-type", "openai", "--yolo", "--model", model, "--output-format", "text", prompt],
+    args: ["--auth-type", "openai", "--yolo", "--model", model, "--output-format", "text", ...mcp, prompt],
     env: {
       ...base,
       OPENAI_API_KEY: "ollama",
@@ -154,23 +192,40 @@ export function makeLocalSend(opts: {
   cfg: LocalConfig;
   model?: string;
   exec?: ExecFn;
+  /** The browser server a turn sent with `browser: true` gets (qwen-code only; aider has no tool use). */
+  browser?: McpStdioServer;
   onTurn?: (info: LocalTurnInfo) => void;
   log?: (line: string) => void;
 }): SendFn {
   const exec = opts.exec ?? defaultExec;
   const model = opts.model ?? opts.cfg.model;
-  return async (prompt): Promise<TurnResult> => {
-    const cmd = buildLocalCommand(opts.cfg, model, prompt);
-    const started = Date.now();
-    opts.log?.(`local: ${opts.cfg.runner} ${model} (${prompt.length} chars)`);
-    const out = await exec(cmd, opts.cwd, opts.cfg.timeoutMs);
-    const seconds = Math.round((Date.now() - started) / 1000);
-    opts.onTurn?.({ model, runner: opts.cfg.runner, seconds, code: out.code });
-    if (out.code !== 0) {
-      opts.log?.(`local: ${opts.cfg.runner} exited ${out.code} after ${seconds}s: ${out.stderr.trim().slice(-400)}`);
-      return { status: "error", result: out.stdout || undefined, runId: `local-${started}` };
+  return async (prompt, o): Promise<TurnResult> => {
+    const runId = `local-${Date.now()}`;
+    let attempt = 0;
+    let seconds = 0;
+    let lastSeconds = 0;
+    let p = prompt;
+    const mcpServers = o?.browser && opts.browser ? { playwright: opts.browser } : undefined;
+    if (o?.browser && opts.browser && opts.cfg.runner !== "aider") opts.log?.("local: playwright MCP attached to this turn");
+    for (;;) {
+      attempt++;
+      const cmd = buildLocalCommand(opts.cfg, model, p, { mcpServers });
+      const started = Date.now();
+      opts.log?.(`local: ${opts.cfg.runner} ${model} (${p.length} chars${attempt > 1 ? `, continuation ${attempt - 1}` : ""})`);
+      const out = await exec(cmd, opts.cwd, opts.cfg.timeoutMs);
+      lastSeconds = Math.round((Date.now() - started) / 1000);
+      seconds += lastSeconds;
+      opts.onTurn?.({ model, runner: opts.cfg.runner, seconds: lastSeconds, code: out.code });
+      if (out.code === 0) return { status: "finished", result: out.stdout, runId };
+      const tail = out.stderr.trim().slice(-300);
+      if (wasInterrupted(out) && attempt <= opts.cfg.continuations) {
+        opts.log?.(`local: ${opts.cfg.runner} interrupted after ${lastSeconds}s (${tail.split("\n").at(-1)}); continuing`);
+        p = `${continuationNote(attempt, lastSeconds)}${prompt}`;
+        continue;
+      }
+      opts.log?.(`local: ${opts.cfg.runner} exited ${out.code} after ${seconds}s total: ${tail}`);
+      return { status: "error", result: out.stdout || undefined, runId };
     }
-    return { status: "finished", result: out.stdout, runId: `local-${started}` };
   };
 }
 
@@ -216,6 +271,71 @@ function orchestratorCommit(cwd: string, message: string, log?: (l: string) => v
   return true;
 }
 
+const KIT_ROOT = resolve(import.meta.dirname, "..", "..");
+
+const HYGIENE_GITIGNORE = [
+  "node_modules/",
+  "dist/",
+  "build/",
+  "coverage/",
+  "*.db",
+  "*.sqlite",
+  "*.sqlite3",
+  ".env",
+  ".qwen/",
+  ".aider*",
+  ".cursor/worktrees/",
+].join("\n");
+
+const GATE_RULES_NOTE = `
+## Orchestrator quality gate
+
+An automated gate runs after every turn in this clone. It is not this session's
+report that decides a turn is done:
+- The repo's own \`npm run lint|typecheck|test|build\` (whichever exist) must exit 0.
+- A fresh clone (\`git clone . scratch && npm ci\`) must start the app: \`npm start\`
+  answers HTTP 200, or a CLI's \`--help\` exits 0.
+- \`git ls-files\` must never include \`.qwen/\`, \`.aider*\`, \`dist/\`, \`build/\`,
+  \`coverage/\`, \`node_modules/\`, \`*.db\`, or \`.env\`. They are in .gitignore already.
+- Do not edit SPEC.md, ROADMAP.md, REQUIREMENTS.md, QUALITY.md, DESIGN.md, TASKS.md,
+  QA.md, eslint/tsconfig/test-runner config, or package.json scripts. Ask for that
+  change in your report instead of making it; the gate reverts it.
+- Do not edit test files. Tests define done. Fix the code they test.
+Failures come back to you as feedback; fix the cause, never the check.
+`;
+
+/** New repos build-app creates have only a README. Seed the agent kit once, before any turn. */
+export function seedRepoKit(cwd: string, log?: (l: string) => void): boolean {
+  const files = git(cwd, ["ls-files"]).split("\n").filter(Boolean);
+  const seeded = files.some((f) => f === "QWEN.md" || f === "AGENTS.md");
+  if (seeded || files.length > 3) return false;
+
+  const agentsSrc = resolve(KIT_ROOT, "target-repo-kit", "AGENTS.md");
+  let agents = existsSync(agentsSrc) ? readFileSync(agentsSrc, "utf8") : "";
+  agents = agents
+    .split("\n")
+    .filter((l) => !/Cloud Agent to Fast, Opus, or GPT|Composer 2\.5, Fast off|Resume a \`bc-\` id|COST on that AI's own meter/.test(l))
+    .join("\n");
+  if (agents) writeFileSync(resolve(cwd, "AGENTS.md"), agents);
+  writeFileSync(resolve(cwd, "QWEN.md"), `${agents ? "@AGENTS.md\n" : ""}${GATE_RULES_NOTE}`);
+
+  const gitignorePath = resolve(cwd, ".gitignore");
+  const existing = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf8") : "";
+  const missing = HYGIENE_GITIGNORE.split("\n").filter((line) => !existing.includes(line));
+  if (missing.length) {
+    writeFileSync(gitignorePath, `${existing.trim() ? `${existing.trim()}\n` : ""}${missing.join("\n")}\n`);
+  }
+
+  execFileSync("git", ["add", "-A"], { cwd, stdio: "ignore" });
+  execFileSync(
+    "git",
+    ["-c", "user.name=cloud-agents", "-c", "user.email=cloud-agents@localhost", "commit", "-q", "-m", "chore: seed agent kit"],
+    { cwd, stdio: "ignore" },
+  );
+  log?.("seeded AGENTS.md, QWEN.md, .gitignore");
+  return true;
+}
+
 export interface HybridHandleArgs {
   engine: "hybrid" | "local";
   repo: string;
@@ -225,7 +345,11 @@ export interface HybridHandleArgs {
   agentId?: string;
   cfg?: LocalConfig;
   policy?: RoutingPolicy;
+  gateCfg?: GateConfig;
   exec?: ExecFn;
+  /** Executes the gate's npm/git commands. Separate from `exec` (the local model harness) because the
+   * gate must run for real regardless of what drives the model; defaults to `defaultExec`. */
+  gateExec?: ExecFn;
   queryFn?: ClaudeQueryFn;
   log?: (line: string) => void;
 }
@@ -240,7 +364,23 @@ export async function createHybridHandle(args: HybridHandleArgs): Promise<AgentH
   const rec = openClaudeWorkspace(args);
   rec.engine = args.engine;
   rec.transcript ??= [];
+  rec.gates ??= [];
   saveClaudeRecord(rec);
+  if (seedRepoKit(rec.cwd, log)) saveClaudeRecord(rec);
+
+  const gateCfg: GateConfig = args.gateCfg ?? gateConfigFromEnv();
+  const gatedKinds: TurnKind[] = ["iterate", "finish", "unblock"];
+
+  /** Capture the scripts baseline once package.json exists, so tamper detection has a fixed point. */
+  const captureGateBaseline = (): void => {
+    if (rec.gateScriptsBaseline) return;
+    const pkg = readPackageJson(rec.cwd);
+    if (pkg?.scripts) {
+      rec.gateScriptsBaseline = pkg.scripts;
+      rec.gateBaseline = git(rec.cwd, ["rev-parse", "HEAD"]);
+      saveClaudeRecord(rec);
+    }
+  };
 
   const claudeSend = makeClaudeSend({
     cwd: rec.cwd,
@@ -261,12 +401,29 @@ export async function createHybridHandle(args: HybridHandleArgs): Promise<AgentH
     queryFn: args.queryFn,
   });
 
-  const localSend = (model: string) =>
+  /** The reviewer may read and run, never edit: enforced by the tool list, not by plan mode (which makes Claude Code stop and ask). */
+  const claudeReviewSend = makeClaudeSend({
+    cwd: rec.cwd,
+    model: args.model,
+    onCost: (usd) => {
+      rec.apiEquivalentUsd += usd;
+      saveClaudeRecord(rec);
+    },
+    onRateLimit: (u: MaxUsage) => {
+      saveMaxUsage(u);
+    },
+    tools: { allowed: ["Read", "Grep", "Glob", "Bash"], disallowed: ["Edit", "Write", "NotebookEdit", "MultiEdit"] },
+    queryFn: args.queryFn,
+  });
+
+  const browser = browserFromEnv();
+  const localSend = (model: string, cwd: string = rec.cwd) =>
     makeLocalSend({
-      cwd: rec.cwd,
+      cwd,
       cfg,
       model,
       exec: args.exec,
+      browser,
       log,
       onTurn: (info) => {
         rec.localTurns = (rec.localTurns ?? 0) + 1;
@@ -275,14 +432,53 @@ export async function createHybridHandle(args: HybridHandleArgs): Promise<AgentH
       },
     });
 
-  const runTier = async (tier: Tier, kind: TurnKind, prompt: string, mode: "agent" | "plan" | undefined): Promise<TurnResult> => {
+  const architectKinds: TurnKind[] = ["plan", "spec", "triage", "requirements", "blueprint"];
+  const runTier = async (tier: Tier, kind: TurnKind, prompt: string, o: SendOpts | undefined): Promise<TurnResult> => {
     if (tier === "claude") {
-      const p = kind === "plan" || kind === "spec" ? `${prompt}${executorNote(cfg.model)}` : prompt;
-      return claudeSend(p, mode ? { mode } : undefined);
+      if (kind === "review") return claudeReviewSend(prompt, { ...o, fresh: true });
+      const p = kind === "plan" || kind === "spec" || kind === "blueprint" ? `${prompt}${executorNote(cfg.model)}` : prompt;
+      return claudeSend(p, o);
     }
-    const model = kind === "plan" || kind === "spec" || kind === "triage" ? cfg.plannerModel : cfg.model;
-    const p = `${transcriptContext(rec.transcript)}${prompt}`;
-    return localSend(model)(p);
+    const model = architectKinds.includes(kind) || kind === "qa" || kind === "review" ? cfg.plannerModel : cfg.model;
+    // Blueprint-loop turns carry their context in the prompt (task block, design excerpt); only the milestone loop replays the transcript.
+    const replay = kind === "task" || kind === "qa" || kind === "review" ? "" : transcriptContext(rec.transcript);
+    // A turn that asks for a browser (QA) gets Playwright MCP on qwen-code's command line for that turn only.
+    return localSend(model, o?.cwd ?? rec.cwd)(`${replay}${prompt}`, o);
+  };
+
+  /**
+   * Run the local turn, then the deterministic gate in its clone. A failing gate is
+   * fed back as a continuation (same pattern as `wasInterrupted`), up to
+   * `gateCfg.retries` times, before the turn is treated as failed. Nothing here
+   * trusts the model's own report; `runQualityGate` re-runs commands.
+   */
+  const runLocalGated = async (kind: TurnKind, prompt: string, mode: "agent" | "plan" | undefined): Promise<TurnResult> => {
+    let p = prompt;
+    let turn: TurnResult = { status: "error", runId: undefined };
+    for (let attempt = 0; attempt <= gateCfg.retries; attempt++) {
+      turn = await runTier("local", kind, p, mode ? { mode } : undefined);
+      if (turn.status !== "finished") return turn; // execution failure: let the existing rescue path handle it
+      orchestratorCommit(rec.cwd, `${args.engine}: ${kind} turn (gate attempt ${attempt})`, log);
+      captureGateBaseline();
+      const gate = await runQualityGate(rec.cwd, gateCfg, kind === "finish" ? "finish" : "iterate", {
+        scriptsBaseline: rec.gateScriptsBaseline,
+        exec: args.gateExec ?? defaultExec,
+        log,
+      });
+      rec.gates!.push({
+        kind,
+        attempt,
+        passed: gate.passed,
+        seconds: gate.seconds,
+        failing: gate.findings.filter((f) => !f.ok).map((f) => f.rule),
+      });
+      saveClaudeRecord(rec);
+      log(formatGateSummary(gate));
+      if (gate.passed) return { ...turn, gate };
+      if (attempt === gateCfg.retries) return { ...turn, status: "error", gate };
+      p = `${gateFeedbackNote(attempt + 1, gate)}${prompt}`;
+    }
+    return turn;
   };
 
   const remember = (kind: TurnKind, tier: Tier, turn: TurnResult) => {
@@ -294,22 +490,32 @@ export async function createHybridHandle(args: HybridHandleArgs): Promise<AgentH
 
   const send: SendFn = async (prompt, o) => {
     const kind = classifyPrompt(prompt);
-    const route = routeTurn(kind, policy, loadMaxUsage());
+    const route = o?.tier
+      ? o.tier === "claude"
+        ? routeTurn("unblock", { ...policy, rescue: true }, loadMaxUsage())
+        : { tier: "local" as const, reason: `${kind}: forced local` }
+      : routeTurn(kind, policy, loadMaxUsage());
+    if (o?.tier === "claude" && route.tier === "claude") route.reason = `${kind}: forced claude`;
     log(`route: ${route.reason} -> ${route.tier}`);
-    let turn = await runTier(route.tier, kind, prompt, o?.mode);
+    let turn =
+      route.tier === "local" && gatedKinds.includes(kind)
+        ? await runLocalGated(kind, prompt, o?.mode)
+        : await runTier(route.tier, kind, prompt, o);
     remember(kind, route.tier, turn);
 
     const verdictKinds: TurnKind[] = ["verify", "finish"];
-    if (route.tier === "local" && verdictKinds.includes(kind) && policy.rescue) {
+    if (route.tier === "local" && policy.rescue) {
       const report = turn.status === "finished" ? extractJsonBlock<{ done?: boolean; complete?: boolean }>(turn.result) : undefined;
       const passed = report?.done === true || report?.complete === true;
-      if (!passed) {
+      const failedTurn = turn.status !== "finished";
+      const failedVerdict = verdictKinds.includes(kind) && !passed;
+      if (failedTurn || failedVerdict) {
         const rescue = routeTurn("unblock", policy, loadMaxUsage());
         if (rescue.tier === "claude") {
           orchestratorCommit(rec.cwd, "wip: local executor checkpoint before rescue", log);
-          log(`rescue: local ${kind} did not pass; re-running on Claude`);
+          log(`rescue: local ${kind} ${failedTurn ? "did not finish" : "did not pass"}; re-running on Claude`);
           const p = `${transcriptContext(rec.transcript)}${prompt}`;
-          turn = await claudeSend(p, o?.mode ? { mode: o.mode } : undefined);
+          turn = await claudeSend(p, o);
           remember(kind, "claude", turn);
         } else {
           log(`rescue skipped: ${rescue.reason}`);
@@ -321,12 +527,13 @@ export async function createHybridHandle(args: HybridHandleArgs): Promise<AgentH
 
   return {
     agentId: rec.agentId,
+    workspace: rec.cwd,
     send: async (prompt, opts) => {
       const turn = await send(prompt, opts);
       if (opts?.mode !== "plan") orchestratorCommit(rec.cwd, `${args.engine}: ${classifyPrompt(prompt)} turn`, log);
-      if (opts?.mode === "agent" && args.autoCreatePR !== false && !rec.prUrl) {
+      if (opts?.mode !== "plan" && args.autoCreatePR !== false && !rec.prUrl && hasCommitsAhead(rec.cwd, rec.ref)) {
         try {
-          rec.prUrl = pushAndOpenPr(rec.cwd, `${args.engine}: ${rec.branch}`);
+          rec.prUrl = pushAndOpenPr(rec.cwd, `${args.engine}: ${rec.branch}`, rec.ref);
           saveClaudeRecord(rec);
         } catch (err) {
           const detail = err instanceof Error ? err.message : String(err);

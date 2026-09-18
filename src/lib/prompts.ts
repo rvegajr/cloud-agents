@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 /**
@@ -10,8 +10,14 @@ import { resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 
+/**
+ * `prompts/<name>.md`, or a repo-relative `<name>.md` for templates that live
+ * with their pattern (e.g. `architect-crew-gate/prompts/task`).
+ */
 export function loadTemplate(name: string): string {
-  return readFileSync(resolve(ROOT, "prompts", `${name}.md`), "utf8");
+  const inPrompts = resolve(ROOT, "prompts", `${name}.md`);
+  if (existsSync(inPrompts)) return readFileSync(inPrompts, "utf8");
+  return readFileSync(resolve(ROOT, `${name}.md`), "utf8");
 }
 
 export function loadBriefTemplate(): string {

@@ -12,9 +12,22 @@ export interface TurnResult {
   result?: string;
   runId?: string;
   prUrl?: string;
+  gate?: import("../../architect-crew-gate/src/quality-gate.js").GateResult;
 }
 
-export type SendFn = (prompt: string, opts?: { mode?: "agent" | "plan" }) => Promise<TurnResult>;
+export interface SendOpts {
+  mode?: "agent" | "plan";
+  /** Start a fresh model session (no resume), e.g. an independent reviewer. */
+  fresh?: boolean;
+  /** Run this turn in another checkout (e.g. QA in a fresh clone). Engines that own a clone honour it. */
+  cwd?: string;
+  /** Force a tier for this turn (e.g. QA falling back to the frontier after the local analyst could not report). The ceiling still applies. */
+  tier?: "claude" | "local";
+  /** Give this turn a real browser (Playwright MCP) if the engine can: the QA analyst walks user flows in it. */
+  browser?: boolean;
+}
+
+export type SendFn = (prompt: string, opts?: SendOpts) => Promise<TurnResult>;
 
 export interface SpecReport {
   stack: string;

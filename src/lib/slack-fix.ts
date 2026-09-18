@@ -26,6 +26,8 @@ export interface AgentHandle {
   agentId: string;
   send: PipelineSend;
   getUsage?: () => Promise<UsageSnapshot>;
+  /** The local clone, for engines that own one (claude, hybrid, local). */
+  workspace?: string;
 }
 
 export interface JobRuntime {

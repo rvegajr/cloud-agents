@@ -99,3 +99,47 @@ test("formatMaxUsage", () => {
     /42% of seven day, resets \d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z/,
   );
 });
+
+test("classifyPrompt recognises the architect–crew–gate templates (architect-crew-gate/prompts)", () => {
+  assert.equal(classifyPrompt(buildPrompt("architect-crew-gate/prompts/requirements", "", { job: "j", repo: "r", must_haves: "m" })), "requirements");
+  assert.equal(classifyPrompt(buildPrompt("architect-crew-gate/prompts/blueprint", "", { job: "j", max_tasks: "8", workflow_ids: "W1" })), "blueprint");
+  assert.equal(classifyPrompt(buildPrompt("architect-crew-gate/prompts/task", "", { task_id: "T1", task_block: "b", design_excerpt: "d", red_output: "r" })), "task");
+  assert.equal(classifyPrompt(buildPrompt("architect-crew-gate/prompts/qa", "", { qa_md: "q", requirements_md: "r", run_instructions: "i", browser_tools: "b" })), "qa");
+  assert.equal(classifyPrompt(buildPrompt("architect-crew-gate/prompts/qa-fix", "", { defects: "d", allowed_files: "f" })), "task");
+  assert.equal(classifyPrompt(buildPrompt("architect-crew-gate/prompts/review", "", { job: "j", base: "b", diff_stat: "s", gates: "g", qa_report: "q", claims: "c" })), "review");
+  assert.equal(classifyPrompt(buildPrompt("architect-crew-gate/prompts/review-fix", "", { findings: "f", allowed_files: "a" })), "task");
+});
+
+test("hybrid policy routes the pattern's stages: architect and review on Claude, crew and QA local", () => {
+  const p = policyFromEnv("hybrid", {});
+  assert.equal(preferredTier("requirements", p), "claude");
+  assert.equal(preferredTier("blueprint", p), "claude");
+  assert.equal(preferredTier("task", p), "local");
+  assert.equal(preferredTier("qa", p), "local");
+  assert.equal(preferredTier("review", p), "claude");
+  assert.equal(preferredTier("review", policyFromEnv("hybrid", { HYBRID_REVIEW: "local" })), "local");
+  assert.equal(preferredTier("qa", policyFromEnv("hybrid", { HYBRID_QA: "claude" })), "claude");
+  for (const k of ["requirements", "blueprint", "task", "qa", "review"] as const) assert.equal(preferredTier(k, policyFromEnv("local", {})), "local");
+});
+
+test("every blueprint template ends with a fenced json contract", () => {
+  const rendered = [
+    buildPrompt("architect-crew-gate/prompts/requirements", "", { job: "j", repo: "r", must_haves: "m" }),
+    buildPrompt("architect-crew-gate/prompts/blueprint", "", { job: "j", max_tasks: "8", workflow_ids: "W1" }),
+    buildPrompt("architect-crew-gate/prompts/task", "", { task_id: "T1", task_block: "b", design_excerpt: "d", red_output: "r" }),
+    buildPrompt("architect-crew-gate/prompts/qa", "", { qa_md: "q", requirements_md: "r", run_instructions: "i", browser_tools: "b" }),
+    buildPrompt("architect-crew-gate/prompts/qa-fix", "", { defects: "d", allowed_files: "f" }),
+    buildPrompt("architect-crew-gate/prompts/review", "", { job: "j", base: "b", diff_stat: "s", gates: "g", qa_report: "q", claims: "c" }),
+    buildPrompt("architect-crew-gate/prompts/review-fix", "", { findings: "f", allowed_files: "a" }),
+  ];
+  for (const r of rendered) {
+    assert.match(r, /```json\n\{[\s\S]*\}\n```\s*$/, r.slice(0, 60));
+    assert.doesNotMatch(r, /\{\{[a-z_]+\}\}/, "unrendered variable");
+  }
+});
+
+test("classifyPrompt sees the template header behind a long prepended note (gate feedback, blueprint gaps)", () => {
+  const note = "## Quality gate failed (attempt 1)\n\n" + "- [quality-bar] npm test exited 1\n  last output:\n  " + "x".repeat(1500) + "\n\n---\n\n";
+  assert.equal(classifyPrompt(note + buildPrompt("architect-crew-gate/prompts/task", "", { task_id: "T1", task_block: "b", design_excerpt: "d", red_output: "r" })), "task");
+  assert.equal(classifyPrompt(note + buildPrompt("architect-crew-gate/prompts/blueprint", "", { job: "j", max_tasks: "8", workflow_ids: "W1" })), "blueprint");
+});

@@ -24,7 +24,7 @@ export interface CostEntry {
   project: string;
   meter: CostMeterId;
   cents: number;
-  source: "build-app" | "farm" | "slack" | "pipeline";
+  source: "build-app" | "farm" | "slack" | "pipeline" | "quality-review";
   agentId?: string;
   repo?: string;
 }
@@ -463,7 +463,10 @@ export function recordJobCost(opts: {
     agentId: opts.agentId,
     repo: opts.repo,
   });
-  const entries = loadCostLedger(file);
+  // Entries are cumulative per agent (getUsage semantics), so a resumed job
+  // appends a newer total for the same agent; summarise the latest per agent,
+  // as the board does, or every resume counts the past again.
+  const entries = mergeCostEntries(loadCostLedger(file), []);
   const close = formatCostClose(
     summarizeCost(entries, {
       project: opts.project,

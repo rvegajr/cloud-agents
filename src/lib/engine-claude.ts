@@ -8,6 +8,7 @@ import type { SendFn, TurnResult } from "./build-loop.js";
 import type { AgentHandle } from "./slack-fix.js";
 import { parseAllowlist } from "./slack-thread.js";
 import { saveMaxUsage, type MaxUsage } from "./routing.js";
+import { browserFromEnv } from "../../architect-crew-gate/src/browser.js";
 
 export type EngineName = "cursor" | "claude" | "hybrid" | "local";
 
@@ -214,6 +215,10 @@ export function makeClaudeSend(opts: {
   onCost?: (usd: number) => void;
   /** Every rate-limit sample the SDK reports, exhausted or not. Handles pass `saveMaxUsage` so routing can read them. */
   onRateLimit?: (usage: MaxUsage) => void;
+  /** Tool allow/deny lists; default is the build set (Read, Grep, Glob, Edit, Write, Bash). */
+  tools?: { allowed?: string[]; disallowed?: string[] };
+  /** Client-side API-equivalent tripwire per turn; default 20. */
+  maxBudgetUsd?: number;
   queryFn?: ClaudeQueryFn;
 }): SendFn {
   let sessionId = opts.sessionId;
@@ -223,21 +228,29 @@ export function makeClaudeSend(opts: {
     assertClaudeCredential();
     let result: string | undefined;
     let status: TurnResult["status"] = "error";
+    const fresh = o?.fresh === true;
+    // A turn that asks for a browser gets the Playwright MCP server and every tool it serves.
+    const browser = o?.browser ? browserFromEnv() : undefined;
     const options: Options = {
-      cwd: opts.cwd,
-      resume: sessionId,
+      cwd: o?.cwd ?? opts.cwd,
+      resume: fresh ? undefined : sessionId,
       model: opts.model ?? (process.env.CLAUDE_MODEL?.trim() || "sonnet"),
       permissionMode: o?.mode === "plan" ? "plan" : "acceptEdits",
-      allowedTools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash"],
+      allowedTools: [...(opts.tools?.allowed ?? ["Read", "Grep", "Glob", "Edit", "Write", "Bash"]), ...(browser ? ["mcp__playwright"] : [])],
+      ...(opts.tools?.disallowed?.length ? { disallowedTools: opts.tools.disallowed } : {}),
+      ...(browser ? { mcpServers: { playwright: { type: "stdio" as const, command: browser.command, args: browser.args, ...(browser.env ? { env: browser.env } : {}) } } } : {}),
       settingSources: ["project"],
       maxTurns: 80,
-      maxBudgetUsd: 20,
+      maxBudgetUsd: opts.maxBudgetUsd ?? 20,
       env: scrubbedEnv(),
     };
     for await (const m of run({ prompt, options })) {
       if (m.type === "system" && "subtype" in m && m.subtype === "init") {
-        sessionId = m.session_id;
-        opts.onSession?.(sessionId);
+        // A fresh session is one-off: it must not become the handle's resumable session.
+        if (!fresh) {
+          sessionId = m.session_id;
+          opts.onSession?.(sessionId);
+        }
         if (m.apiKeySource !== "none") {
           throw new Error(`refusing to run: apiKeySource=${m.apiKeySource}; this would bill the API`);
         }
@@ -255,7 +268,7 @@ export function makeClaudeSend(opts: {
         opts.onCost?.(m.total_cost_usd);
       }
     }
-    return { status, result, runId: sessionId };
+    return { status, result, runId: fresh ? "fresh" : sessionId };
   };
 }
 
@@ -274,6 +287,11 @@ export interface ClaudeRecord {
   transcript?: { kind: string; tier: "claude" | "local"; result: string }[];
   localTurns?: number;
   localSeconds?: number;
+  /** Commit sha the blueprint/spec landed on; tamper detection diffs package.json scripts against this. */
+  gateBaseline?: string;
+  /** package.json scripts as of gateBaseline, captured once so tamper detection has a fixed point. */
+  gateScriptsBaseline?: Record<string, string>;
+  gates?: { kind: string; attempt: number; passed: boolean; seconds: number; failing: string[] }[];
 }
 
 function recordsDir(): string {
@@ -320,10 +338,26 @@ export function cloneWorkspace(repo: string, ref: string, root = process.env.WOR
   return dir;
 }
 
-export function pushAndOpenPr(cwd: string, title: string): string {
+/** True when HEAD has commits the integration branch does not; a PR needs at least one. */
+export function hasCommitsAhead(cwd: string, base: string): boolean {
+  try {
+    execFileSync("git", ["fetch", "-q", "origin", base], { cwd, stdio: "ignore" });
+    const n = execFileSync("git", ["rev-list", "--count", `origin/${base}..HEAD`], { cwd, encoding: "utf8" }).trim();
+    return Number(n) > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Push the branch and open the draft PR. `--head`/`--base` are explicit because
+ * gh's own "is this branch pushed?" check fails on a shallow clone whose origin
+ * URL was rewritten, which is exactly what `cloneWorkspace` produces.
+ */
+export function pushAndOpenPr(cwd: string, title: string, base = "main"): string {
   const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd, encoding: "utf8" }).trim();
   execFileSync("git", ["push", "-u", "origin", branch], { cwd, stdio: "inherit", env: process.env });
-  const out = execFileSync("gh", ["pr", "create", "--draft", "--fill", "--title", title], {
+  const out = execFileSync("gh", ["pr", "create", "--draft", "--fill", "--head", branch, "--base", base, "--title", title], {
     cwd,
     encoding: "utf8",
     env: process.env,
@@ -393,11 +427,12 @@ export async function createClaudeHandle(args: {
 
   return {
     agentId: rec.agentId,
+    workspace: rec.cwd,
     send: async (prompt, opts) => {
       const turn = await send(prompt, opts);
-      if (opts?.mode === "agent" && args.autoCreatePR !== false && !rec.prUrl) {
+      if (opts?.mode !== "plan" && args.autoCreatePR !== false && !rec.prUrl && hasCommitsAhead(rec.cwd, rec.ref)) {
         try {
-          rec.prUrl = pushAndOpenPr(rec.cwd, `claude: ${rec.branch}`);
+          rec.prUrl = pushAndOpenPr(rec.cwd, `claude: ${rec.branch}`, rec.ref);
           saveClaudeRecord(rec);
         } catch (err) {
           const detail = err instanceof Error ? err.message : String(err);
