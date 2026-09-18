@@ -22,6 +22,37 @@ import {
 } from "./github.js";
 import { printStream, type StreamOptions } from "./stream.js";
 import { centsForMeter, closeJobCost, formatRunningCost, meterForEngine, projectFromRepo, type CostMeterId } from "./cost-ledger.js";
+import { initialBlueprintState, runBlueprintLoop, type BlueprintState, type BlueprintStopReason } from "../../architect-crew-gate/src/blueprint-loop.js";
+import { browserFromEnv } from "../../architect-crew-gate/src/browser.js";
+import { makeRepoIO } from "../../architect-crew-gate/src/io.js";
+
+export type BuildLoopKind = "milestone" | "blueprint";
+
+export function parseLoopKind(raw?: string): BuildLoopKind {
+  const v = (raw ?? process.env.BUILD_LOOP ?? "milestone").trim().toLowerCase();
+  return v === "blueprint" || v === "acg" || v === "architect-crew-gate" ? "blueprint" : "milestone";
+}
+
+/** Where a stopped blueprint run resumes: the stage that failed, not the beginning. */
+export function blueprintResumePhase(state: BlueprintState): BlueprintState["phase"] {
+  if (state.phase !== "stopped") return state.phase;
+  switch (state.stopReason) {
+    case "requirements-incomplete":
+      return "requirements";
+    case "blueprint-incomplete":
+      return "blueprint";
+    case "gate-failed":
+      return state.taskIndex < state.tasks.length ? "tasks" : "finish";
+    case "qa-failed":
+      return "qa";
+    case "review-unresolved":
+      return "review";
+    case "unparseable-report":
+      return state.tasks.length ? "tasks" : state.requirements.length ? "blueprint" : "requirements";
+    default:
+      return state.tasks.length ? "tasks" : "requirements";
+  }
+}
 
 export interface BuildRecord {
   agentId: string;
@@ -36,6 +67,9 @@ export interface BuildRecord {
   apiEquivalentUsd?: number;
   prUrl?: string;
   chargedCents?: number;
+  /** Which loop drove this build. Absent = milestone (pre-pattern records). */
+  loop?: BuildLoopKind;
+  blueprint?: BlueprintState;
 }
 
 export interface RunBuildAppOpts {
@@ -45,6 +79,8 @@ export interface RunBuildAppOpts {
   createRepo?: string;
   ref?: string;
   engine?: string;
+  /** `milestone` (default) or `blueprint` (architect–crew–gate; hybrid/local engines only). */
+  loop?: string;
   resume?: string;
   maxIterations?: number;
   maxMilestones?: number;
@@ -65,8 +101,9 @@ export interface BuildAppResult {
   ref?: string;
   engine: EngineName;
   prUrl?: string;
-  stopReason: StopReason | "startup-failed";
+  stopReason: StopReason | BlueprintStopReason | "startup-failed";
   state?: LoopState;
+  blueprint?: BlueprintState;
   chargedCents?: number;
   costClose?: string;
   error?: string;
@@ -102,7 +139,7 @@ export function createGithubRepo(name: string): string {
   return url;
 }
 
-export function exitCodeForStopReason(reason: StopReason | "startup-failed"): number {
+export function exitCodeForStopReason(reason: StopReason | BlueprintStopReason | "startup-failed"): number {
   if (reason === "complete") return 0;
   if (reason === "blocked") return 3;
   if (reason === "run-failed" || reason === "startup-failed") return 2;
@@ -116,6 +153,20 @@ export function banner(title: string, log: (line: string) => void = console.log)
 export function printBuildResult(result: BuildAppResult, log: (line: string) => void = console.log): void {
   banner(`RESULT: ${result.stopReason}`, log);
   if (result.error) log(result.error);
+  if (result.blueprint) {
+    const b = result.blueprint;
+    if (b.stopDetail) log(b.stopDetail);
+    log(`job kind:   ${b.jobKind ?? "?"}    requirements: ${b.requirements.length}    tasks: ${b.tasks.length}`);
+    for (const t of b.taskRecords) log(`  ${t.gatePassed ? "[x]" : "[ ]"} ${t.id}  gate ${t.gatePassed ? "PASS" : `FAIL (${(t.failing ?? []).join(", ")})`} after ${t.attempts} attempt(s)`);
+    if (b.finishGate) log(`finish gate: ${b.finishGate.passed ? "PASS" : `FAIL (${b.finishGate.failing.join(", ")})`}`);
+    if (b.qa) log(`QA:          ${b.qa.results.filter((r) => r.passed).length}/${b.qa.results.length} scenarios passed (${b.qaAttempts} run${b.qaAttempts === 1 ? "" : "s"})`);
+    if (b.review) log(`review:      ${b.review.verdict}, ${b.review.findings.length} finding(s)${b.review.rubric ? `; rubric ${Object.values(b.review.rubric).reduce((n, v) => n + v, 0)}/35` : ""}`);
+    if (b.reviewChecks?.length) log(`checks:      ${b.reviewChecks.filter((c) => c.actual === c.expected).length}/${b.reviewChecks.length} passed`);
+    if (result.prUrl) log(`PR: ${result.prUrl}`);
+    if (result.agentId && result.stopReason !== "complete") log(`\nResume with: npm run build-app -- --resume ${result.agentId}`);
+    log(`\n${result.costClose ?? "COST\n  this run:     unknown"}`);
+    return;
+  }
   const state = result.state;
   if (state?.spec) log(`stack:      ${state.spec.stack}`);
   if (state) log(`iterations: ${state.iteration}`);
@@ -177,6 +228,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
   const maxIterations = opts.maxIterations ?? 12;
   const maxMilestones = opts.maxMilestones ?? 7;
   const engine = parseEngine(opts.engine);
+  const loop = parseLoopKind(opts.loop);
   const cursorApp = opts.cursorApp ?? "warn";
   const createRepoFn = opts.createRepoFn ?? createGithubRepo;
   const grantFn =
@@ -190,6 +242,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
 
   let record: BuildRecord;
   let send: SendFn;
+  let workspace: string | undefined;
   let close: () => Promise<void> = async () => {};
   let usage: () => Promise<number | undefined> = async () => undefined;
   let lastPr: string | undefined;
@@ -215,7 +268,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
   try {
     if (opts.resume) {
       record = loadBuildRecord(opts.resume, stateDir);
-      if (record.state.phase === "stopped") record.state.phase = record.state.history.length ? "iterate" : "spec";
+      if (record.state.phase === "stopped") record.state.phase = record.state.spec ? "iterate" : "spec";
       lastPr = record.prUrl;
       const resumeEngine: EngineName = isClaudeAgentId(record.agentId)
         ? engineOfRecord(record.agentId, record.engine ?? "claude")
@@ -229,6 +282,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
           agentId: record.agentId,
           autoCreatePR: true,
         });
+        workspace = handle.workspace;
         send = wrapSend(handle.send);
         usage = async () => {
           const u = await handle.getUsage?.();
@@ -281,13 +335,16 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
 
       if (isLocalWorkspaceEngine(engine)) {
         const handle = await createEngineHandle(engine, { repo, ref, autoCreatePR: true });
+        workspace = handle.workspace;
         record = {
           agentId: handle.agentId,
           repo,
           ref,
           idea: idea.trim(),
           engine,
+          loop,
           state: { phase: "spec", iteration: 0, runIds: [], history: [] },
+          blueprint: loop === "blueprint" ? initialBlueprintState() : undefined,
           updatedAt: new Date().toISOString(),
         };
         saveBuildRecord(record, stateDir);
@@ -326,10 +383,57 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
         send = wrapSend(cursorSend(agent, opts.stream, log));
         usage = () => usageCents(agent, meter);
       }
+      if (loop === "blueprint" && !isLocalWorkspaceEngine(engine)) {
+        return { engine, repo, ref, stopReason: "startup-failed", error: "--loop blueprint needs --engine hybrid|local|claude (a clone this process owns); Cursor VMs cannot be gated" };
+      }
       log(`agent:  ${record.agentId}`);
       log(`engine: ${record.engine ?? engine}`);
+      log(`loop:   ${record.loop ?? "milestone"}`);
       log(`repo:   ${repo}@${ref}`);
       log(`state:  ${buildStateFile(record.agentId, stateDir)}`);
+    }
+
+    if ((record.loop ?? loop) === "blueprint") {
+      if (!workspace) throw new Error("blueprint loop: the engine returned no workspace");
+      const io = makeRepoIO(workspace, { log: (line) => log(line) });
+      const initialState = record.blueprint ?? initialBlueprintState();
+      if (opts.resume) {
+        initialState.phase = blueprintResumePhase(initialState);
+        // A resumed QA stage starts its attempt count over; the attempts that stopped the run are on record.
+        if (initialState.phase === "qa") initialState.qaAttempts = 0;
+      }
+      const bp = await runBlueprintLoop(
+        send,
+        {
+          job: record.idea,
+          repo: record.repo,
+          io,
+          maxTasks: maxMilestones,
+          qaBatch: Number(process.env.QA_BATCH) > 0 ? Number(process.env.QA_BATCH) : undefined,
+          qaFallbackTier: (process.env.HYBRID_QA_FALLBACK ?? "claude").trim().toLowerCase() === "claude" && engine !== "local" ? "claude" : undefined,
+          browser: Boolean(browserFromEnv()),
+          log: (line) => banner(line, log),
+          onState: (state) => {
+            record.blueprint = state;
+            if (lastPr) record.prUrl = lastPr;
+            saveBuildRecord(record, stateDir);
+          },
+        },
+        { ...initialState, stopReason: undefined, stopDetail: undefined },
+      );
+      const cents = await usage();
+      if (lastPr) record.prUrl = lastPr;
+      record.blueprint = bp;
+      if (cents != null) record.chargedCents = cents;
+      saveBuildRecord(record, stateDir);
+      await close();
+      let costClose: string | undefined;
+      try {
+        costClose = closeJobCost({ stateDir, project: projectFromRepo(record.repo), cents, meter, source: opts.costSource ?? "build-app", agentId: record.agentId, repo: record.repo }).close;
+      } catch {
+        /* ledger is optional */
+      }
+      return { agentId: record.agentId, repo: record.repo, ref: record.ref, engine: record.engine ?? engine, prUrl: lastPr ?? record.prUrl, stopReason: bp.stopReason, blueprint: bp, chargedCents: cents, costClose };
     }
 
     const final = await runBuildLoop(

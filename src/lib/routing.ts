@@ -14,12 +14,30 @@ import { join, resolve } from "node:path";
 
 export type Tier = "claude" | "local";
 
-export type TurnKind = "plan" | "implement" | "verify" | "spec" | "iterate" | "finish" | "unblock" | "triage" | "other";
+export type TurnKind =
+  | "plan"
+  | "implement"
+  | "verify"
+  | "spec"
+  | "iterate"
+  | "finish"
+  | "unblock"
+  | "triage"
+  | "requirements"
+  | "blueprint"
+  | "task"
+  | "qa"
+  | "review"
+  | "other";
 
 export interface RoutingPolicy {
   plan: Tier;
   implement: Tier;
   verify: Tier;
+  /** The scripted acceptance run (architect-crew-gate/prompts/qa.md). */
+  qa: Tier;
+  /** The independent release review (architect-crew-gate/prompts/review.md). */
+  review: Tier;
   /** Re-run a failed local verify on Claude (one turn) before giving up. */
   rescue: boolean;
   /** Max utilization (0..1) at or above which Claude turns are diverted. */
@@ -53,7 +71,8 @@ export class MaxCeiling extends Error {
 }
 
 export function classifyPrompt(prompt: string): TurnKind {
-  const head = prompt.slice(0, 400);
+  // Retries prepend a note (gate feedback, traceability gaps) before the template; look past it.
+  const head = prompt.slice(0, 8000);
   if (/^# Phase 1 of 3: Plan/m.test(head)) return "plan";
   if (/^# Phase 2 of 3: Implement/m.test(head)) return "implement";
   if (/^# Phase 3 of 3: Verify/m.test(head)) return "verify";
@@ -62,6 +81,13 @@ export function classifyPrompt(prompt: string): TurnKind {
   if (/^# Build an app from an idea: final verification/m.test(head)) return "finish";
   if (/^# Loop intervention/m.test(head)) return "unblock";
   if (/^# Triage/im.test(head)) return "triage";
+  // Architect–crew–gate (architect-crew-gate/PATTERN.md, architect-crew-gate/prompts/)
+  if (/^# Job: phase 0, requirements/m.test(head)) return "requirements";
+  if (/^# Job: phase 1, blueprint/m.test(head)) return "blueprint";
+  if (/^# Job: task /m.test(head)) return "task";
+  if (/^# Job: fix turn/m.test(head)) return "task";
+  if (/^# QA: acceptance run/m.test(head)) return "qa";
+  if (/^# Review: independent release review/m.test(head)) return "review";
   return "other";
 }
 
@@ -73,7 +99,7 @@ function parseCeiling(raw: string | undefined): number {
 
 export function policyFromEnv(engine: "hybrid" | "local", env: NodeJS.ProcessEnv = process.env): RoutingPolicy {
   if (engine === "local") {
-    return { plan: "local", implement: "local", verify: "local", rescue: false, ceiling: 1, overCeiling: "local" };
+    return { plan: "local", implement: "local", verify: "local", qa: "local", review: "local", rescue: false, ceiling: 1, overCeiling: "local" };
   }
   const tier = (name: string, fallback: Tier): Tier => {
     const v = env[name]?.trim().toLowerCase();
@@ -83,6 +109,8 @@ export function policyFromEnv(engine: "hybrid" | "local", env: NodeJS.ProcessEnv
     plan: tier("HYBRID_PLAN", "claude"),
     implement: tier("HYBRID_IMPLEMENT", "local"),
     verify: tier("HYBRID_VERIFY", "local"),
+    qa: tier("HYBRID_QA", "local"),
+    review: tier("HYBRID_REVIEW", "claude"),
     rescue: (env.HYBRID_RESCUE ?? "1").trim() !== "0",
     ceiling: parseCeiling(env.MAX_UTILIZATION_CEILING),
     overCeiling: env.HYBRID_OVER_CEILING?.trim().toLowerCase() === "stop" ? "stop" : "local",
@@ -95,13 +123,20 @@ export function preferredTier(kind: TurnKind, policy: RoutingPolicy): Tier {
     case "plan":
     case "spec":
     case "triage":
+    case "requirements":
+    case "blueprint":
       return policy.plan;
     case "implement":
     case "iterate":
+    case "task":
       return policy.implement;
     case "verify":
     case "finish":
       return policy.verify;
+    case "qa":
+      return policy.qa;
+    case "review":
+      return policy.review;
     case "unblock":
       // A stall is a judgement call; the cheap tier already failed to make progress.
       return policy.rescue ? "claude" : policy.implement;

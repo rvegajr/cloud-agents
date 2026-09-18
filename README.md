@@ -14,6 +14,15 @@ Read this file top to bottom once. Then run the numbered scripts in order.
 walkthrough, with a jam.dev recording as the preferred bug report.
 `ARTICLE-CLAUDE-MAX.md` is how the build loop moves onto a Claude Max plan;
 `ARTICLE-CLAUDE-MAX-RESULTS.md` is the snippet-vault A/B that measured it.
+`architect-crew-gate/` is the pattern that A/B led to, in its own folder:
+`THEORY.md` (two pages; hand it to any AI with a job and it can act on it),
+`ARTICLE.md` (what the A/B found wrong with the hybrid engine's output and the
+names the fix is composed from), `PATTERN.md` (the stack-agnostic specification
+for any job — build, change, repair, or maintain — with every artifact template,
+stage contract, and gate rule, and worked examples for a repair and an upgrade),
+`prompts/` (the seven turns), `templates/` (fill-in artifact files), `src/` (the
+deterministic quality gate and its tests), and `ROADMAP.md` (what is built and
+what is not).
 `IMPLEMENTATION-GUIDE.md` is the same setup as a recipe an AI agent can execute:
 every credential and scope in the order it is needed, with the browser-only steps
 marked as human gates, and `npm run doctor` to prove each one. `CHANGELOG.md` is
@@ -195,6 +204,13 @@ npm run build-app -- --resume cc-xxxx                       # Claude handle from
 `--engine cursor` (default) is a Cursor Cloud Agent: a hosted VM, a `bc-…` id, billed per token. `--engine claude` clones onto **this machine** (or `WORK_ROOT`), runs the Anthropic Agent SDK against your Max plan, and opens a `claude/…` draft PR. Resume ids are `cc-…`. Doctor fails if `ANTHROPIC_API_KEY` is set or if `claude auth status` is anything but `apiKeySource=none`.
 
 `--engine hybrid` keeps the same clone, ids, and PR, but only the **plan** turn runs on Max. A local Ollama model (`LOCAL_MODEL`, driven by the qwen-code CLI or aider inside the clone) does the implement and verify turns, and Max comes back for one rescue turn only if the local verifier does not report `done`. Before every Max turn the engine reads the last utilization the Agent SDK reported (`.runs/max-usage.json`); at or above `MAX_UTILIZATION_CEILING` (85%) the turn is diverted to `LOCAL_PLANNER_MODEL` or the job stops, never buying extra usage. `--engine local` is Ollama only. The measured basis for this split is in `~/Dev/local-coding-evals/results/2026-09-17/RESULTS.md`: with a plan written the way `prompts/01-plan.md` now asks for it, every local model tested passed every check; without one, most did not.
+
+`--loop blueprint` (or `BUILD_LOOP=blueprint`) swaps the milestone loop for the
+architect–crew–gate loop on any of these engines: Max writes requirements, the
+standard, and a blueprint with red tests; the local crew fills one task per
+gated turn; QA runs scripted scenarios and every user workflow in a fresh
+clone with a headless browser (Playwright MCP, `QA_BROWSER`); one fresh
+read-only review turn certifies. See `architect-crew-gate/`.
 
 ```bash
 ollama pull qwen3-coder-next            # 52 GB; or qwen3.6:35b-coding (23 GB)

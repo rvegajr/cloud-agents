@@ -1,3 +1,4 @@
+import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -227,4 +228,40 @@ test("rateLimitSamples reads every unified window and marks rejection as full", 
   const rejected = rateLimitSamples({ status: "rejected", rateLimitType: "seven_day", resetsAt: 9 }, "t");
   assert.equal(rejected.at(-1)!.utilization, 1);
   assert.equal(rateLimitSamples({ status: "allowed", unifiedWindows: { seven_day: { utilization: 42 } } } as never, "t")[0]!.utilization, 0.42);
+});
+
+test("makeClaudeSend gives a browser turn the Playwright MCP server and its tools; other turns get neither", async () => {
+  const saved = { key: process.env.ANTHROPIC_API_KEY, browser: process.env.QA_BROWSER };
+  delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.QA_BROWSER;
+  try {
+    const seen: Options[] = [];
+    const send = makeClaudeSend({
+      cwd: "/tmp",
+      tools: { allowed: ["Read", "Bash"], disallowed: ["Edit"] },
+      queryFn: async function* ({ options }) {
+        seen.push(options!);
+        yield { type: "system", subtype: "init", session_id: "s", apiKeySource: "none" } as never;
+        yield { type: "result", subtype: "success", result: "ok", total_cost_usd: 0 } as never;
+      },
+    });
+    await send("qa", { mode: "agent", fresh: true, cwd: "/tmp/clone", browser: true });
+    await send("plain");
+    const b = seen[0]! as Options & { mcpServers?: Record<string, { command: string; args: string[] }> };
+    assert.equal(b.mcpServers?.playwright?.command, "npx");
+    assert.ok(b.mcpServers?.playwright?.args.includes("--headless"));
+    assert.deepEqual(b.allowedTools, ["Read", "Bash", "mcp__playwright"]);
+    assert.deepEqual(b.disallowedTools, ["Edit"]);
+    assert.equal(b.cwd, "/tmp/clone");
+    const p = seen[1]! as Options & { mcpServers?: unknown };
+    assert.equal(p.mcpServers, undefined);
+    assert.deepEqual(p.allowedTools, ["Read", "Bash"]);
+    process.env.QA_BROWSER = "off";
+    await send("qa", { browser: true });
+    assert.equal((seen[2]! as Options & { mcpServers?: unknown }).mcpServers, undefined, "QA_BROWSER=off: no server even when asked");
+  } finally {
+    if (saved.key !== undefined) process.env.ANTHROPIC_API_KEY = saved.key;
+    if (saved.browser !== undefined) process.env.QA_BROWSER = saved.browser;
+    else delete process.env.QA_BROWSER;
+  }
 });

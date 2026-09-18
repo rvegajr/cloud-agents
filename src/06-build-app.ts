@@ -14,6 +14,10 @@
  *   npm run build-app -- --engine hybrid --idea-file ideas/example-snippet-vault.md --repo https://github.com/you/snippet-vault
  *   npm run build-app -- --resume bc-xxxx
  *   npm run build-app -- --resume cc-xxxx
+ *   npm run build-app -- --loop blueprint --engine hybrid --idea "Copying a body with & pastes &amp;" --repo https://github.com/you/app
+ *
+ * `--loop blueprint` (or BUILD_LOOP=blueprint) runs architect-crew-gate/PATTERN.md
+ * instead of the milestone loop: requirements → blueprint → gated tasks → QA → review.
  *
  * For many ideas in parallel, use `npm run build-farm` (Cursor only).
  */
@@ -34,6 +38,7 @@ try {
     createRepo: args["create-repo"],
     ref: args.ref,
     engine: args.engine,
+    loop: args.loop,
     resume: args.resume,
     maxIterations: args["max-iterations"] ? Number(args["max-iterations"]) : undefined,
     maxMilestones: args["max-milestones"] ? Number(args["max-milestones"]) : undefined,
