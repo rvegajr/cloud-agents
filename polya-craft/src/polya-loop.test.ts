@@ -582,3 +582,17 @@ test("look back (d): the ledger takes at most two lessons per run; the rest, and
   assert.match(lb, /## \(not appended: over the per-run cap\)\n[\s\S]*lesson number 4/);
 });
 
+test("oracle on: the understand prompt carries the checklist, and a PROBLEM.md without dispositions gets the targeted retry", async () => {
+  const { io } = makeIO();
+  const { send, sent } = makeSend({});
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null, oracle: true });
+  assert.match(sent[0]!.prompt, /## Oracle: cases a done-check list forgets/);
+  assert.match(sent[1]!.prompt, /^## Understanding incomplete[\s\S]*O1 has no disposition/);
+  assert.equal(out.stopReason, "understanding-incomplete");
+  const { sent: off } = makeSend({});
+  const { send: s2, sent: sent2 } = makeSend({});
+  await runPolyaLoop(s2, { ...base, io: makeIO().io, lessons: null });
+  assert.doesNotMatch(sent2[0]!.prompt, /## Oracle/);
+  void off;
+});
+

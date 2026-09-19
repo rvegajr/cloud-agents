@@ -479,6 +479,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
           browser: Boolean(browserFromEnv()),
           verifyFallbackTier: (process.env.HYBRID_QA_FALLBACK ?? "claude").trim().toLowerCase() === "claude" && engine !== "local" ? "claude" : undefined,
           verifyBatch: Number(process.env.POLYA_VERIFY_BATCH) > 0 ? Number(process.env.POLYA_VERIFY_BATCH) : undefined,
+          oracle: (process.env.POLYA_ORACLE ?? "").trim() === "1",
           log: (line) => banner(line, log),
           onState: (state) => {
             record.polya = state;

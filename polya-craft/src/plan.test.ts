@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { commandOf, contractOf, parsePlan, parseProblem, problemGaps, renderPlan, renderProblem, validateUnits } from "./plan.js";
+import { ORACLE, commandOf, contractOf, oracleNote, parsePlan, parseProblem, problemGaps, renderPlan, renderProblem, validateUnits } from "./plan.js";
 
 export const PROBLEM_MD = `# Problem: unknown routes answer 404
 Kind: repair
@@ -318,5 +318,19 @@ test("commandOf: commands mentioned inside a sentence are an observation, not a 
 test("parsePlan: a parenthetical note inside Touches is not a file", () => {
   const plan = parsePlan(PLAN_MD.replace("Touches:  src/app.js", "Touches:  `src/app.js`, `node_modules/` (generated, gitignored)"));
   assert.deepEqual(plan.units[0]!.touches, ["src/app.js", "node_modules/"]);
+});
+
+test("oracle: parsed from ## Oracle; every line needs a disposition, and an adopted line must name a real D", () => {
+  const base = parseProblem(PROBLEM_MD)!;
+  assert.deepEqual(base.oracle, {});
+  const gaps = problemGaps(base, { oracle: true });
+  assert.equal(gaps.filter((g) => /has no disposition under `## Oracle`/.test(g)).length, ORACLE.length);
+  const withOracle = PROBLEM_MD.replace("## Not this", "## Oracle\n" + ORACLE.map((o) => (o.id === "O1" ? "- O1: adopted as D9" : `- ${o.id}: dismissed — not relevant here`)).join("\n") + "\n\n## Not this");
+  const p = parseProblem(withOracle)!;
+  assert.equal(Object.keys(p.oracle).length, ORACLE.length);
+  assert.deepEqual(problemGaps(p, { oracle: true }), ["- O1 is adopted as D9, which is not a done-check"]);
+  assert.deepEqual(problemGaps(parseProblem(withOracle.replace("adopted as D9", "adopted as D1"))!, { oracle: true }), []);
+  assert.deepEqual(problemGaps(p), []);
+  assert.match(oracleNote(), /^## Oracle: cases a done-check list forgets[\s\S]*\*\*O7\*\*/);
 });
 

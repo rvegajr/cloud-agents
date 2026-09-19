@@ -4,7 +4,7 @@ import { lenientJson, type BlueprintIO } from "../../architect-crew-gate/src/blu
 import { browserToolNote, scenarioNeedsBrowser } from "../../architect-crew-gate/src/browser.js";
 import { gateFeedbackNote, type GateResult } from "../../architect-crew-gate/src/quality-gate.js";
 import { fileLessonsStore, priorLessonsNote, tagsForProblem, type LessonsStore, type NewLesson } from "./lessons.js";
-import { ARTIFACTS, parsePlan, parseProblem, problemGaps, renderPlan, renderProblem, validateUnits, type DoneCheck, type Plan, type Problem, type Unit } from "./plan.js";
+import { ARTIFACTS, oracleNote, parsePlan, parseProblem, problemGaps, renderPlan, renderProblem, validateUnits, type DoneCheck, type Plan, type Problem, type Unit } from "./plan.js";
 
 /**
  * The polya-craft loop (PATTERN.md section 4), engine-free so a fake `send`
@@ -127,6 +127,8 @@ export interface PolyaOptions {
   verifyBatch?: number;
   /** New lessons the ledger takes per run (default 2); the rest stay in LOOKBACK.md. */
   lessonsPerRun?: number;
+  /** Put the oracle checklist in the Understand prompt and require a disposition for every line (POLYA_ORACLE=1). */
+  oracle?: boolean;
   /** Software problems: unit Checks must be commands and the quality bar must name `test`. Default true. */
   software?: boolean;
   /** The engine can give a turn a real browser (Playwright MCP); a unit or a done-check that names a page is sent with `browser: true`. */
@@ -405,8 +407,9 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       problem: opts.problem,
       repo: opts.repo,
       prior_lessons: priorLessonsNote(offered, artifact(ARTIFACTS.lookback)),
+      oracle: opts.oracle ? oracleNote() : "",
     });
-    const gapsOf = () => problemGaps(readProblem(), { maxDone: 8, software, offeredLessons: offered.map((l) => l.id) });
+    const gapsOf = () => problemGaps(readProblem(), { maxDone: opts.oracle ? 10 : 8, software, offeredLessons: offered.map((l) => l.id), oracle: opts.oracle });
     // Already on disk (a resume, or a person wrote it): do not pay for the full turn again. Gaps get the one targeted retry below.
     if (artifact(ARTIFACTS.problem)) {
       log(`${ARTIFACTS.problem} is on disk; ${gapsOf().length ? "it has gaps, asking the Solver to fix only those" : "skipping the Solver turn"}`);

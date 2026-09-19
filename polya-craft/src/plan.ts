@@ -46,6 +46,31 @@ export interface Problem {
   split: { name: string; bound?: string; done: string[] }[];
   /** Purpose -> shell (install, test, lint, typecheck, start). Software only. */
   bar: Record<string, string>;
+  /** `## Oracle`: oracle line id -> the Solver's disposition (adopted as a D, or dismissed with a reason). */
+  oracle: Record<string, string>;
+}
+
+/**
+ * The cases a done-check list forgets when nobody asks for them. The strong Solvers wrote these unprompted
+ * (snippet-vault, 2026-09-19); Sonnet did not. Behind POLYA_ORACLE so the ledger alone can be measured first.
+ */
+export const ORACLE: { id: string; text: string }[] = [
+  { id: "O1", text: "Bad input is refused with a clear error and changes nothing (a missing field, a wrong type, an over-long value)." },
+  { id: "O2", text: "The empty state says so: nothing stored yet, and no matches, each shows a message rather than nothing." },
+  { id: "O3", text: "A failed action is visible: a failed save, copy, or request tells the user it failed; it never looks like success." },
+  { id: "O4", text: "Malformed requests or arguments get an answer and the process keeps running (//, %2f, a 2 KB path, a wrong method, an unknown flag, empty stdin)." },
+  { id: "O5", text: "What is stored survives a restart of the process." },
+  { id: "O6", text: "It installs and runs on the exact minimum runtime version it declares." },
+  { id: "O7", text: "The exact command the requester says they will type works as they said." },
+];
+
+export function oracleNote(): string {
+  return (
+    `## Oracle: cases a done-check list forgets\n\n` +
+    `For each line, either adopt it as a done-check (and say which D) or dismiss it with the reason it does not apply to this problem. ` +
+    `With the oracle the done-check limit is ten, not eight. Write the dispositions under \`## Oracle\` in PROBLEM.md, one bullet per line: \`- O1: adopted as D4\` or \`- O2: dismissed — the tool stores nothing\`.\n\n` +
+    ORACLE.map((o) => `- **${o.id}** ${o.text}`).join("\n")
+  );
 }
 
 export interface Unit {
@@ -224,6 +249,8 @@ export function parseProblem(md: string): Problem | undefined {
     .filter((m) => !/^-+$/.test(m[1]!.trim()) && !/sub-problem/i.test(m[1]!))
     .map((m) => ({ name: m[1]!.trim(), bound: m[2]!.trim() || undefined, done: idList(m[3], "D") }));
   const split = splitMd.length ? splitMd : arr<{ name?: string; bound?: string; done?: string[] }>(block?.split).filter((s) => s && s.name).map((s) => ({ name: String(s.name), bound: s.bound, done: arr<string>(s.done).map(String) }));
+  const oracle: Record<string, string> = {};
+  for (const m of (section(md, "Oracle") ?? "").matchAll(/^\s*[-*]\s*\*{0,2}(O\d+)\*{0,2}\s*[:—–-]\s*(.+)$/gm)) oracle[m[1]!] = m[2]!.trim();
   const barMd = parseBarTable(section(md, "Quality bar"));
   const barBlock = block?.bar && typeof block.bar === "object" ? block.bar : block?.quality_bar && typeof block.quality_bar === "object" ? block.quality_bar : {};
   const bar = Object.keys(barMd).length ? barMd : Object.fromEntries(Object.entries(barBlock).filter(([, v]) => typeof v === "string" && v.trim() && !/^<.*>$/.test(v)));
@@ -240,11 +267,12 @@ export function parseProblem(md: string): Problem | undefined {
     lessons,
     split,
     bar,
+    oracle,
   };
 }
 
 /** What Understand must get right before a plan is drawn (PATTERN.md section 2.1). */
-export function problemGaps(p: Problem | undefined, opts: { maxDone?: number; software?: boolean; offeredLessons?: string[] } = {}): string[] {
+export function problemGaps(p: Problem | undefined, opts: { maxDone?: number; software?: boolean; offeredLessons?: string[]; oracle?: boolean } = {}): string[] {
   const gaps: string[] = [];
   if (!p) return ["- PROBLEM.md is missing or has no `# Problem:` title"];
   const max = opts.maxDone ?? 8;
@@ -260,6 +288,16 @@ export function problemGaps(p: Problem | undefined, opts: { maxDone?: number; so
   }
   if (opts.software && !p.bar.test) gaps.push("- `## Quality bar` names no `test` command; discover it from the repo (package.json scripts, Makefile, pyproject)");
   for (const id of opts.offeredLessons ?? []) if (!p.lessons.some((l) => l.id === id)) gaps.push(`- ${id} was offered and has no disposition under \`## Lessons consulted\``);
+  if (opts.oracle) {
+    for (const o of ORACLE) {
+      const d = p.oracle[o.id];
+      if (!d) gaps.push(`- ${o.id} has no disposition under \`## Oracle\` (adopt it as a D, or dismiss it with a reason)`);
+      else {
+        const adoptedAs = d.match(/adopted[^D]*(D\d+)/i)?.[1];
+        if (adoptedAs && !p.done.some((x) => x.id === adoptedAs)) gaps.push(`- ${o.id} is adopted as ${adoptedAs}, which is not a done-check`);
+      }
+    }
+  }
   return gaps;
 }
 
