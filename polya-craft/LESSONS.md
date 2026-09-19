@@ -23,12 +23,11 @@ Tags:     stage:devise
 When:     a check already exists for a level (an inspection, a CI job, a rubric)
 Lesson:   adopt it verbatim as the level check and name the units that close it; do not write a parallel one
 Evidence: polya-craft design; the county inspection schedule in examples/house.md
-Status:   candidate
+Status:   confirmed(1)
 
 ## L-2026-09-19-01
 Tags:     kind:repair domain:software stage:understand routing http
 When:     the problem is about which paths an HTTP app answers, and the done-checks curl the paths the requester named
 Lesson:   add a done-check for malformed paths (`//`, `%2f`, a 2 KB path, a wrong method): the app must answer, never exit; a request that kills the process is the defect the requester did not name
 Evidence: polya-live-404, both loops' fixes passed every check and review; a blind reviewer sent GET // and the process died on `new URL(req.url, …)`, a line neither loop touched
-Status:   candidate
-
+Status:   confirmed(1)

@@ -487,6 +487,13 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     const problem = readProblem();
     const plan = readPlan();
     if (!problem) return stop("unparseable-report", `${ARTIFACTS.problem} missing at look back`);
+    // A LOOKBACK.md on disk is from an earlier pass that stopped. It is regenerated from evidence at the end of this
+    // one; left in place it reads as the current verdict to the reviewer and to anyone opening the PR.
+    if (artifact(ARTIFACTS.lookback)) {
+      io.writeFile(ARTIFACTS.lookback, `# Look back: ${problem.title}\n\n(in progress: an earlier pass stopped; this file is rewritten when the pass ends)\n`);
+      io.commit("look back: clear the previous pass's LOOKBACK.md");
+      log("cleared the previous pass's LOOKBACK.md");
+    }
 
     // (a) the finish check: ownership over the whole job, hygiene, the bar, clean start, vacuous suite.
     log("look back (a): checks from a clean state");
@@ -599,8 +606,12 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     if (!review || !Array.isArray(review.findings) || !review.verdict) return stop("unparseable-report", "the review returned no findings block");
     state.review = review;
     await persist();
-    const high = review.findings.filter((f) => f.severity === "high");
-    log(`review: ${review.verdict}, ${review.findings.length} finding(s), ${high.length} high, ${review.lessons?.length ?? 0} lesson(s)`);
+    // A finding about the loop's own record (PROBLEM.md, PLAN.md, LOOKBACK.md) is a process finding: it is recorded in
+    // LOOKBACK.md and the ledger, never handed to the Hand, which may not touch those files.
+    const artifactRe = /\b(PROBLEM|PLAN|LOOKBACK)\.md\b/;
+    const process = review.findings.filter((f) => f.severity === "high" && (artifactRe.test(f.where ?? "") || artifactRe.test(f.check?.command ?? "")));
+    const high = review.findings.filter((f) => f.severity === "high" && !process.includes(f));
+    log(`review: ${review.verdict}, ${review.findings.length} finding(s), ${high.length} high${process.length ? ` (+${process.length} about the record, kept in LOOKBACK.md)` : ""}, ${review.lessons?.length ?? 0} lesson(s)`);
     if (high.length || review.answers_problem === false) {
       if (review.answers_problem === false && !high.length) return stop("review-unresolved", "the review says the result does not answer the restated problem; the done-checks were wrong (a stage:understand lesson)");
       const allowed = union(allTouches, high.map((f) => f.where).filter((w): w is string => Boolean(w && /[/.]/.test(w) && !/\s/.test(w))));

@@ -5,6 +5,7 @@ import { classifyPrompt } from "../../src/lib/routing.js";
 import type { GateResult } from "../../architect-crew-gate/src/quality-gate.js";
 import type { Lesson, LessonsStore, NewLesson } from "./lessons.js";
 import { PLAN_MD, PROBLEM_MD } from "./plan.test.js";
+import { parsePlan } from "./plan.js";
 import { initialPolyaState, polyaResumePhase, runPolyaLoop, type PolyaIO, type PolyaState } from "./polya-loop.js";
 
 /**
@@ -478,5 +479,17 @@ test("ownership failure: the orchestrator reverts what the Hand wrote outside To
   assert.match(sent[3]!.prompt, /^## Files outside Touches were reverted\n\nThe orchestrator put src\/main\.ts back/);
   assert.match(sent[3]!.prompt, /## Quality gate failed \(attempt 1\)/);
   assert.equal(out.unitRecords[0]!.attempts, 2);
+});
+
+test("look back: a stale LOOKBACK.md from an earlier pass is cleared first; a high finding about the record spawns no fix turn", async () => {
+  const { io, calls, files } = makeIO({ preload: true, files: { "LOOKBACK.md": "# Look back: old\n\nOutcome: verify-failed\n" } });
+  const { send, sent } = makeSend({ "look-back": () => json({ verdict: "done", answers_problem: true, findings: [{ severity: "high", where: "LOOKBACK.md", what: "the record says verify-failed", check: { command: "grep -q done LOOKBACK.md", expect_exit: 0 } }], lessons: [] }) });
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null }, { phase: "look-back", units: parsePlan(PLAN_MD).units, unitRecords: [{ id: "U1", attempts: 1, passed: true }, { id: "U2", attempts: 1, passed: true }], baselineSha: "sha0" });
+  assert.equal(out.stopReason, "complete");
+  assert.ok(calls.commits.includes("look back: clear the previous pass's LOOKBACK.md"));
+  assert.ok(!sent.some((s) => /U-FIX/.test(s.prompt)), "no fix turn for a finding about the record");
+  assert.equal(out.reviewChecks, undefined);
+  assert.match(files["LOOKBACK.md"]!, /\[high\] LOOKBACK\.md — the record says verify-failed/);
+  assert.match(files["LOOKBACK.md"]!, /Outcome: complete/);
 });
 
