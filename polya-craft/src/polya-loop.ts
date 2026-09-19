@@ -1,6 +1,7 @@
 import type { SendFn, TurnResult } from "../../src/lib/build-loop.js";
 import { buildPrompt } from "../../src/lib/prompts.js";
 import { lenientJson, type BlueprintIO } from "../../architect-crew-gate/src/blueprint-loop.js";
+import { browserToolNote, scenarioNeedsBrowser } from "../../architect-crew-gate/src/browser.js";
 import { gateFeedbackNote, type GateResult } from "../../architect-crew-gate/src/quality-gate.js";
 import { fileLessonsStore, priorLessonsNote, tagsForProblem, type LessonsStore, type NewLesson } from "./lessons.js";
 import { ARTIFACTS, parsePlan, parseProblem, problemGaps, renderPlan, renderProblem, validateUnits, type DoneCheck, type Plan, type Problem, type Unit } from "./plan.js";
@@ -106,6 +107,8 @@ export interface PolyaOptions {
   verifyFallbackTier?: "claude";
   /** Software problems: unit Checks must be commands and the quality bar must name `test`. Default true. */
   software?: boolean;
+  /** The engine can give a turn a real browser (Playwright MCP); a unit or a done-check that names a page is sent with `browser: true`. */
+  browser?: boolean;
   onState?: (state: PolyaState) => void | Promise<void>;
   log?: (line: string) => void;
 }
@@ -291,13 +294,22 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
   const handTurn = async (unit: { id: string; block: string; touches: string[]; command?: string }, excerpt: string, taskCommands: string[], tier?: "claude"): Promise<{ record: UnitRecord; gate?: GateResult; blocked?: string } | "run-failed"> => {
     const baseSha = io.headSha();
     const red = unit.command ? await io.runCommand(unit.command) : { code: 1, output: "" };
-    const base = buildPrompt(`${PROMPTS}/carry-out`, "", { unit_id: unit.id, unit_block: unit.block, problem_excerpt: excerpt, red_output: tail(red.output) || "(no output)" });
+    // A unit whose steps happen on a page gets the browser for that turn only; a library or CLI unit never does.
+    const needsBrowser = scenarioNeedsBrowser(unit.block);
+    const browser = needsBrowser && opts.browser === true;
+    const base = buildPrompt(`${PROMPTS}/carry-out`, "", {
+      unit_id: unit.id,
+      unit_block: unit.block,
+      problem_excerpt: excerpt,
+      red_output: tail(red.output) || "(no output)",
+      browser_tools: browserToolNote(!needsBrowser ? "unneeded" : browser ? "available" : "absent"),
+    });
     let prompt = base;
     const record: UnitRecord = { id: unit.id, attempts: 0, passed: false };
     let gate: GateResult | undefined;
     for (let attempt = 0; attempt <= retries; attempt++) {
       record.attempts = attempt + 1;
-      const t = await send(prompt, { mode: "agent", ...(tier ? { tier } : {}) });
+      const t = await send(prompt, { mode: "agent", ...(tier ? { tier } : {}), ...(browser ? { browser: true } : {}) });
       track(t);
       if (t.status !== "finished") return "run-failed";
       const report = lenientJson<{ blocked?: boolean; question?: string }>(t.result);
@@ -480,13 +492,21 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
         const mechanical = checks.map((c) => `- ${c.id}: ${c.passed ? "PASS" : "FAIL"} — ${c.evidence}`).join("\n") || "(none)";
         const outer = plan?.outerText || prose.map((d) => `- ${d.id}: ${d.text} — Check: ${d.check}`).join("\n");
         const readme = (artifact("README.md") ?? "(no README)").slice(0, 4000);
-        const prompt = buildPrompt(`${PROMPTS}/verify`, "", { outer_test: `${outer}\n\nDone-checks a stranger observes:\n${prose.map((d) => `- ${d.id}: ${d.text} — Check: ${d.check}`).join("\n")}`, mechanical_results: mechanical, run_instructions: readme });
+        const outerFull = `${outer}\n\nDone-checks a stranger observes:\n${prose.map((d) => `- ${d.id}: ${d.text} — Check: ${d.check}`).join("\n")}`;
+        const needsBrowser = scenarioNeedsBrowser(outerFull);
+        const browser = needsBrowser && opts.browser === true;
+        const prompt = buildPrompt(`${PROMPTS}/verify`, "", {
+          outer_test: outerFull,
+          mechanical_results: mechanical,
+          run_instructions: readme,
+          browser_tools: browserToolNote(!needsBrowser ? "unneeded" : browser ? "available" : "absent"),
+        });
         const attempts: { note: string; tier?: "claude" }[] = [{ note: "" }, { note: "## Your previous reply had no results block\n\nWalk the steps and end with the single fenced json block the Output section specifies. Nothing after it.\n\n---\n\n" }];
         if (opts.verifyFallbackTier === "claude") attempts.push({ note: "", tier: "claude" });
         let report: { results?: { step?: number; d?: string; passed?: boolean; evidence?: string; where?: string }[] } | undefined;
         for (const [ai, a] of attempts.entries()) {
           log(`verifier${ai ? ` (attempt ${ai + 1}${a.tier ? `, ${a.tier}` : ""})` : ""}: ${prose.map((d) => d.id).join(", ")}`);
-          const t = await send(`${a.note}${prompt}`, { mode: "agent", fresh: true, cwd: clone, ...(a.tier ? { tier: a.tier } : {}) });
+          const t = await send(`${a.note}${prompt}`, { mode: "agent", fresh: true, cwd: clone, ...(browser ? { browser: true } : {}), ...(a.tier ? { tier: a.tier } : {}) });
           track(t);
           if (t.status !== "finished") continue;
           const r = lenientJson<typeof report>(t.result);

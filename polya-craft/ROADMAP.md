@@ -19,8 +19,9 @@ in `PATTERN.md`; this file only tracks state.
 - `src/lessons.ts`: the ledger store over one `LESSONS.md`: select by tag intersection (the whole ledger below forty active entries), append with day-numbered ids, confirm, and the prior-lessons note capped at 6000 characters.
 - `src/io.ts`: `makePolyaIO`, architect-crew-gate's repo I/O with the gate reading the quality bar from `PROBLEM.md`.
 - `src/polya-loop.ts`: the four stages over `send` and `io`. Stop reasons: `complete`, `understanding-incomplete`, `plan-not-workable`, `unit-not-workable`, `unit-gate-failed`, `finish-check-failed`, `verify-failed`, `review-unresolved`, `unparseable-report`, `run-failed`. `LOOKBACK.md` is written by the loop from evidence on every exit from look back, and the ledger is appended and confirmed.
+- Browser for the Hand and the Verifier: a unit or a done-check whose text names a page is sent with `browser: true`, and the engine attaches Playwright MCP to that turn only (`QA_BROWSER`, `PLAYWRIGHT_MCP_ARGS`, as ACG's QA). The prompt tells the model whether a browser is attached, absent, or unneeded. Imported from `../architect-crew-gate/src/browser.ts`, unchanged.
 - Kit wiring: `src/lib/routing.ts` (five H1 regexes; Solver turns to the plan tier, the Hand to implement, the Verifier to verify, Look back to review), `src/lib/engine-local.ts` (Understand and Devise are architect kinds; Look back runs read-only in a fresh session; Devise carries the executor note), `src/lib/build-app.ts` (`--loop polya`, `--max-units`, resume at the stage that stopped), `package.json` test glob, `tsconfig.json`.
-- Tests: 48 across `plan`, `lessons`, `prompts`, the loop with a faked Hand and Solver (every stop reason, retry, fallback, resume, and materialisation path), and end to end on a real bare origin with the real gate, a real fresh clone, and a real ledger file.
+- Tests: 50 across `plan`, `lessons`, `prompts`, the loop with a faked Hand and Solver (every stop reason, retry, fallback, resume, and materialisation path), and end to end on a real bare origin with the real gate, a real fresh clone, and a real ledger file.
 
 Nothing has been run through a model by this kit, and nothing has been
 measured. The pattern has been used by hand in the three worked examples,
@@ -31,12 +32,11 @@ with a faked model.
 
 In build order. Each line says what the module is and what it borrows.
 
-1. A live run. `npm run build-app -- --loop polya --engine hybrid` on a repair, then the measurement table below.
-2. Browser for UI done-checks. A D whose Check names a page or a click needs the Verifier to hold a browser. Import `../architect-crew-gate/src/browser.ts`; not in the first slice.
-3. Re-plan of one unit only. Today `unit-not-workable` re-runs Devise with the question prepended and keeps the units that passed; the Solver rewrites the plan, not one unit. A targeted single-unit re-plan is cheaper and should replace it once a live run shows how often a Hand asks.
-4. Level checks at run time. `PLAN.md`'s Shape is parsed but the loop does not yet run a group's check when its units complete; the finish check and the done-checks cover the whole. Add when a plan with more than one L1 group has been run live.
-5. Parallel Hands: units with disjoint `Touches` and no `Depends` between them, one worktree each. After the first measurement, not before.
-6. Slack stays on the milestone loop. `--loop polya` is CLI only.
+1. A live run. `npm run build-app -- --loop polya --engine hybrid` on a repair, then the measurement table below. Then `examples/site-inspection.md` live, which is the browser's first real test.
+2. Re-plan of one unit only. Today `unit-not-workable` re-runs Devise with the question prepended and keeps the units that passed; the Solver rewrites the plan, not one unit. A targeted single-unit re-plan is cheaper and should replace it once a live run shows how often a Hand asks.
+3. Level checks at run time. `PLAN.md`'s Shape is parsed but the loop does not yet run a group's check when its units complete; the finish check and the done-checks cover the whole. Add when a plan with more than one L1 group has been run live.
+4. Parallel Hands: units with disjoint `Touches` and no `Depends` between them, one worktree each. After the first measurement, not before.
+5. Slack stays on the milestone loop. `--loop polya` is CLI only.
 
 ## Known limitations
 
@@ -52,7 +52,7 @@ answers it.
 - A reviewer in plan mode wrote a plan and scored nothing. Answer: Look back (c) runs in agent mode with edit tools removed, as ACG's review now does.
 - Prose where a shell command was expected. Answer: `plan-lint` rejects a `Check` that is prose when the kind is software, and every runnable Check is run at Devise and required to fail.
 - A local QA analyst could not hold eleven scenarios in one turn. Answer: at most eight done-checks; those that are commands run mechanically and never reach the Verifier; the Verifier sees only the prose ones, with one reminder retry and the frontier fallback on hybrid.
-- A project-scope MCP server is gated by qwen-code until a person approves it. Answer: the browser, when it is added, is passed with `--mcp-config` for that turn only and nothing is written into the clone.
+- A project-scope MCP server is gated by qwen-code until a person approves it. Answer: the browser is passed with `--mcp-config` for that turn only, through the engine's existing path, and nothing is written into the clone.
 - A long feedback note hid the prompt header from the router. Answer: the five H1 regexes are matched against the first 8000 characters, and the feedback note is appended after the header, never before it.
 
 polya-craft also carries assumptions no run has tested.
@@ -95,8 +95,8 @@ passes against a real bare origin and the real gate. Still to do from this
 phase: `npm run build-app -- --loop polya` completing a repair on the hybrid
 engine, which is the first row of the measurement table.
 
-**Phase 3: measure and decide.** Run the table above. Port the browser for UI
-done-checks. Then decide which loop retires. If polya-craft scores within the
+**Phase 3: measure and decide.** Run the table above, then the site
+inspection live. Then decide which loop retires. If polya-craft scores within the
 same band as ACG on the same problem and costs no more in Solver turns, ACG's
 blueprint loop retires and its gate, repo I/O, browser, and scorer stay. If
 not, polya-craft stays as documents and the ledger moves into ACG.

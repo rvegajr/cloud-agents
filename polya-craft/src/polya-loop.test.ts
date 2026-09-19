@@ -355,3 +355,38 @@ test("polyaResumePhase: every stop reason maps to the stage that stopped", () =>
   assert.equal(polyaResumePhase(s("unparseable-report", { units: [{ id: "U1" }] as PolyaState["units"], unitIndex: 1 })), "look-back");
   assert.equal(polyaResumePhase({ ...initialPolyaState(), phase: "devise" }), "devise");
 });
+
+test("browser: a unit that names a page is sent with browser:true when the run has one, told it is absent when not, and never asked for by a library unit", async () => {
+  const plan = PLAN_MD.replace("Do:       1. Add a Run section naming `npm start`.", "Do:       1. Open the page and click the button named Save. 2. Add a Run section naming `npm start`.");
+  const { io } = makeIO({ files: { "PLAN.md": plan } });
+  const { send, sent } = makeSend({});
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null, browser: true });
+  assert.equal(out.stopReason, "complete");
+  const [u1, u2] = sent.filter((s) => s.kind === "carry-out");
+  assert.equal(u1!.opts?.browser, undefined);
+  assert.match(u1!.prompt, /no browser is attached/);
+  assert.equal(u2!.opts?.browser, true);
+  assert.match(u2!.prompt, /You have a real headless browser/);
+  // The Verifier's D2 does not name a page here, so no browser for it.
+  assert.equal(sent.find((s) => s.kind === "verify")!.opts?.browser, undefined);
+  // Without a browser in the run, the unit is told so and is not sent the flag.
+  const { io: io2 } = makeIO({ files: { "PLAN.md": plan } });
+  const { send: s2, sent: sent2 } = makeSend({});
+  await runPolyaLoop(s2, { ...base, io: io2, lessons: null });
+  const u2b = sent2.filter((s) => s.kind === "carry-out")[1]!;
+  assert.equal(u2b.opts?.browser, undefined);
+  assert.match(u2b.prompt, /No browser tool is available in this run/);
+});
+
+test("browser: a prose done-check that names a page sends the Verifier with browser:true", async () => {
+  const problem = PROBLEM_MD.replace("Check: a stranger follows the README and the app starts", "Check: a stranger opens the page in a browser and clicks Start");
+  const { io } = makeIO({ files: { "PROBLEM.md": problem } });
+  const { send, sent } = makeSend({});
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null, browser: true });
+  assert.equal(out.stopReason, "complete");
+  const v = sent.find((s) => s.kind === "verify")!;
+  assert.equal(v.opts?.browser, true);
+  assert.equal(v.opts?.cwd, "/tmp/clone-1");
+  assert.match(v.prompt, /browser_navigate/);
+});
+

@@ -273,7 +273,8 @@ inspection report, and the pattern produces it for free.
 
 ## In the kit
 
-This example is the reason `ROADMAP.md` lists a browser for the Hand and
-the Verifier. With Playwright attached to the cheap model, U2 through U7
-are ordinary carry-out turns and the walks are recorded runs. Without it,
-the Hand is a person with the same packet.
+A unit whose steps name a page, a click, or a field is sent with a browser
+attached, Playwright through the engine's MCP path, for that turn only. U1
+never gets one; U2 through U7 do; the Verifier walking D1 does. With
+`QA_BROWSER=0` the same units run with the prompt told no browser is
+available, and the Hand is a person with the same packet.

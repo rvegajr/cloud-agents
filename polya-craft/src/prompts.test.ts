@@ -7,8 +7,8 @@ import { gateFeedbackNote } from "../../architect-crew-gate/src/quality-gate.js"
 const SLOTS: Record<string, Record<string, string>> = {
   understand: { problem: "p", repo: "r", prior_lessons: "-" },
   devise: { problem_md: "p", max_units: "8", done_ids: "D1 D2" },
-  "carry-out": { unit_id: "U1", unit_block: "b", problem_excerpt: "e", red_output: "o" },
-  verify: { outer_test: "t", mechanical_results: "m", run_instructions: "r" },
+  "carry-out": { unit_id: "U1", unit_block: "b", problem_excerpt: "e", red_output: "o", browser_tools: "-" },
+  verify: { outer_test: "t", mechanical_results: "m", run_instructions: "r", browser_tools: "-" },
   "look-back": { problem: "p", base: "b", diff_stat: "d", gates: "g", verify_report: "v", claims: "c", lessons_consulted: "l" },
 };
 

@@ -22,8 +22,8 @@ four steps, for any problem: a bug, a product, a proposal, a house.
 | `src/plan.ts` | Parsers for the three artifacts; `validateUnits`, the mechanical half of the stranger test; `contractOf` for the borrowed gate | built |
 | `src/lessons.ts` | The ledger store: select by tags, append, confirm; the prior-lessons note | built |
 | `src/io.ts` | `makePolyaIO`: architect-crew-gate's repo I/O with the gate reading PROBLEM.md's quality bar | built |
-| `src/polya-loop.ts` | The loop: understand → devise → gated units → look back (a, b, c, d); LOOKBACK.md written from evidence | built |
-| `src/*.test.ts` | Parsers, validator, ledger, prompt render/classify/route, the loop with a faked Hand and Solver, end to end on a real bare origin with the real gate | 48 tests, passing |
+| `src/polya-loop.ts` | The loop: understand → devise → gated units → look back (a, b, c, d); LOOKBACK.md written from evidence; a unit or done-check that names a page gets a browser for that turn | built |
+| `src/*.test.ts` | Parsers, validator, ledger, prompt render/classify/route, the loop with a faked Hand and Solver, end to end on a real bare origin with the real gate | 50 tests, passing |
 
 ## Read in this order
 
@@ -51,7 +51,8 @@ npm test && npx tsc --noEmit
 
 Env: `POLYA_LESSONS_FILE` (the ledger; default `polya-craft/LESSONS.md`),
 `LOCAL_GATE*` (the borrowed gate), `HYBRID_QA_FALLBACK` (the Verifier's
-fallback tier), `--max-units` (default 8).
+fallback tier), `QA_BROWSER` (Playwright for any turn that names a page, on
+by default), `--max-units` (default 8).
 
 ## Layout rules
 

@@ -41,8 +41,10 @@ npm run deploy                        # stamp the commit, then ship
   fallback on hybrid. LOOKBACK.md is written by the loop from evidence, always,
   and the ledger is appended and confirmed. Routing knows the five prompt
   headers; the hybrid engine treats Understand and Devise as architect turns
-  and Look back as a read-only reviewer. 48 tests, including end to end on a
-  real bare origin with the real gate.
+  and Look back as a read-only reviewer. A unit or done-check that names a
+  page gets Playwright attached for that turn, through the engine's existing
+  path. 50 tests, including end to end on a real bare origin with the real
+  gate.
 - **`architect-crew-gate/`: the pattern in its own folder.** `THEORY.md` is the
   claim, five principles, and operating instructions an AI or a person can act
   on directly; `PATTERN.md` is

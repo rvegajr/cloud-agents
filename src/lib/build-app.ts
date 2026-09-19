@@ -476,6 +476,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
           io,
           lessons: fileLessonsStore(),
           maxUnits: opts.maxUnits,
+          browser: Boolean(browserFromEnv()),
           verifyFallbackTier: (process.env.HYBRID_QA_FALLBACK ?? "claude").trim().toLowerCase() === "claude" && engine !== "local" ? "claude" : undefined,
           log: (line) => banner(line, log),
           onState: (state) => {

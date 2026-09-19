@@ -18,6 +18,10 @@ Do only what `Do` says. Change only what `Touches` lists. Then run `Check`.
 {{red_output}}
 ```
 
+## Browser
+
+{{browser_tools}}
+
 ## Procedure
 
 1. Read the inputs `Given` names. Nothing else.
