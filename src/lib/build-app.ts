@@ -1,6 +1,7 @@
 import { Agent, type SDKAgent } from "@cursor/sdk";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { env } from "./env.js";
 import { selectModel } from "./model.js";
@@ -461,6 +462,9 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
 
     if ((record.loop ?? loop) === "polya") {
       if (!workspace) throw new Error("polya loop: the engine returned no workspace");
+      // Playwright MCP writes console logs and page snapshots into its working directory; a Hand turn with a
+      // browser would commit them. Every browser turn in this run writes to a temp folder instead.
+      process.env.PLAYWRIGHT_MCP_OUTPUT_DIR ??= resolve(tmpdir(), "polya-playwright-mcp");
       const io = makePolyaIO(workspace, { log: (line) => log(line) });
       const initialState = record.polya ?? initialPolyaState();
       if (opts.resume) {

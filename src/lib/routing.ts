@@ -97,6 +97,7 @@ export function classifyPrompt(prompt: string): TurnKind {
   // polya-craft (polya-craft/prompts/)
   if (/^# Understand the problem/m.test(head)) return "understand";
   if (/^# Devise a plan/m.test(head)) return "devise";
+  if (/^# Devise a repair/m.test(head)) return "devise";
   if (/^# Carry out: unit /m.test(head)) return "carry-out";
   if (/^# Look back: verify/m.test(head)) return "walk";
   if (/^# Look back: review/m.test(head)) return "look-back";

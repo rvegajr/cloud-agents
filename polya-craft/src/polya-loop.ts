@@ -204,9 +204,6 @@ function doneLines(problem: Problem | undefined, unit: Unit): string {
   return lines.join("\n") || "(no done-check named)";
 }
 
-function unitBlockForFix(id: string, what: string, touches: string[], check: string): string {
-  return `## ${id}: fix what the look back found\nServes:   (the findings below)\nProduces: the fix\nGiven:    the findings, verbatim:\n${what.split("\n").map((l) => `          ${l}`).join("\n")}\nDo:       1. Fix the cause of each finding, not the check. 2. Run Check.\nTouches:  ${touches.join(", ")}\nCheck:    ${check} — Now: unmet\nDepends:  none\nNot:      any file not under Touches; any test or check.`;
-}
 
 /** LOOKBACK.md, rendered by the loop from evidence (PATTERN.md section 2.3). */
 /** `labels[i]` names what became of the reviewer's i-th lesson in the ledger. */
@@ -396,6 +393,69 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     return { record, gate };
   };
 
+  /**
+   * A check failed at look back. The Solver writes the repair as ordinary units (plan-lint, a red Check, the Hand,
+   * the gate); the loop never writes a unit itself. Returns undefined when every repair unit passed its gate.
+   */
+  const repair = async (stage: "finish" | "verify" | "review", evidence: string): Promise<{ reason: PolyaStopReason; detail: string } | undefined> => {
+    const stopFor: PolyaStopReason = stage === "finish" ? "finish-check-failed" : stage === "verify" ? "verify-failed" : "review-unresolved";
+    const problem = readProblem();
+    const before = readPlan()?.units.map((u) => u.id) ?? [];
+    const nextId = `U${before.reduce((n, id) => Math.max(n, Number(id.match(/\d+/)?.[0] ?? 0)), 0) + 1}`;
+    const prompt = buildPrompt(`${PROMPTS}/repair`, "", {
+      stage: stage === "finish" ? "the finish check" : stage === "verify" ? "done-checks from a fresh clone" : "the review",
+      evidence,
+      problem_md: artifact(ARTIFACTS.problem) ?? "",
+      plan_md: artifact(ARTIFACTS.plan) ?? "",
+      next_id: nextId,
+    });
+    log(`repair (${stage}): asking the Solver for units from ${nextId}`);
+    let t = await send(prompt, { mode: "agent" });
+    track(t);
+    if (t.status !== "finished") return { reason: "run-failed", detail: "repair turn did not finish" };
+    io.commit("repair: PLAN.md");
+    const report = lenientJson<{ check_wrong?: boolean; notes?: string }>(t.result);
+    if (report?.check_wrong) return { reason: stopFor, detail: `the Solver says the check is wrong, not the product: ${report.notes ?? ""}`.trim() };
+    const fresh = () => (readPlan()?.units ?? []).filter((u) => !before.includes(u.id));
+    const gapsOf = (): string[] => {
+      const units = fresh();
+      if (!units.length) return ["- no new unit under `## Repairs`"];
+      const lines = validateUnits(units, problem, { requireCommand: software, exists: (p) => artifact(p) !== undefined, doneIds: [] }).map((p) => `- ${p.id}: ${p.problem}`);
+      return lines;
+    };
+    let gaps = gapsOf();
+    if (gaps.length) {
+      log(`repair not workable; asking the Solver once more:\n${gaps.join("\n")}`);
+      t = await send(`## Repair not workable\n\nFix only these in the repair units, commit, then reply with the same JSON block.\n\n${gaps.join("\n")}\n\n---\n\n${prompt}`, { mode: "agent" });
+      track(t);
+      if (t.status !== "finished") return { reason: "run-failed", detail: "repair retry did not finish" };
+      io.commit("repair: gap fixes");
+      gaps = gapsOf();
+      if (gaps.length) return { reason: stopFor, detail: `repair not workable: ${gaps.join("; ")}` };
+    }
+    const units = fresh();
+    for (const u of units) {
+      if (u.command && (await io.runCommand(u.command)).code === 0) return { reason: stopFor, detail: `repair ${u.id}'s Check already passes; it measures nothing` };
+    }
+    state.units = [...state.units, ...units];
+    await persist();
+    for (const u of units) {
+      log(`carry out ${u.id} (repair): ${u.title}`);
+      const passedCommands = state.unitRecords.filter((r) => r.passed).map((r) => state.units.find((x) => x.id === r.id)?.command).filter((c): c is string => Boolean(c));
+      const r = await handTurn({ id: u.id, block: u.body, touches: u.touches, command: u.command }, `${problem?.restated ?? ""}\n\nDone-checks this unit serves:\n${problem ? doneLines(problem, u) : ""}`, union(passedCommands, u.command ? [u.command] : []));
+      if (r === "run-failed") return { reason: "run-failed", detail: `repair ${u.id} did not finish` };
+      state.unitRecords = state.unitRecords.filter((x) => x.id !== u.id);
+      state.unitRecords.push(r.record);
+      await persist();
+      if (r.blocked) {
+        state.replanNote = `Repair ${u.id} asked: "${r.blocked}"`;
+        return { reason: "unit-not-workable", detail: `${u.id} asked: ${r.blocked}` };
+      }
+      if (!r.record.passed) return { reason: stopFor, detail: `repair ${u.id} failed the gate after ${r.record.attempts} attempt(s): ${(r.record.failing ?? []).join(", ")}` };
+    }
+    return undefined;
+  };
+
   // ---- 1. Understand --------------------------------------------------------
   if (state.phase === "understand") {
     log("understand");
@@ -558,15 +618,13 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     let gate = await io.gate("finish", { allowedFiles: finishAllowed, baseSha: state.baselineSha });
     if (!gate.passed) {
       const what = gate.findings.filter((f) => !f.ok).map((f) => `- [${f.rule}] ${f.detail}${f.command ? ` (\`${f.command}\`)` : ""}${f.output ? `\n  ${tail(f.output, 30).replace(/\n/g, "\n  ")}` : ""}`).join("\n");
-      log(`finish check failed: ${failingRules(gate).join(", ")}; one fix turn`);
-      const fix = await handTurn({ id: "U-FIX", block: unitBlockForFix("U-FIX", what, allTouches, problem.bar.test ?? "the finish check"), touches: allTouches }, problem.restated ?? "", []);
-      if (fix === "run-failed") return stop("run-failed", "finish fix turn did not finish");
-      state.unitRecords.push(fix.record);
-      if (!fix.record.passed) {
-        state.finish = { passed: false, failing: fix.record.failing ?? failingRules(gate) };
-        return stop("finish-check-failed", `fix turn failed the gate: ${state.finish.failing.join(", ")}`);
+      log(`finish check failed: ${failingRules(gate).join(", ")}; the Solver devises a repair`);
+      const stopped = await repair("finish", what);
+      if (stopped) {
+        state.finish = { passed: false, failing: failingRules(gate) };
+        return stop(stopped.reason, stopped.detail);
       }
-      gate = await io.gate("finish", { allowedFiles: finishAllowed, baseSha: state.baselineSha });
+      gate = await io.gate("finish", { allowedFiles: union(finishAllowed, ...state.units.map((u) => u.touches)), baseSha: state.baselineSha });
     }
     state.finish = { passed: gate.passed, failing: failingRules(gate) };
     await persist();
@@ -652,12 +710,14 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       log(`done-checks: ${checks.length - failed.length}/${checks.length} met`);
       if (!failed.length) break;
       if (state.verifyAttempts >= 2) return stop("verify-failed", `still unmet: ${failed.map((f) => f.id).join(", ")}`);
-      const what = failed.map((f) => `- ${f.id}: ${f.evidence ?? ""}${f.where ? ` (where: ${f.where})` : ""}`).join("\n");
-      const where = failed.map((f) => f.where).filter((w): w is string => Boolean(w && /[/.]/.test(w) && !/\s/.test(w)));
-      const allowed = union(allTouches, where);
-      const fix = await handTurn({ id: "U-FIX", block: unitBlockForFix("U-FIX", what, allowed, failed.map((f) => problem.done.find((d) => d.id === f.id)?.command).filter(Boolean).join(" && ") || "the done-checks above"), touches: allowed }, problem.restated ?? "", []);
-      if (fix === "run-failed") return stop("run-failed", "verify fix turn did not finish");
-      if (!fix.record.passed) return stop("verify-failed", `fix turn failed the gate: ${(fix.record.failing ?? []).join(", ")}`);
+      const what = failed
+        .map((f) => {
+          const d = problem.done.find((x) => x.id === f.id);
+          return `- ${f.id}: ${d?.text ?? ""}\n  Check: ${d?.check ?? ""}\n  Observed (${f.how}): ${f.evidence ?? ""}${f.where ? `\n  Where: ${f.where}` : ""}`;
+        })
+        .join("\n");
+      const stopped = await repair("verify", what);
+      if (stopped) return stop(stopped.reason, stopped.detail);
     }
 
     // (c) the review: fresh session, read-only, Pólya's questions, lessons.
@@ -689,11 +749,9 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     log(`review: ${review.verdict}, ${review.findings.length} finding(s), ${high.length} high${process.length ? ` (+${process.length} about the record, kept in LOOKBACK.md)` : ""}, ${review.lessons?.length ?? 0} lesson(s)`);
     if (high.length || review.answers_problem === false) {
       if (review.answers_problem === false && !high.length) return stop("review-unresolved", "the review says the result does not answer the restated problem; the done-checks were wrong (a stage:understand lesson)");
-      const allowed = union(allTouches, high.map((f) => f.where).filter((w): w is string => Boolean(w && /[/.]/.test(w) && !/\s/.test(w))));
-      const what = high.map((f) => `- ${f.where ?? ""}: ${f.what}${f.fix ? ` — fix: ${f.fix}` : ""}`).join("\n");
-      const fix = await handTurn({ id: "U-FIX", block: unitBlockForFix("U-FIX", what, allowed, high.map((f) => f.check?.command).filter(Boolean).join(" && ") || "the findings' checks"), touches: allowed }, problem.restated ?? "", []);
-      if (fix === "run-failed") return stop("run-failed", "review fix turn did not finish");
-      if (!fix.record.passed) return stop("review-unresolved", `fix turn failed the gate: ${(fix.record.failing ?? []).join(", ")}`);
+      const what = high.map((f) => `- [high] ${f.where ?? ""}: ${f.what}${f.fix ? `\n  Suggested fix: ${f.fix}` : ""}${f.check?.command ? `\n  Its check: \`${f.check.command}\` should exit ${f.check.expect_exit ?? 0}` : ""}`).join("\n");
+      const stopped = await repair("review", what);
+      if (stopped) return stop(stopped.reason, stopped.detail);
       state.reviewChecks = [];
       for (const f of high) {
         if (!f.check?.command) continue;

@@ -62,6 +62,7 @@ function makeIO(overrides: Partial<PolyaIO> & { files?: Record<string, string>; 
       // The suite is red before any unit ran; everything else exits 0.
       if (command === "npm test" && calls.gate.length === 0) return { code: 1, output: "1 failing" };
       if (command.startsWith("fail:")) return { code: 1, output: "" };
+      if (command.includes("red-until-fixed")) return { code: 1, output: "1 failing" };
       return { code: 0, output: "ok" };
     },
     freshClone: async () => {
@@ -116,12 +117,21 @@ function makeSend(script: Script) {
 }
 
 const json = (o: unknown) => `done\n\`\`\`json\n${JSON.stringify(o)}\n\`\`\``;
+const defaultDevise = (p: string): string => defaultScript.devise!(p, undefined, 1);
 const defaultScript: Script = {
   understand: () => {
     currentIO?.writeFile(".polya/PROBLEM.md", seed.problem);
     return json({ written: [".polya/PROBLEM.md"], done_ids: ["D1", "D2"] });
   },
-  devise: () => {
+  devise: (p) => {
+    if (/^# Devise a repair/m.test(p)) {
+      const next = p.match(/numbered from (U\d+)/)?.[1] ?? "U9";
+      const d = p.match(/^- (D\d+):/m)?.[1] ?? "D1";
+      const plan = currentIO?.readFile(".polya/PLAN.md") ?? "";
+      currentIO?.writeFile(".polya/PLAN.md", `${plan}\n\n## Repairs\n\n## ${next}: repair what look back found\nServes:   ${d}\nLevel:    L1:repair\nProduces: \`src/app.js\` fixed\nGiven:    the evidence line for ${d}\nDo:       1. Fix the cause in src/app.js.\nTouches:  src/app.js\nCheck:    \`node --test test/repair.red-until-fixed.test.js\` — Now: unmet\nDepends:  none\nNot:      anything else.\n`);
+      currentIO?.writeFile("test/repair.red-until-fixed.test.js", "test('red until fixed', ...)");
+      return json({ written: [".polya/PLAN.md"], units: [next], check_wrong: false });
+    }
     currentIO?.writeFile(".polya/PLAN.md", seed.plan);
     return json({ written: [".polya/PLAN.md"], units: ["U1", "U2"] });
   },
@@ -250,9 +260,14 @@ test("look back (b): an unmet done-check gets one fix turn and a second run in a
   assert.equal(out.stopReason, "complete");
   assert.equal(out.verifyAttempts, 2);
   assert.equal(calls.clones, 2);
-  const fix = sent.find((s) => /unit U-FIX/.test(s.prompt))!;
-  assert.match(fix.prompt, /D2: no Run section \(where: README\.md\)/);
-  assert.match(fix.prompt, /Touches:\s+src\/app\.js, README\.md/);
+  // The Solver got the evidence and wrote U3; the Hand carried out U3, not an orchestrator-written brief.
+  const rep = sent.find((s) => /^# Devise a repair/m.test(s.prompt))!;
+  assert.equal(rep.kind, "devise");
+  assert.match(rep.prompt, /- D2: [\s\S]*Observed \(verifier\): no Run section\n  Where: README\.md/);
+  assert.match(rep.prompt, /numbered from U3/);
+  assert.ok(sent.some((s) => /# Carry out: unit U3/.test(s.prompt)));
+  assert.ok(!sent.some((s) => /U-FIX/.test(s.prompt)));
+  assert.deepEqual(out.units.map((u) => u.id), ["U1", "U2", "U3"]);
   assert.match(out.checks!.find((c) => c.id === "D2")!.evidence!, /started/);
 });
 
@@ -295,9 +310,10 @@ test("finish check fails → one fix turn → re-check; still failing → finish
   const { send, sent } = makeSend({});
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "finish-check-failed");
-  assert.equal(sent.filter((s) => /unit U-FIX/.test(s.prompt)).length, 3);
+  assert.match(out.stopDetail!, /repair U3 failed the gate after 3 attempt/);
+  assert.equal(sent.filter((s) => /# Carry out: unit U3/.test(s.prompt)).length, 3);
   assert.equal(calls.gate.filter((g) => g.kind === "finish").length, 1);
-  assert.equal(out.unitRecords.find((r) => r.id === "U-FIX")!.passed, false);
+  assert.equal(out.unitRecords.find((r) => r.id === "U3")!.passed, false);
   // A fix turn that passes its gate gets the finish check run again.
   const { io: io2, calls: calls2 } = makeIO({ gates: [pass, pass, fail("quality-bar"), pass] });
   const ok = await runPolyaLoop(makeSend({}).send, { ...base, io: io2, lessons: null });
@@ -314,8 +330,8 @@ test("review: a high finding gets one fix turn and its own check decides; a fail
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "review-unresolved");
   assert.match(out.stopDetail!, /fail:grep -> 1, expected 0/);
-  const fix = sent.find((s) => /unit U-FIX/.test(s.prompt))!;
-  assert.match(fix.prompt, /the 404 body leaks the path/);
+  const rep = sent.find((s) => /^# Devise a repair/m.test(s.prompt))!;
+  assert.match(rep.prompt, /- \[high\] src\/app\.js: the 404 body leaks the path\n  Suggested fix: constant body\n  Its check: `fail:grep` should exit 0/);
   assert.match(files[".polya/LOOKBACK.md"]!, /\[high\] src\/app\.js — the 404 body leaks the path/);
   // A passing check completes.
   const { io: io2 } = makeIO();
@@ -331,7 +347,7 @@ test("review: the result does not answer the restated problem → review-unresol
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "review-unresolved");
   assert.match(out.stopDetail!, /done-checks were wrong/);
-  assert.ok(!sent.some((s) => /U-FIX/.test(s.prompt)));
+  assert.ok(!sent.some((s) => /^# Devise a repair/m.test(s.prompt)));
 });
 
 test("materialise: a Solver that only reports bare JSON gets a reminder, then PROBLEM.md is written from its report", async () => {
@@ -493,7 +509,7 @@ test("look back: a stale LOOKBACK.md from an earlier pass is cleared first; a hi
   const out = await runPolyaLoop(send, { ...base, io, lessons: null }, { phase: "look-back", units: parsePlan(PLAN_MD).units, unitRecords: [{ id: "U1", attempts: 1, passed: true }, { id: "U2", attempts: 1, passed: true }], baselineSha: "sha0" });
   assert.equal(out.stopReason, "complete");
   assert.ok(calls.commits.includes("look back: clear the previous pass's LOOKBACK.md"));
-  assert.ok(!sent.some((s) => /U-FIX/.test(s.prompt)), "no fix turn for a finding about the record");
+  assert.ok(!sent.some((s) => /^# Devise a repair/m.test(s.prompt)), "no repair for a finding about the record");
   assert.equal(out.reviewChecks, undefined);
   assert.match(files[".polya/LOOKBACK.md"]!, /\[high\] \.polya\/LOOKBACK\.md — the record says verify-failed/);
   assert.match(files[".polya/LOOKBACK.md"]!, /Outcome: complete/);
@@ -633,5 +649,40 @@ test("look back (b): a bar with no start falls back to the repo's npm start for 
   assert.equal(out.stopReason, "complete");
   assert.equal(out.problem!.bar.start, undefined);
   assert.deepEqual(started, ["npm start"]);
+});
+
+test("repair: the Solver may say the check is wrong; an unworkable repair gets one retry; a repair Check that already passes measures nothing", async () => {
+  const failing = () => json({ results: [{ step: 2, d: "D2", passed: false, evidence: "nope" }] });
+  // The Solver says the check itself is wrong: no unit, a stop that names why.
+  const { io } = makeIO();
+  const { send, sent } = makeSend({ walk: failing, devise: (p) => (/^# Devise a repair/m.test(p) ? json({ units: [], check_wrong: true, notes: "D2 asks for a port the problem never names" }) : (defaultDevise(p))) });
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "verify-failed");
+  assert.match(out.stopDetail!, /the check is wrong, not the product: D2 asks for a port/);
+  assert.ok(!sent.some((s) => /# Carry out: unit U3/.test(s.prompt)));
+  // A repair unit with a decision in it is sent back once, then the run stops.
+  const { io: io2 } = makeIO();
+  const bad = (p: string) => {
+    if (!/^# Devise a repair/m.test(p)) return defaultDevise(p);
+    const plan = currentIO!.readFile(".polya/PLAN.md")!;
+    currentIO!.writeFile(".polya/PLAN.md", `${plan}\n\n## Repairs\n\n## U3: repair\nServes:   D2\nProduces: x\nGiven:    y\nDo:       1. Choose the best fix.\nTouches:  src/app.js\nCheck:    \`node --test test/notfound.test.js\`\nDepends:  none\nNot:      z\n`);
+    return json({ units: ["U3"] });
+  };
+  const { send: s2, sent: sent2 } = makeSend({ walk: failing, devise: bad });
+  const out2 = await runPolyaLoop(s2, { ...base, io: io2, lessons: null });
+  assert.equal(out2.stopReason, "verify-failed");
+  assert.match(out2.stopDetail!, /repair not workable: .*"Choose"/);
+  assert.equal(sent2.filter((s) => /^## Repair not workable/m.test(s.prompt)).length, 1);
+  // A repair whose Check already passes measures nothing.
+  const { io: io3 } = makeIO();
+  const green = (p: string) => {
+    if (!/^# Devise a repair/m.test(p)) return defaultDevise(p);
+    const plan = currentIO!.readFile(".polya/PLAN.md")!;
+    currentIO!.writeFile(".polya/PLAN.md", `${plan}\n\n## Repairs\n\n## U3: repair\nServes:   D2\nProduces: x\nGiven:    y\nDo:       1. Edit src/app.js.\nTouches:  src/app.js\nCheck:    \`node --test test/notfound.test.js\`\nDepends:  none\nNot:      z\n`);
+    return json({ units: ["U3"] });
+  };
+  const out3 = await runPolyaLoop(makeSend({ walk: failing, devise: green }).send, { ...base, io: io3, lessons: null });
+  assert.equal(out3.stopReason, "verify-failed");
+  assert.match(out3.stopDetail!, /U3's Check already passes; it measures nothing/);
 });
 
