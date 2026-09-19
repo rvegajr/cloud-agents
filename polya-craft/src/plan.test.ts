@@ -225,3 +225,37 @@ test("renderProblem / renderPlan round-trip through the parsers", () => {
   assert.equal(plan.outer[0]!.d, "D1");
   assert.equal(renderPlan({}), undefined);
 });
+
+// The PROBLEM.md a live Claude Max Solver wrote on 2026-09-18 for the polya-live-404 repair: bold ids, three-line
+// done-checks, "met (invariant)", a three-column bar table, and a json block with its own field names.
+import { readFileSync } from "node:fs";
+const LIVE = readFileSync(new URL("./fixtures-live-problem.md", import.meta.url), "utf8");
+
+test("parseProblem: the live Solver's drifted format parses without a gap", () => {
+  const p = parseProblem(LIVE)!;
+  assert.equal(p.kind, "repair");
+  assert.deepEqual(p.done.map((d) => d.id), ["D1", "D2", "D3", "D4", "D5"]);
+  assert.equal(p.done[0]!.command, `test "$(curl -s -o /dev/null -w '%{http_code}' localhost:4571/nope)" = "404" && test "$(curl -s localhost:4571/nope)" = "not found"`);
+  assert.match(p.done[0]!.text, /^`GET \/nope` on the running app answers 404/);
+  assert.equal(p.done[0]!.now, "unmet");
+  assert.equal(p.done[2]!.now, "met");
+  assert.equal(p.done[4]!.command, "npm test");
+  assert.deepEqual(p.bar, { install: "npm install", test: "npm test", start: "npm start" });
+  assert.match(p.restated!, /catch-all handler/);
+  assert.deepEqual(p.split, []);
+  assert.deepEqual(problemGaps(p, { software: true }), []);
+});
+
+test("parseProblem: a json block with aliases and a false split never throws", () => {
+  const md = '# Problem: x\n\n```json problem\n{ "kind": "repair", "done_checks": [ { "id": "D1", "statement": "s", "check": "npm test", "status": "met (invariant)" } ], "quality_bar": { "test": "npm test" }, "split": false, "lessons": null }\n```\n';
+  const p = parseProblem(md)!;
+  assert.equal(p.done[0]!.text, "s");
+  assert.equal(p.done[0]!.now, "met");
+  assert.equal(p.bar.test, "npm test");
+  assert.deepEqual(p.split, []);
+  assert.deepEqual(p.lessons, []);
+});
+
+test("commandOf: several backticked commands are one check", () => {
+  assert.equal(commandOf("`npm test` and `npm run lint`"), "npm test && npm run lint");
+});

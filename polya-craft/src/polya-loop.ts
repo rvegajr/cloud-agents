@@ -20,7 +20,13 @@ import { ARTIFACTS, parsePlan, parseProblem, problemGaps, renderPlan, renderProb
  * by this loop from evidence, not by the reviewer.
  */
 
-export type PolyaIO = BlueprintIO;
+export type PolyaIO = BlueprintIO & {
+  /** Start a long-running command (the quality bar's `start`) in `cwd`; resolve once it has had time to listen. The loop stops it. */
+  start?(command: string, cwd: string): Promise<{ stop(): void }>;
+};
+
+/** A done-check that curls a server needs the server running. */
+const NEEDS_SERVER = /\b(localhost|127\.0\.0\.1|0\.0\.0\.0)\b|:\d{4,5}\//;
 
 export type PolyaPhase = "understand" | "devise" | "carry-out" | "look-back" | "done" | "stopped";
 
@@ -482,10 +488,20 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       const clone = await io.freshClone();
       if (problem.bar.install) await io.runCommand(problem.bar.install, clone);
       const checks: CheckResult[] = [];
-      for (const d of problem.done) {
-        if (!d.command) continue;
-        const r = await io.runCommand(d.command, clone);
-        checks.push({ id: d.id, passed: r.code === 0, how: "mechanical", evidence: `\`${d.command}\` exited ${r.code}${r.code ? `: ${tail(r.output, 5)}` : ""}` });
+      const mechanical = problem.done.filter((d) => d.command);
+      // A check that curls the app needs the app up: start the bar's `start` in the clone for the duration of the checks.
+      let running: { stop(): void } | undefined;
+      if (problem.bar.start && io.start && mechanical.some((d) => NEEDS_SERVER.test(d.command!))) {
+        log(`starting \`${problem.bar.start}\` in the clone for the done-checks`);
+        running = await io.start(problem.bar.start, clone);
+      }
+      try {
+        for (const d of mechanical) {
+          const r = await io.runCommand(d.command!, clone);
+          checks.push({ id: d.id, passed: r.code === 0, how: "mechanical", evidence: `\`${d.command}\` exited ${r.code}${r.code ? `: ${tail(r.output, 5)}` : ""}` });
+        }
+      } finally {
+        running?.stop();
       }
       const prose: DoneCheck[] = problem.done.filter((d) => !d.command);
       if (prose.length) {

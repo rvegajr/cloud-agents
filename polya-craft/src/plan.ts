@@ -117,51 +117,59 @@ function idList(s: string | undefined, prefix: string): string[] {
  */
 export function commandOf(check: string | undefined): string | undefined {
   if (!check) return undefined;
-  const ticked = [...check.matchAll(/`([^`]+)`/g)].map((m) => m[1]!.trim()).find((c) => COMMAND_HEAD.test(c));
-  const candidate = ticked ?? check.trim();
+  // Several backticked commands ("`a` and `b`") are one check: all must pass.
+  const ticked = [...check.matchAll(/`([^`]+)`/g)].map((m) => m[1]!.trim()).filter((c) => COMMAND_HEAD.test(c));
+  if (ticked.length) return ticked.join(" && ");
+  const candidate = check.trim();
   if (!COMMAND_HEAD.test(candidate)) return undefined;
-  if (!ticked && looksLikeProse(candidate)) return undefined;
+  if (looksLikeProse(candidate)) return undefined;
   return candidate;
+}
+
+function arr<T>(v: unknown): T[] {
+  return Array.isArray(v) ? (v as T[]) : [];
+}
+
+function normNow(v: unknown): "unmet" | "met" {
+  return /^\s*met\b/i.test(String(v ?? "")) ? "met" : "unmet";
 }
 
 // ---------------------------------------------------------------------------
 // PROBLEM.md
 // ---------------------------------------------------------------------------
 
+/** The `json problem` block, with the aliases a model tends to use (done_checks, statement, status, quality_bar). */
 interface ProblemBlock {
   kind?: string;
   size?: string;
-  done?: Partial<DoneCheck>[];
+  done?: Partial<DoneCheck & { statement: string; status: string }>[];
+  done_checks?: Partial<DoneCheck & { statement: string; status: string }>[];
   lessons?: Partial<LessonDisposition>[];
-  split?: { name?: string; bound?: string; done?: string[] }[];
+  split?: { name?: string; bound?: string; done?: string[] }[] | false;
   bar?: Record<string, string>;
+  quality_bar?: Record<string, string>;
 }
 
-/** `- D1: text — Check: how — Now: unmet` with `—`, `--`, or `-` as the separator; the Check may spill onto indented lines. */
+/**
+ * One done-check per bullet: `- D1: text — Check: how — Now: unmet`. Models
+ * drift: `**D1** —` for the id, `Check:` and `Now:` on their own indented
+ * lines, `met (invariant)`. All of that is one item; the bullet that starts
+ * the next D id ends it.
+ */
 function parseDoneChecks(text: string | undefined): DoneCheck[] {
   if (!text) return [];
   const out: DoneCheck[] = [];
-  const joined = text.replace(/\n[ \t]+(?!\s*[-*]\s*D\d)/g, " ");
-  for (const m of joined.matchAll(/^\s*[-*]\s*\*{0,2}(D\d+)\*{0,2}\s*:\s*(.*)$/gim)) {
-    const rest = m[2]!;
-    const parts = rest.split(/\s+(?:—|–|--|-)\s+(?=Check:|Now:)/i);
-    const textPart = parts[0]!.trim();
-    let check = "";
-    let now: "unmet" | "met" = "unmet";
-    for (const p of parts.slice(1)) {
-      const c = p.match(/^Check:\s*(.*)$/i);
-      if (c) check = c[1]!.trim();
-      const n = p.match(/^Now:\s*(unmet|met)/i);
-      if (n) now = n[1]!.toLowerCase() as "unmet" | "met";
-    }
-    if (!check) {
-      const inline = rest.match(/Check:\s*(.*?)(?:\s+(?:—|–|--|-)\s+Now:|$)/i);
-      if (inline) check = inline[1]!.trim();
-      const n = rest.match(/Now:\s*(unmet|met)/i);
-      if (n) now = n[1]!.toLowerCase() as "unmet" | "met";
-    }
-    if (/^<.*>$/.test(textPart)) continue;
-    out.push({ id: m[1]!, text: textPart.replace(/\s+—\s*Check:.*$/i, "").trim(), check, outer: m[1] === "D1", now, command: commandOf(check) });
+  const items = text.split(/\n(?=\s*[-*]\s*\*{0,2}D\d+\*{0,2}\s*(?::|—|–|-))/);
+  for (const item of items) {
+    const m = item.match(/^\s*[-*]\s*\*{0,2}(D\d+)\*{0,2}\s*(?::|—|–|-)?\s*([\s\S]*)$/);
+    if (!m) continue;
+    const rest = m[2]!.replace(/\s*\n\s*/g, " ").trim();
+    const checkM = rest.match(/\bCheck:\s*([\s\S]*?)(?=\s*(?:—|–|--|-)?\s*\bNow:|$)/i);
+    const check = checkM?.[1]?.trim().replace(/\s*(?:—|–|--|-)\s*$/, "") ?? "";
+    const nowM = rest.match(/\bNow:\s*(unmet|met)/i);
+    const textPart = rest.split(/\s*(?:—|–|--|-)?\s*\bCheck:/i)[0]!.replace(/\s*(?:—|–|--|-)?\s*\bNow:.*$/i, "").trim();
+    if (!textPart || /^<.*>$/.test(textPart)) continue;
+    out.push({ id: m[1]!, text: textPart, check, outer: m[1] === "D1", now: nowM ? normNow(nowM[1]) : "unmet", command: commandOf(check) });
   }
   return out;
 }
@@ -169,7 +177,8 @@ function parseDoneChecks(text: string | undefined): DoneCheck[] {
 function parseBarTable(text: string | undefined): Record<string, string> {
   const bar: Record<string, string> = {};
   if (!text) return bar;
-  for (const m of text.matchAll(/^\|\s*([a-z]+)\s*\|\s*`([^`]+)`\s*\|/gim)) {
+  // The command is the first backticked thing in the second cell; a note after it ("(no dependencies)") is allowed.
+  for (const m of text.matchAll(/^\|\s*([a-z]+)\s*\|[^|`\n]*`([^`]+)`/gim)) {
     const cmd = m[2]!.trim();
     if (cmd && !/^<.*>$/.test(cmd)) bar[m[1]!.toLowerCase()] = cmd;
   }
@@ -183,14 +192,13 @@ export function parseProblem(md: string): Problem | undefined {
   const kindRaw = (md.match(/^Kind:\s*(repair|change|build|answer)\b/im)?.[1] ?? block?.kind)?.toLowerCase();
   const sizeRaw = (md.match(/^Size:\s*([SML])\b/im)?.[1] ?? block?.size)?.toUpperCase();
   let done = parseDoneChecks(section(md, "Done-checks?"));
-  if (!done.length && block?.done?.length) {
-    done = block.done
-      .filter((d) => d && typeof d.id === "string")
-      .map((d) => ({ id: d.id!, text: String(d.text ?? ""), check: String(d.check ?? ""), outer: Boolean(d.outer) || d.id === "D1", now: d.now === "met" ? "met" : "unmet", command: commandOf(d.check) }));
-  } else if (block?.done?.length) {
-    for (const d of block.done) {
-      const mine = done.find((x) => x.id === d?.id);
-      if (mine && d?.outer) mine.outer = true;
+  const blockDone = arr<NonNullable<ProblemBlock["done"]>[number]>(block?.done ?? block?.done_checks).filter((d) => d && typeof d.id === "string");
+  if (!done.length && blockDone.length) {
+    done = blockDone.map((d) => ({ id: d.id!, text: String(d.text ?? d.statement ?? ""), check: String(d.check ?? ""), outer: Boolean(d.outer) || d.id === "D1", now: normNow(d.now ?? d.status), command: commandOf(d.check) }));
+  } else {
+    for (const d of blockDone) {
+      const mine = done.find((x) => x.id === d.id);
+      if (mine && d.outer) mine.outer = true;
     }
   }
   const lessonsMd: LessonDisposition[] = [];
@@ -200,13 +208,14 @@ export function parseProblem(md: string): Problem | undefined {
     const applied = /\bapplied\b/i.test(m[2]!) && !/\bnot applicable\b/i.test(m[2]!);
     lessonsMd.push({ id: m[1]!, applied, how: m[2]!.trim() });
   }
-  const lessons = lessonsMd.length ? lessonsMd : (block?.lessons ?? []).filter((l) => l && typeof l.id === "string").map((l) => ({ id: l.id!, applied: Boolean(l.applied), how: l.how }));
+  const lessons = lessonsMd.length ? lessonsMd : arr<Partial<LessonDisposition>>(block?.lessons).filter((l) => l && typeof l.id === "string").map((l) => ({ id: l.id!, applied: Boolean(l.applied), how: l.how }));
   const splitMd = [...(section(md, "Split") ?? "").matchAll(/^\|\s*(P\d+[^|]*?)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|/gm)]
     .filter((m) => !/^-+$/.test(m[1]!.trim()) && !/sub-problem/i.test(m[1]!))
     .map((m) => ({ name: m[1]!.trim(), bound: m[2]!.trim() || undefined, done: idList(m[3], "D") }));
-  const split = splitMd.length ? splitMd : (block?.split ?? []).filter((s) => s && s.name).map((s) => ({ name: String(s.name), bound: s.bound, done: (s.done ?? []).map(String) }));
+  const split = splitMd.length ? splitMd : arr<{ name?: string; bound?: string; done?: string[] }>(block?.split).filter((s) => s && s.name).map((s) => ({ name: String(s.name), bound: s.bound, done: arr<string>(s.done).map(String) }));
   const barMd = parseBarTable(section(md, "Quality bar"));
-  const bar = Object.keys(barMd).length ? barMd : Object.fromEntries(Object.entries(block?.bar ?? {}).filter(([, v]) => typeof v === "string" && v.trim() && !/^<.*>$/.test(v)));
+  const barBlock = block?.bar && typeof block.bar === "object" ? block.bar : block?.quality_bar && typeof block.quality_bar === "object" ? block.quality_bar : {};
+  const bar = Object.keys(barMd).length ? barMd : Object.fromEntries(Object.entries(barBlock).filter(([, v]) => typeof v === "string" && v.trim() && !/^<.*>$/.test(v)));
   return {
     title,
     kind: kindRaw === "repair" || kindRaw === "change" || kindRaw === "build" || kindRaw === "answer" ? kindRaw : undefined,

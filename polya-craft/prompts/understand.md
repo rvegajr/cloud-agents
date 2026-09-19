@@ -52,8 +52,18 @@ You must list every entry below in `Lessons consulted` with a disposition:
 9. For software, write the **Quality bar** table: `install`, `test` at
    least; `lint`, `typecheck`, `start` when the repo has them. Discover
    these from the repo; never invent a command.
-10. Write `PROBLEM.md` from `templates/PROBLEM.md`, end it with the fenced
-    `json problem` block, and commit it: `understand: PROBLEM.md`.
+10. Write `PROBLEM.md` from `templates/PROBLEM.md`, in exactly its shape:
+    the H1 is `# Problem: <title>`; each done-check is one bullet,
+    `- D<n>: <statement> — Check: <command or observation> — Now: unmet|met`;
+    the quality bar is a two-column table, the command alone in backticks.
+    End with the fenced `json problem` block using these keys and no
+    others: `kind`, `size`, `done` (`id`, `text`, `check`, `outer`, `now`),
+    `lessons`, `split` (a list, empty if none), `bar`. Commit:
+    `understand: PROBLEM.md`.
+11. A Check that needs the app running (a `curl` against localhost) is
+    fine: the orchestrator starts the quality bar's `start` command in a
+    fresh clone before running such checks and stops it after. Write the
+    check against the app's default port.
 
 ## Rules
 

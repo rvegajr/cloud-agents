@@ -390,3 +390,26 @@ test("browser: a prose done-check that names a page sends the Verifier with brow
   assert.match(v.prompt, /browser_navigate/);
 });
 
+
+test("look back (b): a done-check that curls localhost starts the bar's start command in the clone and stops it after", async () => {
+  const problem = PROBLEM_MD.replace("- D1: GET /nope answers 404 — Check: `node --test test/notfound.test.js` — Now: unmet", "- D1: GET /nope answers 404 — Check: `test \"$(curl -s -o /dev/null -w '%{http_code}' localhost:4571/nope)\" = 404` — Now: unmet");
+  const started: { command: string; cwd: string; stopped: boolean }[] = [];
+  const { io, calls } = makeIO({ files: { "PROBLEM.md": problem } });
+  io.start = async (command, cwd) => {
+    const rec = { command, cwd, stopped: false };
+    started.push(rec);
+    return { stop: () => { rec.stopped = true; } };
+  };
+  const { send } = makeSend({});
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  assert.deepEqual(started, [{ command: "npm start", cwd: "/tmp/clone-1", stopped: true }]);
+  const check = calls.commands.find((c) => c.command.startsWith("test \"$(curl"));
+  assert.equal(check?.cwd, "/tmp/clone-1");
+  // Without a server-shaped check, nothing is started.
+  const { io: io2 } = makeIO();
+  let startedAgain = false;
+  io2.start = async () => { startedAgain = true; return { stop: () => {} }; };
+  await runPolyaLoop(makeSend({}).send, { ...base, io: io2, lessons: null });
+  assert.equal(startedAgain, false);
+});
