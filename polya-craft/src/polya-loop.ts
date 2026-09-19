@@ -714,25 +714,32 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
             run_instructions: readme,
             browser_tools: browserToolNote(!needsBrowser ? "unneeded" : browser ? "available" : "absent"),
           });
-          const attempts: { note: string; tier?: "claude" }[] = [{ note: "" }, { note: "## Your previous reply had no results block\n\nWalk the steps and end with the single fenced json block the Output section specifies. Nothing after it.\n\n---\n\n" }];
-          if (opts.verifyFallbackTier === "claude") attempts.push({ note: "", tier: "claude" });
-          let report: { results?: { step?: number; d?: string; passed?: boolean; evidence?: string; where?: string }[] } | undefined;
-          for (const [ai, a] of attempts.entries()) {
-            log(`verifier batch ${bi + 1}/${batches.length}${ai ? ` (attempt ${ai + 1}${a.tier ? `, ${a.tier}` : ""})` : ""}: ${batch.map((d) => d.id).join(", ")}`);
-            const t = await send(`${a.note}${prompt}`, { mode: "agent", fresh: true, cwd: clone, ...(browser ? { browser: true } : {}), ...(a.tier ? { tier: a.tier } : {}) });
+          type Walked = { step?: number; d?: string; passed?: boolean; evidence?: string; where?: string };
+          const seen = new Map<string, Walked[]>();
+          const missing = () => batch.map((d) => d.id).filter((id) => !seen.has(id));
+          const tiers: ("local" | "claude")[] = ["local", "local", ...(opts.verifyFallbackTier === "claude" ? (["claude"] as const) : [])];
+          for (const [ai, tier] of tiers.entries()) {
+            const left = missing();
+            if (!left.length) break;
+            // A silent reply and a reply that walks one check of two are the same failure: ask again for what is missing.
+            const note = ai === 0 ? "" : `## Your previous reply did not report ${left.join(" and ")}\n\nWalk ${left.length > 1 ? "each of them" : "it"} now and end with the single fenced json block the Output section specifies, one result per id, nothing after it.\n\n---\n\n`;
+            log(`verifier batch ${bi + 1}/${batches.length}${ai ? ` (attempt ${ai + 1}${tier === "claude" ? ", claude" : ""})` : ""}: ${left.join(", ")}`);
+            const t = await send(`${note}${prompt}`, { mode: "agent", fresh: true, cwd: clone, ...(browser ? { browser: true } : {}), ...(tier === "claude" ? { tier } : {}) });
             track(t);
             if (t.status !== "finished") continue;
-            const r = lenientJson<typeof report>(t.result);
-            if (r?.results && Array.isArray(r.results)) {
-              report = r;
-              break;
+            const r = lenientJson<{ results?: Walked[] }>(t.result);
+            if (!r?.results || !Array.isArray(r.results)) continue;
+            for (const id of batch.map((d) => d.id)) {
+              const mine = r.results.filter((x) => x.d === id);
+              if (mine.length) seen.set(id, mine);
             }
           }
-          if (!report) return stop("unparseable-report", `the Verifier returned no results block for ${batch.map((d) => d.id).join(", ")}`);
+          // A check nobody walked is not a failed check: the run stops and says so, rather than repairing a defect no one saw.
+          const unwalked = missing();
+          if (unwalked.length) return stop("unparseable-report", `the Verifier did not report ${unwalked.join(", ")} after ${tiers.length} attempt(s)`);
           for (const d of batch) {
-            const mine = report.results!.filter((r) => r.d === d.id);
-            const passed = mine.length > 0 && mine.every((r) => r.passed);
-            checks.push({ id: d.id, passed, how: "verifier", evidence: mine.map((r) => r.evidence).filter(Boolean).join("; ") || (mine.length ? "" : "not walked"), where: mine.find((r) => !r.passed)?.where });
+            const mine = seen.get(d.id)!;
+            checks.push({ id: d.id, passed: mine.every((r) => r.passed), how: "verifier", evidence: mine.map((r) => r.evidence).filter(Boolean).join("; "), where: mine.find((r) => !r.passed)?.where });
           }
         }
       }

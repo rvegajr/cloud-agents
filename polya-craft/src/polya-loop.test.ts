@@ -289,7 +289,7 @@ test("verifier silent twice → the fallback tier; silent again → unparseable-
   const verifies = sent.filter((s) => s.kind === "walk");
   assert.equal(verifies.length, 3);
   assert.equal(verifies[2]!.opts?.tier, "claude");
-  assert.match(verifies[1]!.prompt, /^## Your previous reply had no results block/);
+  assert.match(verifies[1]!.prompt, /^## Your previous reply did not report D2/);
   const { io: io2 } = makeIO();
   const { send: s2 } = makeSend({ walk: () => "nothing" });
   assert.equal((await runPolyaLoop(s2, { ...base, io: io2, lessons: null })).stopReason, "unparseable-report");
@@ -724,3 +724,30 @@ test("a unit's gate skips an earlier unit's hash Check for a file this unit may 
   // A hash Check for a file this unit cannot touch still runs.
   assert.ok(calls.gate.some((g) => g.kind === "task" && (g.taskCommands ?? []).some((c) => c.includes("createHash")) === false));
 });
+
+test("look back (b): a batch that reports one check of two is asked again for the other; silence about it stops the run", async () => {
+  const problem = PROBLEM_MD.replace(
+    "- D2: a stranger can start the app from the README — Check: a stranger follows the README and the app starts — Now: unmet",
+    "- D2: a stranger starts it — Check: a stranger follows the README — Now: unmet\n- D3: a stranger copies a line — Check: a stranger clicks Copy — Now: unmet",
+  );
+  const plan = PLAN_MD.replace("Serves:   D2", "Serves:   D2 D3");
+  // First reply walks D2 only; the second reply, asked for D3, walks it.
+  const { io } = makeIO({ files: { ".polya/PROBLEM.md": problem, ".polya/PLAN.md": plan } });
+  const { send, sent } = makeSend({
+    walk: (p) => (/did not report D3/.test(p) ? json({ results: [{ d: "D3", passed: true, evidence: "copied" }] }) : json({ results: [{ d: "D2", passed: true, evidence: "started" }] })),
+  });
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  const walks = sent.filter((s) => s.kind === "walk");
+  assert.equal(walks.length, 2);
+  assert.match(walks[1]!.prompt, /^## Your previous reply did not report D3\n/);
+  assert.deepEqual(out.checks!.filter((c) => c.how === "verifier").map((c) => [c.id, c.passed]), [["D2", true], ["D3", true]]);
+  // Still silent about D3 after every attempt: the run stops and names it, and no repair is asked for.
+  const { io: io2 } = makeIO({ files: { ".polya/PROBLEM.md": problem, ".polya/PLAN.md": plan } });
+  const { send: s2, sent: sent2 } = makeSend({ walk: () => json({ results: [{ d: "D2", passed: true, evidence: "started" }] }) });
+  const out2 = await runPolyaLoop(s2, { ...base, io: io2, lessons: null });
+  assert.equal(out2.stopReason, "unparseable-report");
+  assert.match(out2.stopDetail!, /did not report D3 after 2 attempt/);
+  assert.ok(!sent2.some((x) => /^# Devise a repair/m.test(x.prompt)));
+});
+
