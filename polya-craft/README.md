@@ -16,6 +16,7 @@ four steps, for any problem: a bug, a product, a proposal, a house.
 | `examples/site-inspection.md` | Find as many bugs as possible in a site; kind: answer; the deliverable is a report, and Understand refuses "all" | written |
 | `ARTICLE.md` | Where it comes from and why it is a fresh loop, with sources | written |
 | `ROADMAP.md` | Built, known limitations, not built, measurement | written |
+| `NEXT-SESSION.md` | The experiments queued for the next session: files under `.polya/`, Verifier batching, ledger hygiene, the oracle, and the Sonnet reruns that measure them | written |
 | `templates/` | `PROBLEM.md`, `PLAN.md`, `LOOKBACK.md`, `ONE-PAGE.md` | written |
 | `prompts/` | The five turns: `understand`, `devise`, `carry-out`, `verify`, `look-back` | written, render-tested |
 | `LESSONS.md` | The ledger, seeded with three process lessons | written |
