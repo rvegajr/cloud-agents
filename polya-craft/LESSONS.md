@@ -40,12 +40,11 @@ Evidence: package.json engines >=22.5.0 and README both cite 22.5 as sufficient 
 Status:   confirmed(2)
 
 ## L-2026-09-19-03
-Tags:     kind:build stage:devise stage:carry-out
-When:     A unit's Do gives the whole content of a file verbatim.
-Lesson:   Make that unit's Check compare the file byte for byte with the plan's text, for example against a sha256 recorded in the plan, because behavioural tests pass on transcription drift.
-Evidence: U5 typed SFMenlo-Regular for the plan's SFMono-Regular in public/app.css line 14. test/page.test.js passed, and the Hand reported done with no note. Only diffing PLAN.md's blocks against HEAD at look back found it; the other seven files were identical.
+Tags:     kind:build stage:devise stage:carry-out check
+When:     a unit's Do gives the whole content of one or more files verbatim
+Lesson:   make that unit's Check compare each file with the plan's text (a sha256 recorded in the plan) and assert that `git status --porcelain` names only the unit's Touches, because behavioural tests pass on transcription drift and a hash passes while a stray file rides along
+Evidence: snippet-vault (Opus): U5 typed SFMenlo-Regular for SFMono-Regular and every test passed; snippet-vault (Fable): U5's commit added public/app.css.bak beside its Touches while its sha256 Check passed. Merged from L-2026-09-19-03 and -07.
 Status:   confirmed(1)
-
 ## L-2026-09-19-04
 Tags:     kind:build stage:devise
 When:     The page edits a value by formatting it into a text field and parsing it back on save, and the API accepts values that format cannot express.
@@ -67,23 +66,15 @@ Lesson:   Put a filled-in AGENTS.md in the Unknown, because every Hand reads it 
 Evidence: Every unit's Not here carried a paragraph overriding AGENTS.md's TypeScript, src/index.ts, lint, typecheck and port-3000 lines. The finished branch still ships that file, and QWEN.md includes it with @AGENTS.md.
 Status:   confirmed(1)
 
-## L-2026-09-19-07
-Tags:     kind:build stage:devise check
-When:     A unit's Do gives a file verbatim and its Check is a sha256 of the named files
-Lesson:   Make the Check also assert, before the commit, that `git status --porcelain` names exactly the unit's Touches and nothing else, because a hash on the named files passes while a stray file rides along into the commit.
-Evidence: U5's commit 119a255 added public/app.css.bak (byte-identical to app.css) beside its two Touches files; U5's Check (two sha256s + test/page-static.test.js) passed; commit fc20045 had to remove it.
-Status:   candidate
-
 ## L-2026-09-19-08
 Tags:     kind:build stage:understand done-check
-When:     The request's example names the command the requester will actually type
-Lesson:   Put that exact command in a D or an outer-test step, not a sibling that shares its code path.
-Evidence: Request: 'I run `npm run dev`, open localhost'. D1-D8 and outer steps 1-10 use `npm start` only; `npm run dev` (node --watch server.js) was first run at review, where it answered 200, restarted on a source change and exited on SIGINT.
+When:     the request's example names the command the requester will type (`npm run dev`, a CLI invocation)
+Lesson:   put that exact command in a done-check or an outer-test step; a sibling command that shares its code path (`npm start`) does not prove it
+Evidence: snippet-vault (Fable): the idea says "I run `npm run dev`"; every D and outer step used `npm start`; `npm run dev` was first run at the review.
 Status:   candidate
-
 ## L-2026-09-19-09
 Tags:     kind:build stage:devise storage
-When:     A plan rejects an option because its side files are not covered by .gitignore
-Lesson:   Apply the same test to the option you keep: SQLite's default journal_mode=delete writes `<db>-journal` beside the file, which `*.db` matches no better than `-wal` or `-shm`.
-Evidence: PLAN.md Approach: 'WAL mode (its -wal and -shm side files are not covered by .gitignore)'; `sqlite3 dev-vault.db 'pragma journal_mode'` printed delete; `git check-ignore snippets.db-journal` exits 1.
+When:     a plan rejects an option because its side files would not be ignored by git
+Lesson:   check the option it keeps the same way: SQLite's default journal writes `<db>-journal` beside the file, which a `*.db` ignore rule does not match
+Evidence: snippet-vault (Fable): PLAN.md rejected WAL for its -wal and -shm files; the default journal mode left snippets.db-journal unignored.
 Status:   candidate
