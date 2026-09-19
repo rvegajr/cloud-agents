@@ -60,6 +60,21 @@ npm run deploy                        # stamp the commit, then ship
   is one reviewer repeat that sent `GET //` and crashed a line in the original
   fixture that neither loop's look back had probed. That crash is now a ledger
   entry; `ROADMAP.md` has the table and the reading.
+- **Second live polya run: the snippet-vault build.** Five units, every one
+  gate-green on its first attempt, zero Hand questions; the Verifier walked
+  five prose done-checks in a browser on the local model alone; 8/8 met, one
+  of them the malformed-path probe that entered the ledger from the repair the
+  day before. Blind score in one invocation with the existing builds: Claude
+  31, Cursor 30, **polya 29**, ACG 28.5; polya best of four on correctness,
+  security and validation, behind on tests, UX and structure. Eight
+  orchestrator defects surfaced and are fixed with the live artifacts as
+  fixtures: the plan parser (h3 units, next-line fields, fenced files, object
+  traces, no throw); paid turns skipped when the artifact is on disk; the unit
+  gate runs only the unit's Check; the orchestrator reverts files outside
+  Touches; prose that mentions commands is the Verifier's; the Verifier is the
+  `walk` turn kind, never rescued; a stale LOOKBACK.md is cleared before a
+  pass and findings about the record never reach the Hand; a Hand turn that
+  rewrites git history is discarded. 268 tests.
 - **`architect-crew-gate/`: the pattern in its own folder.** `THEORY.md` is the
   claim, five principles, and operating instructions an AI or a person can act
   on directly; `PATTERN.md` is
