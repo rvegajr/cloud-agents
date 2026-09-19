@@ -413,3 +413,15 @@ test("look back (b): a done-check that curls localhost starts the bar's start co
   await runPolyaLoop(makeSend({}).send, { ...base, io: io2, lessons: null });
   assert.equal(startedAgain, false);
 });
+
+test("look back (d): a \"No lesson\" entry stays in LOOKBACK.md and is not appended to the ledger", async () => {
+  const { io, files } = makeIO();
+  const lessons = memLessons();
+  const { send } = makeSend({ "look-back": () => json({ verdict: "done", findings: [], lessons: [{ tags: ["kind:repair"], when: "w", lesson: "No lesson: the plan held.", evidence: "e" }] }) });
+  const out = await runPolyaLoop(send, { ...base, io, lessons });
+  assert.equal(out.stopReason, "complete");
+  assert.equal(lessons.added.length, 0);
+  assert.equal(out.lookback?.lessons, 0);
+  assert.match(files["LOOKBACK.md"]!, /No lesson: the plan held/);
+});
+

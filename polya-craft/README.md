@@ -23,7 +23,7 @@ four steps, for any problem: a bug, a product, a proposal, a house.
 | `src/lessons.ts` | The ledger store: select by tags, append, confirm; the prior-lessons note | built |
 | `src/io.ts` | `makePolyaIO`: architect-crew-gate's repo I/O with the gate reading PROBLEM.md's quality bar | built |
 | `src/polya-loop.ts` | The loop: understand → devise → gated units → look back (a, b, c, d); LOOKBACK.md written from evidence; a unit or done-check that names a page gets a browser for that turn | built |
-| `src/*.test.ts` | Parsers, validator, ledger, prompt render/classify/route, the loop with a faked Hand and Solver, end to end on a real bare origin with the real gate | 50 tests, passing |
+| `src/*.test.ts` | Parsers, validator, ledger, prompt render/classify/route, the loop with a faked Hand and Solver, end to end on a real bare origin with the real gate | 58 tests, passing |
 
 ## Read in this order
 

@@ -245,7 +245,9 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     let confirmed = 0;
     if (lessons) {
       try {
-        if (report?.lessons?.length) added = lessons.append(report.lessons.filter((l) => l && l.lesson).map((l) => ({ tags: l.tags ?? [], when: l.when ?? problem?.title ?? "", lesson: l.lesson, evidence: l.evidence ?? problem?.title ?? "" })));
+        // "No lesson: the plan held" is an entry in LOOKBACK.md, never in the ledger.
+        const real = (report?.lessons ?? []).filter((l) => l && l.lesson && !/^\s*no lesson\b/i.test(l.lesson));
+        if (real.length) added = lessons.append(real.map((l) => ({ tags: l.tags ?? [], when: l.when ?? problem?.title ?? "", lesson: l.lesson, evidence: l.evidence ?? problem?.title ?? "" })));
         if (report?.confirmed?.length) {
           lessons.confirm(report.confirmed);
           confirmed = report.confirmed.length;

@@ -21,18 +21,17 @@ in `PATTERN.md`; this file only tracks state.
 - `src/polya-loop.ts`: the four stages over `send` and `io`. Stop reasons: `complete`, `understanding-incomplete`, `plan-not-workable`, `unit-not-workable`, `unit-gate-failed`, `finish-check-failed`, `verify-failed`, `review-unresolved`, `unparseable-report`, `run-failed`. `LOOKBACK.md` is written by the loop from evidence on every exit from look back, and the ledger is appended and confirmed.
 - Browser for the Hand and the Verifier: a unit or a done-check whose text names a page is sent with `browser: true`, and the engine attaches Playwright MCP to that turn only (`QA_BROWSER`, `PLAYWRIGHT_MCP_ARGS`, as ACG's QA). The prompt tells the model whether a browser is attached, absent, or unneeded. Imported from `../architect-crew-gate/src/browser.ts`, unchanged.
 - Kit wiring: `src/lib/routing.ts` (five H1 regexes; Solver turns to the plan tier, the Hand to implement, the Verifier to verify, Look back to review), `src/lib/engine-local.ts` (Understand and Devise are architect kinds; Look back runs read-only in a fresh session; Devise carries the executor note), `src/lib/build-app.ts` (`--loop polya`, `--max-units`, resume at the stage that stopped), `package.json` test glob, `tsconfig.json`.
-- Tests: 50 across `plan`, `lessons`, `prompts`, the loop with a faked Hand and Solver (every stop reason, retry, fallback, resume, and materialisation path), and end to end on a real bare origin with the real gate, a real fresh clone, and a real ledger file.
+- Tests: 58 across `plan`, `lessons`, `prompts`, the loop with a faked Hand and Solver (every stop reason, retry, fallback, resume, and materialisation path), and end to end on a real bare origin with the real gate, a real fresh clone, and a real ledger file.
 
-Nothing has been run through a model by this kit, and nothing has been
-measured. The pattern has been used by hand in the three worked examples,
-which are written walks and not recorded runs, and by the end-to-end test
-with a faked model.
+One live run on 2026-09-18 (the measurement table below). The pattern has
+also been used by hand in the worked examples, which are written walks and
+not recorded runs.
 
 ## Not built
 
 In build order. Each line says what the module is and what it borrows.
 
-1. A live run. `npm run build-app -- --loop polya --engine hybrid` on a repair, then the measurement table below. Then `examples/site-inspection.md` live, which is the browser's first real test.
+1. The ACG row of the measurement table: the same repair under `--loop blueprint`, same day, same models, scored blind together. Then `examples/site-inspection.md` live, which is the browser's first real test.
 2. Re-plan of one unit only. Today `unit-not-workable` re-runs Devise with the question prepended and keeps the units that passed; the Solver rewrites the plan, not one unit. A targeted single-unit re-plan is cheaper and should replace it once a live run shows how often a Hand asks.
 3. Level checks at run time. `PLAN.md`'s Shape is parsed but the loop does not yet run a group's check when its units complete; the finish check and the done-checks cover the whole. Add when a plan with more than one L1 group has been run live.
 4. Parallel Hands: units with disjoint `Touches` and no `Depends` between them, one worktree each. After the first measurement, not before.
@@ -40,10 +39,19 @@ In build order. Each line says what the module is and what it borrows.
 
 ## Known limitations
 
-These are the orchestrator defects `../architect-crew-gate/ROADMAP.md`
-measured on 2026-09-18. polya-craft has not run live yet, so it has none of
-its own. Each line is a defect the loop must not repeat and how the code
-answers it.
+First, polya-craft's own, measured on the first live run (2026-09-18,
+polya-live-404, hybrid). Both were in the orchestrator, not the models, and
+both are fixed with the live artifacts as test fixtures.
+
+- **The parser crashed on the Solver's json block.** Claude Max wrote `split: false`, `done_checks` for `done`, `statement` for `text`, `status` for `now`, `quality_bar` for `bar`, bold `**D1** —` ids over three lines, and a three-column bar table. The markdown was excellent; the parser read none of it and threw on the `false`. Answer: one bullet per D however it is laid out, aliases accepted, no field can throw, and the understand prompt states the exact shape. Cost: one Understand turn ($0.36 API-eq) that had to be resumed past by hand.
+- **A backticked path became a shell command.** The Devise turn wrote prose in the Check field with `test/*.test.js` in backticks; `commandOf` joined it into `npm test && test/*.test.js`. The Hand's correct two-line fix failed the gate three times on a phantom command, and the gate feedback told it to fix something that did not exist. Answer: a backticked path or glob is a name, and `test` is a command only with an argument. Cost: three local turns (free) and one resume.
+- **A done-check that curls the app needs the app up.** Not a defect the run hit, because it was fixed before look back ran, but the first PROBLEM.md exposed it: four of five checks curl `localhost:4571`. Answer: look back (b) starts the bar's `start` in the fresh clone for the checks and stops its process group after.
+- **"No lesson" went into the ledger.** The reviewer wrote "No lesson: the plan held" as a lesson entry and the loop appended it. Answer: it stays in LOOKBACK.md, never the ledger.
+
+What the models did right, for the record: the Understand turn found the defect's exact branch, wrote the reproduction as D1, named three invariants, and discovered the quality bar from package.json without inventing a lint command. The Devise turn wrote a red regression test with a bonus trailing-slash case, a unit whose Do quotes the exact lines to replace, and answered the first plan-lint gap (no Given) in one retry. The Hand, qwen3-coder-next, made the two-line fix on its first attempt with no question. The reviewer checked the result a second way, curling a server it started itself, and found nothing.
+
+Then the orchestrator defects `../architect-crew-gate/ROADMAP.md`
+measured on 2026-09-18, each with how the code answers it.
 
 - A local architect that does not use tools writes nothing to disk. Answer: Solver turns run on the frontier tier by routing; a local Solver is opt-in and the loop materialises the three artifacts from the report before it validates them.
 - Local models reply with bare JSON and no fence. Answer: every parser in `src/plan.ts` accepts a bare object.
@@ -64,7 +72,7 @@ polya-craft also carries assumptions no run has tested.
 
 ## Measurement status
 
-Nothing measured.
+One row. The ACG row is next.
 
 The intended measurement is one problem run twice on the same day with the
 same models: once under ACG's blueprint loop (`--loop blueprint`) and once
@@ -75,8 +83,11 @@ reported per meter, one line each, as the close of both runs.
 
 | problem | engine | Solver turns | Hand turns | retries | questions from the Hand | blind score /35 | cost per meter |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| | blueprint (ACG) | | | | | | |
-| | polya | | | | | | |
+| polya-live-404 repair (unknown routes answer 200) | blueprint (ACG) | | | | | | |
+| polya-live-404 repair (unknown routes answer 200) | polya, hybrid, 2026-09-18 | 4 (understand; devise + 1 plan-lint retry; review) | 1 gate-green (+3 wasted on the orchestrator's phantom command, +1 on resume) | 0 real | 0 | not yet scored | Claude Max API-eq $1.01; Ollama $0 |
+
+Result: complete. U1 gate PASS first attempt once the orchestrator was fixed; finish check PASS; 5/5 done-checks met against a server started in a fresh clone; review: done, 0 findings; diff `src/app.js` +2/-2 plus a red test the Solver wrote. PR: `rvegajr/polya-live-404#1`. Two resumes were needed, both for orchestrator defects listed under Known limitations, neither for a model.
+
 
 The first problem should be a repair, as ACG's first run was: it exercises
 every stage for the least cost. The second should be the snippet-vault build

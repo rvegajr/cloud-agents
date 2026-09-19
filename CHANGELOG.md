@@ -45,6 +45,17 @@ npm run deploy                        # stamp the commit, then ship
   page gets Playwright attached for that turn, through the engine's existing
   path. 50 tests, including end to end on a real bare origin with the real
   gate.
+- **First live polya run and what it fixed.** A repair on the hybrid engine
+  (Claude Max Solver, qwen3-coder-next Hand) completed end to end:
+  understand, devise with one plan-lint retry, one Hand turn gate-green,
+  finish check, five done-checks met against a server the loop started in a
+  fresh clone, a clean review, LOOKBACK.md. Two orchestrator defects surfaced
+  and are fixed with the live artifacts as fixtures: the parser crashed on the
+  Solver's json block and missed its bold multi-line done-checks (now lenient,
+  aliases accepted, never throws); a backticked path in a Check was joined into
+  a shell command (now a path is a name). Done-checks that curl the app start
+  the bar's `start` in the clone. "No lesson" stays out of the ledger. 258
+  tests.
 - **`architect-crew-gate/`: the pattern in its own folder.** `THEORY.md` is the
   claim, five principles, and operating instructions an AI or a person can act
   on directly; `PATTERN.md` is
