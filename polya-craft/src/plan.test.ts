@@ -259,3 +259,25 @@ test("parseProblem: a json block with aliases and a false split never throws", (
 test("commandOf: several backticked commands are one check", () => {
   assert.equal(commandOf("`npm test` and `npm run lint`"), "npm test && npm run lint");
 });
+
+test("commandOf: a backticked path or glob is not a command; `test` needs an argument", () => {
+  assert.equal(commandOf("`npm test` — now: unmet. This command is outside Touches (it runs `test/*.test.js`, and `src/app.js` is not a test file)."), "npm test");
+  assert.equal(commandOf("`test/app.test.js`"), undefined);
+  assert.equal(commandOf("test"), undefined);
+  assert.equal(commandOf(`test "$(curl -s localhost:4571/nope)" = "not found"`), `test "$(curl -s localhost:4571/nope)" = "not found"`);
+});
+
+// The PLAN.md the same live Solver wrote: a fenced Given, multi-line Do with fenced blocks, prose in the Check field.
+const LIVE_PLAN = readFileSync(new URL("./fixtures-live-plan.md", import.meta.url), "utf8");
+
+test("parsePlan: the live Solver's plan yields one lawful unit whose Check is `npm test`", () => {
+  const plan = parsePlan(LIVE_PLAN);
+  assert.equal(plan.units.length, 1);
+  const u = plan.units[0]!;
+  assert.equal(u.id, "U1");
+  assert.deepEqual(u.serves, ["D1", "D2", "D3", "D4", "D5"]);
+  assert.deepEqual(u.touches, ["src/app.js"]);
+  assert.equal(u.command, "npm test");
+  const p = parseProblem(LIVE)!;
+  assert.deepEqual(validateUnits(plan.units, p, { requireCommand: true }), []);
+});

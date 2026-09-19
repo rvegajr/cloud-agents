@@ -79,7 +79,9 @@ export interface Plan {
 
 const TEST_FILE = /(^|\/)(test|tests|__tests__|spec)\/|\.(test|spec)\.[jt]sx?$|(^|\/)test_[^/]+\.py$|_test\.(py|go)$|Tests\.cs$/;
 const ARTIFACT_FILE = /^(PROBLEM|PLAN|LOOKBACK|ONE-PAGE|LESSONS)\.md$/;
-const COMMAND_HEAD = /^(npm|npx|pnpm|yarn|node|deno|bun|curl|wget|sh|bash|zsh|git|python3?|pytest|pip|go|cargo|make|mvn|gradle|dotnet|ruby|bundle|test|\[|ls|cat|grep|diff|cmp|wc|jq|docker|kubectl|railway|gh)\b/;
+const COMMAND_HEAD = /^(npm|npx|pnpm|yarn|node|deno|bun|curl|wget|sh|bash|zsh|git|python3?|pytest|pip|go|cargo|make|mvn|gradle|dotnet|ruby|bundle|\[|ls|cat|grep|diff|cmp|wc|jq|docker|kubectl|railway|gh)\b|^test\s+\S/;
+/** A backticked path or glob (`test/*.test.js`, `src/app.js`) is a name, not a command. */
+const LOOKS_LIKE_PATH = /^[\w.@-]*[\/*][\w.*\/@-]*$/;
 const FORBIDDEN_IN_DO = /\b(choose|decide|appropriate|as needed|best|etc\.?|or similar|something like|if you (?:think|want|prefer)|use your judg?e?ment)\b/i;
 const DEFAULT_HYGIENE = ["node_modules/", "dist/", "build/", "coverage/", "*.db", "*.sqlite", "*.sqlite3", ".env", ".qwen/", ".aider*", ".cursor/worktrees/"];
 
@@ -118,7 +120,7 @@ function idList(s: string | undefined, prefix: string): string[] {
 export function commandOf(check: string | undefined): string | undefined {
   if (!check) return undefined;
   // Several backticked commands ("`a` and `b`") are one check: all must pass.
-  const ticked = [...check.matchAll(/`([^`]+)`/g)].map((m) => m[1]!.trim()).filter((c) => COMMAND_HEAD.test(c));
+  const ticked = [...check.matchAll(/`([^`]+)`/g)].map((m) => m[1]!.trim()).filter((c) => COMMAND_HEAD.test(c) && !LOOKS_LIKE_PATH.test(c));
   if (ticked.length) return ticked.join(" && ");
   const candidate = check.trim();
   if (!COMMAND_HEAD.test(candidate)) return undefined;
