@@ -45,6 +45,18 @@ npm run deploy                        # stamp the commit, then ship
   page gets Playwright attached for that turn, through the engine's existing
   path. 50 tests, including end to end on a real bare origin with the real
   gate.
+- **Solver comparison: Sonnet vs Opus vs Fable 5.1, both at max effort and a
+  full thinking budget, on the snippet-vault build.** `CLAUDE_EFFORT` and
+  `CLAUDE_THINKING_TOKENS` env vars, applied to every Claude turn (the
+  Solver, on the hybrid engine). Same idea, same Hand, three independent
+  runs, blind-scored together: Sonnet 29/35 (merge-with-followup), Opus
+  34/35 (merge, all 3 repeats), Fable 5.1 34/35 (merge, all 3 repeats).
+  Both stronger Solvers closed the tests and UX gap unprompted — negative-
+  case tests, empty-state and failed-save messages — confirming the gap was
+  judgment at Understand/Devise, not the Hand. Neither improved structure,
+  which stays capped by the loop's own artifacts at the repo root
+  regardless of Solver strength. Cost: Sonnet $6.39, Opus $35.78, Fable
+  $31.51 (Max API-eq). `ROADMAP.md` has the full table and reading.
 - **First live polya run and what it fixed.** A repair on the hybrid engine
   (Claude Max Solver, qwen3-coder-next Hand) completed end to end:
   understand, devise with one plan-lint retry, one Hand turn gate-green,

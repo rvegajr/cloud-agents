@@ -132,6 +132,53 @@ every stage for the least cost. The second should be the snippet-vault build
 already scored under four engines in `../architect-crew-gate/ROADMAP.md`, so
 polya-craft's number lands in an existing table.
 
+## Solver comparison: does a stronger Solver close the gap?
+
+Same idea (`ideas/example-snippet-vault.md`), same Hand (qwen3-coder-next),
+same day, three Solvers, `CLAUDE_EFFORT=max CLAUDE_THINKING_TOKENS=31999`
+on the two non-default runs. Each build ran the full loop independently on
+its own fixture repo; blind-scored together, one invocation, sonnet,
+repeat 3, record `.runs/quality-2026-09-19T16-08-23-265Z.json`, $4.71.
+
+| Solver | Units | First-attempt gate-green | Build cost (Max API-eq) | Blind score /35 | Verdict (3 repeats) |
+| --- | --- | --- | --- | --- | --- |
+| Sonnet, default | 5 | 5/5 | $6.39 | **29** | merge-with-followup |
+| Opus, max effort + thinking | 7 | 7/7 | $35.78 | **34** | merge (×3) |
+| Fable 5.1, max effort + thinking | 8 | 8/8 | $31.51 | **34** | merge (×3) |
+
+Every unit passed the gate on the first attempt on all three runs; the Hand
+never varied. Both stronger Solvers closed the tests and UX gap that
+`polya-live-snippet-vault` (the Sonnet run above) lost on: the reviewers'
+own evidence names negative-case tests (malformed input, oversized paths,
+injection-shaped strings) and an empty-state/failed-save message the
+Sonnet build did not write. Neither stronger Solver improved structure,
+which stayed capped at 4 (one reviewer gave Opus a 3) for the same reason
+as the Sonnet run: `PROBLEM.md`, `PLAN.md`, `LOOKBACK.md`, `AGENTS.md`,
+`QWEN.md` at the repo root. That is unchanged by the Solver's model and
+argues directly for item 2 above (`.polya/`), not for more Max spend.
+
+Fable and Opus are indistinguishable on this one run: same score, same
+verdict on every repeat, similar build cost. Fable's plan pinned the exact
+Node version by fetching and running it (`npx node@<version>`); Opus's did
+not. One run is not enough to call a difference between them.
+
+**Reading for the pattern, not just the score.** The oracle checklist
+proposed under "not built" item 4 — refuse bad input, show an empty state,
+show a failed action — is not a new mechanism the loop needs. A strong
+enough Solver writes it unprompted, because that is what "understand the
+problem" means when done properly. The item stays on the queue for when
+the Solver is Sonnet or a local model; it stops being load-bearing when the
+Solver is Opus or Fable at high effort. What does not shrink with a
+stronger Solver is the structure penalty, because it is not a judgment gap,
+it is a decision about where the loop's own files live.
+
+**Cost read.** Max spend is per-project and per-repo in `.runs/*.json`;
+`npm run cost-board` rolls it up. A stronger Solver at max effort costs
+roughly 5-6x Sonnet's default on the Solver turns alone (`$24-36` vs
+`$3.27` for understand+devise), before the review turn. Worth it when the
+`.polya/`-scale structure fix is also in place and the remaining gap is
+genuinely judgment, not paperwork location.
+
 ## Order of work
 
 **Phase 1: the pattern.** The documents, templates, prompts, ledger,
