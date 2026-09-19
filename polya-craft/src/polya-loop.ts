@@ -398,6 +398,20 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
   };
 
   /**
+   * The commands a unit's gate runs: its own Check, plus the Checks of the units already passed — except a Check
+   * that pins the hash of a file this unit may change. A repair that edits a file an earlier unit wrote whole can
+   * never match that unit's hash again, and the earlier unit's behaviour is still covered by the finish check.
+   */
+  const taskCommandsFor = (unit: { touches: string[]; command?: string }): string[] => {
+    const passed = state.unitRecords
+      .filter((r) => r.passed)
+      .map((r) => state.units.find((x) => x.id === r.id)?.command)
+      .filter((c): c is string => Boolean(c))
+      .filter((c) => !(/sha(?:256|1|512)|createHash/.test(c) && unit.touches.some((t) => c.includes(t))));
+    return union(passed, unit.command ? [unit.command] : []);
+  };
+
+  /**
    * A check failed at look back. The Solver writes the repair as ordinary units (plan-lint, a red Check, the Hand,
    * the gate); the loop never writes a unit itself. Returns undefined when every repair unit passed its gate.
    */
@@ -448,8 +462,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     await persist();
     for (const u of units) {
       log(`carry out ${u.id} (repair): ${u.title}`);
-      const passedCommands = state.unitRecords.filter((r) => r.passed).map((r) => state.units.find((x) => x.id === r.id)?.command).filter((c): c is string => Boolean(c));
-      const r = await handTurn({ id: u.id, block: u.body, touches: u.touches, command: u.command }, `${problem?.restated ?? ""}\n\nDone-checks this unit serves:\n${problem ? doneLines(problem, u) : ""}`, union(passedCommands, u.command ? [u.command] : []));
+      const r = await handTurn({ id: u.id, block: u.body, touches: u.touches, command: u.command }, `${problem?.restated ?? ""}\n\nDone-checks this unit serves:\n${problem ? doneLines(problem, u) : ""}`, taskCommandsFor(u));
       if (r === "run-failed") return { reason: "run-failed", detail: `repair ${u.id} did not finish` };
       state.unitRecords = state.unitRecords.filter((x) => x.id !== u.id);
       state.unitRecords.push(r.record);
@@ -579,8 +592,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       log(`carry out ${unit.id} (${state.unitIndex + 1}/${state.units.length}): ${unit.title}`);
       state.unitRecords = state.unitRecords.filter((r) => r.id !== unit.id);
       const excerpt = `${problem?.restated ?? ""}\n\nDone-checks this unit serves:\n${doneLines(problem, unit)}`;
-      const passedCommands = state.unitRecords.filter((r) => r.passed).map((r) => state.units.find((u) => u.id === r.id)?.command).filter((c): c is string => Boolean(c));
-      const taskCommands = union(passedCommands, unit.command ? [unit.command] : []);
+      const taskCommands = taskCommandsFor(unit);
       const strong = /^\s*strong\s*$/i.test(unit.body.match(/^Owner:\s*(.*)$/im)?.[1] ?? "");
       const r = await handTurn({ id: unit.id, block: unit.body, touches: unit.touches, command: unit.command }, excerpt, taskCommands, strong ? "claude" : undefined);
       if (r === "run-failed") return stop("run-failed", `unit ${unit.id} turn did not finish`);
@@ -623,8 +635,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     // A unit that has not passed its gate (a repair from an earlier pass, or a resume mid-stage) runs first.
     for (const u of state.units.filter((x) => !state.unitRecords.find((r) => r.id === x.id)?.passed)) {
       log(`carry out ${u.id} (unfinished): ${u.title}`);
-      const passedCommands = state.unitRecords.filter((r) => r.passed).map((r) => state.units.find((x) => x.id === r.id)?.command).filter((c): c is string => Boolean(c));
-      const r = await handTurn({ id: u.id, block: u.body, touches: u.touches, command: u.command }, `${problem.restated ?? ""}\n\nDone-checks this unit serves:\n${doneLines(problem, u)}`, union(passedCommands, u.command ? [u.command] : []));
+      const r = await handTurn({ id: u.id, block: u.body, touches: u.touches, command: u.command }, `${problem.restated ?? ""}\n\nDone-checks this unit serves:\n${doneLines(problem, u)}`, taskCommandsFor(u));
       if (r === "run-failed") return stop("run-failed", `${u.id} turn did not finish`);
       state.unitRecords = state.unitRecords.filter((x) => x.id !== u.id);
       state.unitRecords.push(r.record);

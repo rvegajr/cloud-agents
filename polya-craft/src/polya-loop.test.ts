@@ -706,3 +706,21 @@ test("look back: an unfinished unit runs before the finish check, and the Solver
   assert.ok(finish.allowed!.includes("src/app.js"));
 });
 
+
+test("a unit's gate skips an earlier unit's hash Check for a file this unit may change (live R0, U3 vs U7)", async () => {
+  const hashApp = `node -e "const h=require('crypto').createHash('sha256').update(require('fs').readFileSync('src/app.js')).digest('hex');if(h!=='abc'){process.exit(1)}"`;
+  const plan = PLAN_MD.replace("Check:    `node --test test/notfound.test.js`", `Check:    \`${hashApp}\``);
+  const { io, calls } = makeIO({ preload: true, files: { ".polya/PLAN.md": `${plan}\n\n## Repairs\n\n## U3: repair the saved file\nServes:   D1\nProduces: x\nGiven:    y\nDo:       1. Edit src/app.js.\nTouches:  src/app.js\nCheck:    \`node --test test/repair.red-until-fixed.test.js\`\nDepends:  none\nNot:      z\n` } });
+  const out = await runPolyaLoop(makeSend({}).send, { ...base, io, lessons: null }, {
+    phase: "look-back",
+    units: parsePlan(`${plan}\n\n## Repairs\n\n## U3: repair the saved file\nServes:   D1\nProduces: x\nGiven:    y\nDo:       1. Edit src/app.js.\nTouches:  src/app.js\nCheck:    \`node --test test/repair.red-until-fixed.test.js\`\nDepends:  none\nNot:      z\n`).units,
+    unitRecords: [{ id: "U1", attempts: 1, passed: true }, { id: "U2", attempts: 1, passed: true }, { id: "U3", attempts: 1, passed: false }],
+    baselineSha: "sha0",
+  });
+  assert.equal(out.stopReason, "complete");
+  const u3gate = calls.gate.find((g) => g.kind === "task" && g.allowed?.includes("src/app.js"))!;
+  assert.ok(!u3gate.taskCommands!.some((c) => c.includes("createHash")), `U1's hash of src/app.js must not run for U3: ${u3gate.taskCommands!.join(" | ")}`);
+  assert.ok(u3gate.taskCommands!.includes("node --test test/repair.red-until-fixed.test.js"));
+  // A hash Check for a file this unit cannot touch still runs.
+  assert.ok(calls.gate.some((g) => g.kind === "task" && (g.taskCommands ?? []).some((c) => c.includes("createHash")) === false));
+});
