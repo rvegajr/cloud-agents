@@ -8,7 +8,9 @@ import { extractTaggedJson, looksLikeProse, type QualityContract } from "../../a
  * Nothing here runs a model or a command.
  */
 
-export const ARTIFACTS = { problem: "PROBLEM.md", plan: "PLAN.md", lookback: "LOOKBACK.md" } as const;
+/** The loop's own record lives in `.polya/`, out of the product's tree (blind reviewers docked structure for it at the root). */
+export const POLYA_DIR = ".polya";
+export const ARTIFACTS = { problem: `${POLYA_DIR}/PROBLEM.md`, plan: `${POLYA_DIR}/PLAN.md`, lookback: `${POLYA_DIR}/LOOKBACK.md` } as const;
 
 export type ProblemKind = "repair" | "change" | "build" | "answer";
 export type ProblemSize = "S" | "M" | "L";
@@ -78,7 +80,7 @@ export interface Plan {
 // ---------------------------------------------------------------------------
 
 const TEST_FILE = /(^|\/)(test|tests|__tests__|spec)\/|\.(test|spec)\.[jt]sx?$|(^|\/)test_[^/]+\.py$|_test\.(py|go)$|Tests\.cs$/;
-const ARTIFACT_FILE = /^(PROBLEM|PLAN|LOOKBACK|ONE-PAGE|LESSONS)\.md$/;
+const ARTIFACT_FILE = /^(\.polya\/.*|(PROBLEM|PLAN|LOOKBACK|ONE-PAGE|LESSONS)\.md)$/;
 const COMMAND_HEAD = /^(npm|npx|pnpm|yarn|node|deno|bun|curl|wget|sh|bash|zsh|git|python3?|pytest|pip|go|cargo|make|mvn|gradle|dotnet|ruby|bundle|\[|ls|cat|grep|diff|cmp|wc|jq|docker|kubectl|railway|gh)\b|^test\s+\S/;
 /** A backticked path or glob (`test/*.test.js`, `src/app.js`) is a name, not a command. */
 const LOOKS_LIKE_PATH = /^[\w.@-]*[\/*][\w.*\/@-]*$/;

@@ -64,7 +64,7 @@ Tags:     kind:build stage:understand
 When:     The seeded AGENTS.md is the kit's unfilled template, so its Layout and Commands are false for the repo.
 Lesson:   Put a filled-in AGENTS.md in the Unknown, because every Hand reads it each turn and the finished branch otherwise ships instructions for another project.
 Evidence: Every unit's Not here carried a paragraph overriding AGENTS.md's TypeScript, src/index.ts, lint, typecheck and port-3000 lines. The finished branch still ships that file, and QWEN.md includes it with @AGENTS.md.
-Status:   confirmed(1)
+Status:   retired (implemented: the loop removes the unmodified seed at Understand, 2026-09-19)
 
 ## L-2026-09-19-08
 Tags:     kind:build stage:understand done-check

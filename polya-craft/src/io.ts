@@ -1,4 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
+import { existsSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 import type { ExecFn } from "../../src/lib/engine-local.js";
 import { defaultExec } from "../../src/lib/engine-local.js";
 import { makeRepoIO } from "../../architect-crew-gate/src/io.js";
@@ -26,6 +28,12 @@ export function makePolyaIO(
   let warned = false;
   return {
     ...base,
+    removeFile: (rel) => {
+      const p = join(cwd, rel);
+      if (!existsSync(p)) return false;
+      unlinkSync(p);
+      return true;
+    },
     isAncestor: (sha) => {
       try {
         execFileSync("git", ["merge-base", "--is-ancestor", sha, "HEAD"], { cwd, stdio: "ignore", env: subprocessEnv() as NodeJS.ProcessEnv });

@@ -123,12 +123,14 @@ test("polya loop end to end: real clone, real gate, a faked model that writes fi
     const cwd = opts?.cwd ?? clone;
     switch (kind) {
       case "understand":
-        writeFileSync(join(cwd, "PROBLEM.md"), PROBLEM);
+        mkdirSync(join(cwd, ".polya"), { recursive: true });
+        writeFileSync(join(cwd, ".polya", "PROBLEM.md"), PROBLEM);
         return { status: "finished", result: json({ written: ["PROBLEM.md"] }) };
       case "devise":
         mkdirSync(join(cwd, "test"), { recursive: true });
         mkdirSync(join(cwd, "src"), { recursive: true });
-        writeFileSync(join(cwd, "PLAN.md"), PLAN);
+        mkdirSync(join(cwd, ".polya"), { recursive: true });
+        writeFileSync(join(cwd, ".polya", "PLAN.md"), PLAN);
         writeFileSync(join(cwd, "test", "greet.test.js"), RED_TEST);
         writeFileSync(join(cwd, "src", "greet.js"), STUB);
         return { status: "finished", result: json({ written: ["PLAN.md"] }) };
@@ -161,7 +163,7 @@ test("polya loop end to end: real clone, real gate, a faked model that writes fi
   assert.match(history, /carry out: U1 attempt 2/);
   assert.match(history, /devise: PLAN\.md/);
   assert.match(history, /understand: PROBLEM\.md/);
-  const lookback = readFileSync(join(clone, "LOOKBACK.md"), "utf8");
+  const lookback = readFileSync(join(clone, ".polya", "LOOKBACK.md"), "utf8");
   assert.match(lookback, /\| D1 \| yes \|/);
   assert.match(lookback, /U1: 2 attempt\(s\)/);
   assert.match(lookback, /run the Check before reporting/);

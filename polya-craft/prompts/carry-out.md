@@ -42,7 +42,7 @@ ready, and it goes back to the planner.
 
 - Do not edit any test, check, or checklist. If one looks wrong, say so in
   `notes` and stop.
-- Do not edit `PROBLEM.md`, `PLAN.md`, `LOOKBACK.md`, lint or type config,
+- Do not edit anything under `.polya/` (the plan and its record), lint or type config,
   or task-runner scripts.
 - Do not write outside `Touches`. If the unit cannot be done inside them,
   name the missing file in `notes` and stop.

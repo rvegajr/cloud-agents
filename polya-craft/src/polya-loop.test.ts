@@ -23,14 +23,14 @@ let currentIO: PolyaIO | undefined;
 
 function makeIO(overrides: Partial<PolyaIO> & { files?: Record<string, string>; gates?: GateResult[]; commands?: Record<string, number>; preload?: boolean } = {}) {
   const given = { ...(overrides.files ?? {}) };
-  seed = { problem: given["PROBLEM.md"] ?? PROBLEM_MD, plan: given["PLAN.md"] ?? PLAN_MD };
+  seed = { problem: given[".polya/PROBLEM.md"] ?? PROBLEM_MD, plan: given[".polya/PLAN.md"] ?? PLAN_MD };
   // The artifacts are written by the Solver's turns, not pre-loaded, unless a test resumes past them.
   if (overrides.preload) {
-    given["PROBLEM.md"] = seed.problem;
-    given["PLAN.md"] = seed.plan;
+    given[".polya/PROBLEM.md"] = seed.problem;
+    given[".polya/PLAN.md"] = seed.plan;
   } else {
-    delete given["PROBLEM.md"];
-    delete given["PLAN.md"];
+    delete given[".polya/PROBLEM.md"];
+    delete given[".polya/PLAN.md"];
   }
   const files: Record<string, string> = {
     "README.md": "# app\nnpm ci && npm start",
@@ -69,6 +69,12 @@ function makeIO(overrides: Partial<PolyaIO> & { files?: Record<string, string>; 
       return `/tmp/clone-${calls.clones}`;
     },
     diffStat: () => " 2 files changed",
+    removeFile: (rel) => {
+      if (!(rel in files)) return false;
+      delete files[rel];
+      calls.writes.push(`rm ${rel}`);
+      return true;
+    },
     ...overrides,
   };
   currentIO = io;
@@ -112,12 +118,12 @@ function makeSend(script: Script) {
 const json = (o: unknown) => `done\n\`\`\`json\n${JSON.stringify(o)}\n\`\`\``;
 const defaultScript: Script = {
   understand: () => {
-    currentIO?.writeFile("PROBLEM.md", seed.problem);
-    return json({ written: ["PROBLEM.md"], done_ids: ["D1", "D2"] });
+    currentIO?.writeFile(".polya/PROBLEM.md", seed.problem);
+    return json({ written: [".polya/PROBLEM.md"], done_ids: ["D1", "D2"] });
   },
   devise: () => {
-    currentIO?.writeFile("PLAN.md", seed.plan);
-    return json({ written: ["PLAN.md"], units: ["U1", "U2"] });
+    currentIO?.writeFile(".polya/PLAN.md", seed.plan);
+    return json({ written: [".polya/PLAN.md"], units: ["U1", "U2"] });
   },
   "carry-out": (p) => json({ unit_id: p.match(/unit (U[\w-]+)/)?.[1] ?? "?", done: true, blocked: false, check_passed: true }),
   walk: () => json({ started: true, results: [{ step: 2, d: "D2", passed: true, evidence: "started on :3000" }] }),
@@ -145,7 +151,7 @@ test("happy path: understand → devise → two gated units → finish check →
   assert.deepEqual(calls.gate[0]!.taskCommands, ["node --test test/notfound.test.js"]);
   assert.deepEqual(calls.gate[1]!.taskCommands, ["node --test test/notfound.test.js", 'grep -q "npm start" README.md']);
   assert.equal(calls.gate[2]!.kind, "finish");
-  assert.deepEqual(calls.gate[2]!.allowed, ["src/app.js", "README.md", "PROBLEM.md", "PLAN.md", "LOOKBACK.md"]);
+  assert.deepEqual(calls.gate[2]!.allowed, ["src/app.js", "README.md", ".polya/PROBLEM.md", ".polya/PLAN.md", ".polya/LOOKBACK.md"]);
   assert.equal(calls.gate[2]!.base, out.baselineSha);
   // (b): D1 ran mechanically in the clone; D2 went to the Verifier in the same clone, fresh.
   assert.equal(calls.clones, 1);
@@ -156,10 +162,10 @@ test("happy path: understand → devise → two gated units → finish check →
   // (c) fresh session; (d) written by the loop, lessons appended, consulted lesson confirmed.
   assert.equal(sent[5]!.opts?.fresh, true);
   assert.match(sent[5]!.prompt, /L-2026-09-18-01: not applicable/);
-  assert.ok(calls.writes.includes("LOOKBACK.md"));
-  assert.match(files["LOOKBACK.md"]!, /# Look back: unknown routes answer 404/);
-  assert.match(files["LOOKBACK.md"]!, /\| D1 \| yes \|/);
-  assert.match(files["LOOKBACK.md"]!, /## L-new-1\nTags:     kind:repair stage:devise/);
+  assert.ok(calls.writes.includes(".polya/LOOKBACK.md"));
+  assert.match(files[".polya/LOOKBACK.md"]!, /# Look back: unknown routes answer 404/);
+  assert.match(files[".polya/LOOKBACK.md"]!, /\| D1 \| yes \|/);
+  assert.match(files[".polya/LOOKBACK.md"]!, /## L-new-1\nTags:     kind:repair stage:devise/);
   assert.equal(lessons.added.length, 1);
   assert.deepEqual(lessons.confirmed, ["L-2026-09-18-01"]);
   assert.deepEqual(out.lookback, { written: true, lessons: 1, confirmed: 1 });
@@ -167,7 +173,7 @@ test("happy path: understand → devise → two gated units → finish check →
 });
 
 test("understanding-incomplete: a PROBLEM.md with no done-checks gets one targeted retry, then stops", async () => {
-  const { io } = makeIO({ files: { "PROBLEM.md": "# Problem: x\nKind: repair\n\n## Restated\nr\n" } });
+  const { io } = makeIO({ files: { ".polya/PROBLEM.md": "# Problem: x\nKind: repair\n\n## Restated\nr\n" } });
   const { send, sent } = makeSend({});
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "understanding-incomplete");
@@ -177,7 +183,7 @@ test("understanding-incomplete: a PROBLEM.md with no done-checks gets one target
 });
 
 test("plan-not-workable: a unit naming a test file under Touches is sent back once, then stops", async () => {
-  const { io } = makeIO({ files: { "PLAN.md": PLAN_MD.replace("Touches:  src/app.js", "Touches:  src/app.js, test/notfound.test.js") } });
+  const { io } = makeIO({ files: { ".polya/PLAN.md": PLAN_MD.replace("Touches:  src/app.js", "Touches:  src/app.js, test/notfound.test.js") } });
   const { send, sent } = makeSend({});
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "plan-not-workable");
@@ -276,7 +282,7 @@ test("verifier silent twice → the fallback tier; silent again → unparseable-
 test("the Verifier is skipped when every done-check is a command", async () => {
   const problem = PROBLEM_MD.replace(/- D2:.*\n/, "");
   const plan = PLAN_MD.replace("Serves:   D2", "Serves:   D1");
-  const { io } = makeIO({ files: { "PROBLEM.md": problem, "PLAN.md": plan } });
+  const { io } = makeIO({ files: { ".polya/PROBLEM.md": problem, ".polya/PLAN.md": plan } });
   const { send, sent } = makeSend({});
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "complete");
@@ -297,9 +303,9 @@ test("finish check fails → one fix turn → re-check; still failing → finish
   const ok = await runPolyaLoop(makeSend({}).send, { ...base, io: io2, lessons: null });
   assert.equal(ok.stopReason, "complete");
   assert.equal(calls2.gate.filter((g) => g.kind === "finish").length, 2);
-  assert.ok(files["LOOKBACK.md"]);
-  assert.match(files["LOOKBACK.md"]!, /Outcome: finish-check-failed/);
-  assert.match(files["LOOKBACK.md"]!, /No lesson/);
+  assert.ok(files[".polya/LOOKBACK.md"]);
+  assert.match(files[".polya/LOOKBACK.md"]!, /Outcome: finish-check-failed/);
+  assert.match(files[".polya/LOOKBACK.md"]!, /No lesson/);
 });
 
 test("review: a high finding gets one fix turn and its own check decides; a failing check is review-unresolved", async () => {
@@ -310,7 +316,7 @@ test("review: a high finding gets one fix turn and its own check decides; a fail
   assert.match(out.stopDetail!, /fail:grep -> 1, expected 0/);
   const fix = sent.find((s) => /unit U-FIX/.test(s.prompt))!;
   assert.match(fix.prompt, /the 404 body leaks the path/);
-  assert.match(files["LOOKBACK.md"]!, /\[high\] src\/app\.js — the 404 body leaks the path/);
+  assert.match(files[".polya/LOOKBACK.md"]!, /\[high\] src\/app\.js — the 404 body leaks the path/);
   // A passing check completes.
   const { io: io2 } = makeIO();
   const { send: s2 } = makeSend({ "look-back": () => json({ verdict: "fix", findings: [{ severity: "high", where: "src/app.js", what: "x", check: { command: "grep ok", expect_exit: 0 } }] }) });
@@ -335,13 +341,13 @@ test("materialise: a Solver that only reports bare JSON gets a reminder, then PR
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "complete");
   assert.deepEqual(sent.slice(0, 2).map((s) => s.kind), ["understand", "understand"]);
-  assert.match(sent[1]!.prompt, /^## You did not write PROBLEM\.md/);
-  assert.ok(calls.writes.includes("PROBLEM.md"));
+  assert.match(sent[1]!.prompt, /^## You did not write \.polya\/PROBLEM\.md/);
+  assert.ok(calls.writes.includes(".polya/PROBLEM.md"));
   assert.equal(out.problem!.done[0]!.command, "node --test test/notfound.test.js");
 });
 
 test("resume at carry-out re-attempts the unit that stopped and never re-runs understand or devise; PLAN.md on disk wins", async () => {
-  const { io } = makeIO({ preload: true, files: { "PLAN.md": PLAN_MD.replace("## U2: document the start command", "## U2: document the start command (edited by hand)") } });
+  const { io } = makeIO({ preload: true, files: { ".polya/PLAN.md": PLAN_MD.replace("## U2: document the start command", "## U2: document the start command (edited by hand)") } });
   const { send, sent } = makeSend({});
   const stale: PolyaState = { ...initialPolyaState(), phase: "carry-out", units: [], unitIndex: 1, unitRecords: [{ id: "U1", attempts: 1, passed: true }], baselineSha: "sha0" };
   const out = await runPolyaLoop(send, { ...base, io, lessons: null }, stale);
@@ -352,7 +358,7 @@ test("resume at carry-out re-attempts the unit that stopped and never re-runs un
 });
 
 test("a unit marked Owner: strong is sent with tier claude", async () => {
-  const { io } = makeIO({ files: { "PLAN.md": PLAN_MD.replace("Level:    L1:routes\nProduces: `src/app.js`", "Level:    L1:routes\nOwner:    strong\nProduces: `src/app.js`") } });
+  const { io } = makeIO({ files: { ".polya/PLAN.md": PLAN_MD.replace("Level:    L1:routes\nProduces: `src/app.js`", "Level:    L1:routes\nOwner:    strong\nProduces: `src/app.js`") } });
   const { send, sent } = makeSend({});
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "complete");
@@ -377,7 +383,7 @@ test("polyaResumePhase: every stop reason maps to the stage that stopped", () =>
 
 test("browser: a unit that names a page is sent with browser:true when the run has one, told it is absent when not, and never asked for by a library unit", async () => {
   const plan = PLAN_MD.replace("Do:       1. Add a Run section naming `npm start`.", "Do:       1. Open the page and click the button named Save. 2. Add a Run section naming `npm start`.");
-  const { io } = makeIO({ files: { "PLAN.md": plan } });
+  const { io } = makeIO({ files: { ".polya/PLAN.md": plan } });
   const { send, sent } = makeSend({});
   const out = await runPolyaLoop(send, { ...base, io, lessons: null, browser: true });
   assert.equal(out.stopReason, "complete");
@@ -389,7 +395,7 @@ test("browser: a unit that names a page is sent with browser:true when the run h
   // The Verifier's D2 does not name a page here, so no browser for it.
   assert.equal(sent.find((s) => s.kind === "walk")!.opts?.browser, undefined);
   // Without a browser in the run, the unit is told so and is not sent the flag.
-  const { io: io2 } = makeIO({ files: { "PLAN.md": plan } });
+  const { io: io2 } = makeIO({ files: { ".polya/PLAN.md": plan } });
   const { send: s2, sent: sent2 } = makeSend({});
   await runPolyaLoop(s2, { ...base, io: io2, lessons: null });
   const u2b = sent2.filter((s) => s.kind === "carry-out")[1]!;
@@ -399,7 +405,7 @@ test("browser: a unit that names a page is sent with browser:true when the run h
 
 test("browser: a prose done-check that names a page sends the Verifier with browser:true", async () => {
   const problem = PROBLEM_MD.replace("Check: a stranger follows the README and the app starts", "Check: a stranger opens the page in a browser and clicks Start");
-  const { io } = makeIO({ files: { "PROBLEM.md": problem } });
+  const { io } = makeIO({ files: { ".polya/PROBLEM.md": problem } });
   const { send, sent } = makeSend({});
   const out = await runPolyaLoop(send, { ...base, io, lessons: null, browser: true });
   assert.equal(out.stopReason, "complete");
@@ -413,7 +419,7 @@ test("browser: a prose done-check that names a page sends the Verifier with brow
 test("look back (b): a done-check that curls localhost starts the bar's start command in the clone and stops it after", async () => {
   const problem = PROBLEM_MD.replace("- D1: GET /nope answers 404 — Check: `node --test test/notfound.test.js` — Now: unmet", "- D1: GET /nope answers 404 — Check: `test \"$(curl -s -o /dev/null -w '%{http_code}' localhost:4571/nope)\" = 404` — Now: unmet");
   const started: { command: string; cwd: string; stopped: boolean }[] = [];
-  const { io, calls } = makeIO({ files: { "PROBLEM.md": problem } });
+  const { io, calls } = makeIO({ files: { ".polya/PROBLEM.md": problem } });
   io.start = async (command, cwd) => {
     const rec = { command, cwd, stopped: false };
     started.push(rec);
@@ -441,7 +447,7 @@ test("look back (d): a \"No lesson\" entry stays in LOOKBACK.md and is not appen
   assert.equal(out.stopReason, "complete");
   assert.equal(lessons.added.length, 0);
   assert.equal(out.lookback?.lessons, 0);
-  assert.match(files["LOOKBACK.md"]!, /No lesson: the plan held/);
+  assert.match(files[".polya/LOOKBACK.md"]!, /No lesson: the plan held/);
 });
 
 
@@ -452,7 +458,7 @@ test("a PROBLEM.md or PLAN.md already on disk and workable skips the Solver turn
   assert.equal(out.stopReason, "complete");
   assert.deepEqual(sent.map((s) => s.kind), ["carry-out", "carry-out", "walk", "look-back"]);
   // A plan on disk with a gap still gets the (one) Solver turn.
-  const { io: io2 } = makeIO({ preload: true, files: { "PLAN.md": PLAN_MD.replace("Given:    `src/app.js`; the red test `test/notfound.test.js`", "Given:") } });
+  const { io: io2 } = makeIO({ preload: true, files: { ".polya/PLAN.md": PLAN_MD.replace("Given:    `src/app.js`; the red test `test/notfound.test.js`", "Given:") } });
   const { send: s2, sent: sent2 } = makeSend({});
   await runPolyaLoop(s2, { ...base, io: io2, lessons: null });
   assert.equal(sent2[0]!.kind, "devise");
@@ -482,15 +488,15 @@ test("ownership failure: the orchestrator reverts what the Hand wrote outside To
 });
 
 test("look back: a stale LOOKBACK.md from an earlier pass is cleared first; a high finding about the record spawns no fix turn", async () => {
-  const { io, calls, files } = makeIO({ preload: true, files: { "LOOKBACK.md": "# Look back: old\n\nOutcome: verify-failed\n" } });
-  const { send, sent } = makeSend({ "look-back": () => json({ verdict: "done", answers_problem: true, findings: [{ severity: "high", where: "LOOKBACK.md", what: "the record says verify-failed", check: { command: "grep -q done LOOKBACK.md", expect_exit: 0 } }], lessons: [] }) });
+  const { io, calls, files } = makeIO({ preload: true, files: { ".polya/LOOKBACK.md": "# Look back: old\n\nOutcome: verify-failed\n" } });
+  const { send, sent } = makeSend({ "look-back": () => json({ verdict: "done", answers_problem: true, findings: [{ severity: "high", where: ".polya/LOOKBACK.md", what: "the record says verify-failed", check: { command: "grep -q done LOOKBACK.md", expect_exit: 0 } }], lessons: [] }) });
   const out = await runPolyaLoop(send, { ...base, io, lessons: null }, { phase: "look-back", units: parsePlan(PLAN_MD).units, unitRecords: [{ id: "U1", attempts: 1, passed: true }, { id: "U2", attempts: 1, passed: true }], baselineSha: "sha0" });
   assert.equal(out.stopReason, "complete");
   assert.ok(calls.commits.includes("look back: clear the previous pass's LOOKBACK.md"));
   assert.ok(!sent.some((s) => /U-FIX/.test(s.prompt)), "no fix turn for a finding about the record");
   assert.equal(out.reviewChecks, undefined);
-  assert.match(files["LOOKBACK.md"]!, /\[high\] LOOKBACK\.md — the record says verify-failed/);
-  assert.match(files["LOOKBACK.md"]!, /Outcome: complete/);
+  assert.match(files[".polya/LOOKBACK.md"]!, /\[high\] \.polya\/LOOKBACK\.md — the record says verify-failed/);
+  assert.match(files[".polya/LOOKBACK.md"]!, /Outcome: complete/);
 });
 
 test("a Hand turn that rewrote history is discarded and retried; the gate never sees it", async () => {
@@ -507,5 +513,31 @@ test("a Hand turn that rewrote history is discarded and retried; the gate never 
   assert.match(sent[3]!.prompt, /rewrote git history/);
   // Only one task gate ran for U1: the discarded turn was never judged.
   assert.equal(calls.gate.filter((g) => g.kind === "task" && g.allowed?.includes("src/app.js")).length, 1);
+});
+
+test("understand removes the kit's unmodified seeded AGENTS.md and QWEN.md; a person's AGENTS.md stays", async () => {
+  const seededAgents = "# AGENTS.md\n\n<!--\nCopy this file to the root of any repository you want cloud agents to work on,\n-->\n";
+  const seededQwen = "@AGENTS.md\n\n## Orchestrator quality gate\n\nrules\n";
+  const { io, files, calls } = makeIO({ files: { "AGENTS.md": seededAgents, "QWEN.md": seededQwen } });
+  const out = await runPolyaLoop(makeSend({}).send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  assert.equal(files["AGENTS.md"], undefined);
+  assert.equal(files["QWEN.md"], undefined);
+  assert.ok(calls.commits.some((c) => /remove the kit's seeded AGENTS\.md and QWEN\.md/.test(c)));
+  const mine = "# AGENTS.md\n\nThis repo: run npm test.\n";
+  const { io: io2, files: f2 } = makeIO({ files: { "AGENTS.md": mine } });
+  await runPolyaLoop(makeSend({}).send, { ...base, io: io2, lessons: null });
+  assert.equal(f2["AGENTS.md"], mine);
+});
+
+test("the artifacts live under .polya/, and a unit whose Touches names .polya/ is not workable", async () => {
+  const { io, files } = makeIO();
+  await runPolyaLoop(makeSend({}).send, { ...base, io, lessons: null });
+  assert.ok(files[".polya/PROBLEM.md"] && files[".polya/PLAN.md"] && files[".polya/LOOKBACK.md"]);
+  assert.equal(files["PROBLEM.md"], undefined);
+  const { io: io2 } = makeIO({ files: { ".polya/PLAN.md": PLAN_MD.replace("Touches:  src/app.js", "Touches:  src/app.js, .polya/notes.md") } });
+  const out = await runPolyaLoop(makeSend({}).send, { ...base, io: io2, lessons: null });
+  assert.equal(out.stopReason, "plan-not-workable");
+  assert.match(out.stopDetail!, /plan artifact/);
 });
 

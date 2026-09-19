@@ -29,7 +29,13 @@ export type PolyaIO = BlueprintIO & {
   isAncestor?(sha: string): boolean;
   /** Discard everything after `sha`: the answer to a turn that rewrote history. */
   resetTo?(sha: string): void;
+  /** Delete a file from the working tree (the next commit records it). */
+  removeFile?(rel: string): boolean;
 };
+
+/** The kit seeds a template AGENTS.md and a QWEN.md of ACG gate rules; on a polya run both are false for the repo and the prompts carry the rules. */
+const SEEDED_AGENTS = /Copy this file to the root of any repository you want cloud agents to work on/;
+const SEEDED_QWEN = /^## Orchestrator quality gate/m;
 
 /** A done-check that curls a server needs the server running. */
 const NEEDS_SERVER = /\b(localhost|127\.0\.0\.1|0\.0\.0\.0)\b|:\d{4,5}\//;
@@ -368,6 +374,18 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
   // ---- 1. Understand --------------------------------------------------------
   if (state.phase === "understand") {
     log("understand");
+    // A template AGENTS.md tells every Hand the wrong layout and commands, and ships as instructions for another
+    // project (ledger L-2026-09-19-06). Only the unmodified seed is removed; a person's AGENTS.md stays.
+    if (io.removeFile) {
+      const removed = [
+        SEEDED_AGENTS.test(artifact("AGENTS.md") ?? "") && io.removeFile("AGENTS.md") ? "AGENTS.md" : "",
+        SEEDED_QWEN.test(artifact("QWEN.md") ?? "") && io.removeFile("QWEN.md") ? "QWEN.md" : "",
+      ].filter(Boolean);
+      if (removed.length) {
+        io.commit(`polya: remove the kit's seeded ${removed.join(" and ")}; the prompts carry the rules`);
+        log(`removed the kit's seeded ${removed.join(", ")}`);
+      }
+    }
     const offered = lessons ? lessons.select(tagsForProblem(opts.problem, opts.repo)) : [];
     const prompt = buildPrompt(`${PROMPTS}/understand`, "", {
       problem: opts.problem,

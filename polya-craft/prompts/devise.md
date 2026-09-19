@@ -7,7 +7,7 @@ and no permission to decide could each carry out alone. The Hand that will
 carry them out is a cheap model in a fresh session per unit, or a person
 working from the packet. It will see one unit at a time and nothing else.
 
-## PROBLEM.md
+## PROBLEM.md (at `.polya/PROBLEM.md`)
 
 {{problem_md}}
 
@@ -46,7 +46,7 @@ outer-test step.
    signatures the unit must implement, in a fenced code block, exactly;
    `Check` is a test command that fails now. Write the red tests and any
    stubs in this turn. Never put a test file or a plan artifact under
-   `Touches`.
+   `Touches`, and never anything under `.polya/`.
 5. **The stranger test, on every unit, yourself, before you hand over.**
    Start: can they begin without a question? Same: would two strangers both
    pass Check? Decide: is Check outside Touches and unmet today? Sitting:
@@ -55,7 +55,7 @@ outer-test step.
    etc., or similar, something like* in `Do` each fail the test.
 6. **Order** and **Trace**. Parallel units have disjoint Touches. Every D in
    the limit above appears in Trace.
-7. Write `PLAN.md` from `templates/PLAN.md`, end it with the fenced
+7. Write `.polya/PLAN.md` from `templates/PLAN.md`, end it with the fenced
    `json plan` block. For software, run the test command from the quality
    bar and confirm it is red. One commit: `devise: PLAN.md`.
 
@@ -73,7 +73,7 @@ outer-test step.
 A short summary, then a single fenced `json` block, nothing after it:
 
 ```json
-{ "written": ["PLAN.md", "test/…"], "units": ["U1", "U2"],
+{ "written": [".polya/PLAN.md", "test/…"], "units": ["U1", "U2"],
   "red_command": "npm test", "red_exit": 1,
   "stranger_test": [ { "unit": "U1", "start": true, "same": true, "decide": true, "sitting": true } ],
   "notes": "a D you could not carry, a PROBLEM.md defect, or empty" }
