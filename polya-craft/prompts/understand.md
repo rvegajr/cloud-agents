@@ -40,7 +40,10 @@ You must list every entry below in `Lessons consulted` with a disposition:
    or `Now: met (invariant)`. `D1` is the answer *in use* by a stranger: a
    route answering under `curl`, a reader scoring a document, a family in a
    house. Not a property of the deliverable. For a repair, `D1` is the
-   reproduction: unmet today.
+   reproduction: unmet today. A Check the orchestrator can run itself is a
+   shell command that exits 0 when the D is met, in backticks (for a repair:
+   `test "$(curl -s -o /dev/null -w '%{http_code}' :4571/nope)" = 404`).
+   A Check only a stranger can observe is written as what they observe.
 7. Write **Not this**.
 8. If the problem needs more than eight units, write the **Split** table:
    sub-problems bounded by checks that already exist (a release, a

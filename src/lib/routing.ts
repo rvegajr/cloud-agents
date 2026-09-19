@@ -28,6 +28,11 @@ export type TurnKind =
   | "task"
   | "qa"
   | "review"
+  // polya-craft (polya-craft/PATTERN.md, polya-craft/prompts/): the Verifier reuses `verify`.
+  | "understand"
+  | "devise"
+  | "carry-out"
+  | "look-back"
   | "other";
 
 export interface RoutingPolicy {
@@ -88,6 +93,12 @@ export function classifyPrompt(prompt: string): TurnKind {
   if (/^# Job: fix turn/m.test(head)) return "task";
   if (/^# QA: acceptance run/m.test(head)) return "qa";
   if (/^# Review: independent release review/m.test(head)) return "review";
+  // polya-craft (polya-craft/prompts/)
+  if (/^# Understand the problem/m.test(head)) return "understand";
+  if (/^# Devise a plan/m.test(head)) return "devise";
+  if (/^# Carry out: unit /m.test(head)) return "carry-out";
+  if (/^# Look back: verify/m.test(head)) return "verify";
+  if (/^# Look back: review/m.test(head)) return "look-back";
   return "other";
 }
 
@@ -125,10 +136,13 @@ export function preferredTier(kind: TurnKind, policy: RoutingPolicy): Tier {
     case "triage":
     case "requirements":
     case "blueprint":
+    case "understand":
+    case "devise":
       return policy.plan;
     case "implement":
     case "iterate":
     case "task":
+    case "carry-out":
       return policy.implement;
     case "verify":
     case "finish":
@@ -136,6 +150,7 @@ export function preferredTier(kind: TurnKind, policy: RoutingPolicy): Tier {
     case "qa":
       return policy.qa;
     case "review":
+    case "look-back":
       return policy.review;
     case "unblock":
       // A stall is a judgement call; the cheap tier already failed to make progress.
