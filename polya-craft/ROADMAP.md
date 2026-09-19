@@ -33,9 +33,10 @@ In build order. Each line says what the module is and what it borrows.
 
 1. The ACG row of the measurement table: the same repair under `--loop blueprint`, same day, same models, scored blind together. Then `examples/site-inspection.md` live, which is the browser's first real test.
 2. Re-plan of one unit only. Today `unit-not-workable` re-runs Devise with the question prepended and keeps the units that passed; the Solver rewrites the plan, not one unit. A targeted single-unit re-plan is cheaper and should replace it once a live run shows how often a Hand asks.
-3. Level checks at run time. `PLAN.md`'s Shape is parsed but the loop does not yet run a group's check when its units complete; the finish check and the done-checks cover the whole. Add when a plan with more than one L1 group has been run live.
-4. Parallel Hands: units with disjoint `Touches` and no `Depends` between them, one worktree each. After the first measurement, not before.
-5. Slack stays on the milestone loop. `--loop polya` is CLI only.
+3. A stranger test for done-checks. The `//` crash shows Understand writes checks for what the requester named. A mechanical probe list per problem kind (for a route: `//`, `%2f`, a 2 KB path, a wrong method) that the Solver must either adopt as done-checks or dismiss with a reason. Design first; the ledger carries it until then.
+4. Level checks at run time. `PLAN.md`'s Shape is parsed but the loop does not yet run a group's check when its units complete; the finish check and the done-checks cover the whole. Add when a plan with more than one L1 group has been run live.
+5. Parallel Hands: units with disjoint `Touches` and no `Depends` between them, one worktree each. After the first measurement, not before.
+6. Slack stays on the milestone loop. `--loop polya` is CLI only.
 
 ## Known limitations
 
@@ -72,7 +73,7 @@ polya-craft also carries assumptions no run has tested.
 
 ## Measurement status
 
-One row. The ACG row is next.
+Both rows, one problem, same day, same models, scored blind together.
 
 The intended measurement is one problem run twice on the same day with the
 same models: once under ACG's blueprint loop (`--loop blueprint`) and once
@@ -83,10 +84,16 @@ reported per meter, one line each, as the close of both runs.
 
 | problem | engine | Solver turns | Hand turns | retries | questions from the Hand | blind score /35 | cost per meter |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| polya-live-404 repair (unknown routes answer 200) | blueprint (ACG) | | | | | | |
-| polya-live-404 repair (unknown routes answer 200) | polya, hybrid, 2026-09-18 | 4 (understand; devise + 1 plan-lint retry; review) | 1 gate-green (+3 wasted on the orchestrator's phantom command, +1 on resume) | 0 real | 0 | not yet scored | Claude Max API-eq $1.01; Ollama $0 |
+| polya-live-404 repair (unknown routes answer 200) | blueprint (ACG), hybrid, 2026-09-18 | 3 (requirements; blueprint; review) | 1 task gate-green first attempt + 2 QA batches | 0 | n/a | 27 (repeats: ~22, ~32) | Claude Max API-eq $1.07; Ollama $0 |
+| polya-live-404 repair (unknown routes answer 200) | polya, hybrid, 2026-09-18 | 4 (understand; devise + 1 plan-lint retry; review) | 1 gate-green (+3 wasted on the orchestrator's phantom command, +1 on resume) | 0 real | 0 | 32.5 (repeats: 32, 33) | Claude Max API-eq $1.01; Ollama $0 |
 
-Result: complete. U1 gate PASS first attempt once the orchestrator was fixed; finish check PASS; 5/5 done-checks met against a server started in a fresh clone; review: done, 0 findings; diff `src/app.js` +2/-2 plus a red test the Solver wrote. PR: `rvegajr/polya-live-404#1`. Two resumes were needed, both for orchestrator defects listed under Known limitations, neither for a model.
+Both runs completed. Both produced the identical two-line change to `src/app.js` (200 "ok" → 404 "not found" in the catch-all) plus red tests written by the Solver or architect. polya's PR adds 428 lines across three artifacts and one test file; ACG's adds 570 across five artifacts, two test files, a README line and a `.gitignore`. PRs: `rvegajr/polya-live-404#1` (polya) and `#2` (blueprint). Blind score: `npm run quality-review`, sonnet, repeat 2, prompt `baefefce9cfc`, record `.runs/quality-2026-09-19T05-02-53-368Z.json`, $1.17.
+
+**Read the score honestly.** The source diff is identical, so the 5.5-point gap is not a difference between the loops. One of ACG's two reviewer repeats sent `GET //`, which makes `new URL(req.url, …)` on line 16 throw and kills the process; it scored correctness 2, security 2, validation 1 and said do-not-merge. That line is in the original fixture and in both candidates; the other three repeats never probed it and scored both 5/5/5. So the number measures which repeat thought of `//`, and with repeat 2 that noise is larger than any real difference here. The useful result is the crash: a real, pre-existing, one-request denial of service that neither loop's own look back found. polya's reviewer curled four well-formed paths; ACG's QA walked six scenarios; both passed. The blind scorer with fresh eyes and a different question found it in one of four tries.
+
+What that says about the pattern: Understand wrote done-checks for the paths the requester named and the invariants, and nothing about malformed input, because nobody asked. The stranger test is about the plan; there is no equivalent test for the done-checks themselves. A ledger entry now carries the lesson (`L-2026-09-19-01`), which is exactly the mechanism the pattern has for it; the next routing repair's Understand reads it before writing D1. Whether that is enough is the next measurement.
+
+To make the score mean something on the next problem: repeat 3 or more, and a problem where the loops could plausibly produce different code.
 
 
 The first problem should be a repair, as ACG's first run was: it exercises

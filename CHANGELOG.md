@@ -55,7 +55,11 @@ npm run deploy                        # stamp the commit, then ship
   aliases accepted, never throws); a backticked path in a Check was joined into
   a shell command (now a path is a name). Done-checks that curl the app start
   the bar's `start` in the clone. "No lesson" stays out of the ledger. 258
-  tests.
+  tests. The same repair then ran under `--loop blueprint` and both PRs were
+  scored blind: identical source diff; polya 32.5, blueprint 27, and the gap
+  is one reviewer repeat that sent `GET //` and crashed a line in the original
+  fixture that neither loop's look back had probed. That crash is now a ledger
+  entry; `ROADMAP.md` has the table and the reading.
 - **`architect-crew-gate/`: the pattern in its own folder.** `THEORY.md` is the
   claim, five principles, and operating instructions an AI or a person can act
   on directly; `PATTERN.md` is
