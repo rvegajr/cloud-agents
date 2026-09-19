@@ -26,6 +26,18 @@ export function makePolyaIO(
   let warned = false;
   return {
     ...base,
+    isAncestor: (sha) => {
+      try {
+        execFileSync("git", ["merge-base", "--is-ancestor", sha, "HEAD"], { cwd, stdio: "ignore", env: subprocessEnv() as NodeJS.ProcessEnv });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    resetTo: (sha) => {
+      execFileSync("git", ["reset", "-q", "--hard", sha], { cwd, stdio: "ignore", env: subprocessEnv() as NodeJS.ProcessEnv });
+      opts.log?.(`reset to ${sha.slice(0, 8)}`);
+    },
     revertOutside: (baseSha, allowed) => {
       const changed = git(["diff", "--name-status", `${baseSha}..HEAD`])
         .split("\n")

@@ -25,6 +25,10 @@ export type PolyaIO = BlueprintIO & {
   start?(command: string, cwd: string): Promise<{ stop(): void }>;
   /** Put every file changed since `baseSha` that is not in `allowed` back as it was, and commit. Returns what was reverted. */
   revertOutside?(baseSha: string, allowed: string[]): string[];
+  /** Is `sha` an ancestor of HEAD? False after a Hand rebased, reset, or amended history. */
+  isAncestor?(sha: string): boolean;
+  /** Discard everything after `sha`: the answer to a turn that rewrote history. */
+  resetTo?(sha: string): void;
 };
 
 /** A done-check that curls a server needs the server running. */
@@ -328,6 +332,16 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       if (report?.blocked && report.question) {
         record.question = report.question;
         return { record, blocked: report.question };
+      }
+      // The gate diffs base..HEAD; a rebase, reset, or amend makes that diff lie. A turn that rewrote history is
+      // discarded whole and the Hand is told; nothing it did survives to be judged.
+      if (io.isAncestor && !io.isAncestor(baseSha)) {
+        log(`gate ${unit.id}: history rewritten (base ${baseSha.slice(0, 8)} is no longer an ancestor of HEAD); turn discarded, attempt ${attempt + 1}`);
+        io.resetTo?.(baseSha);
+        record.failing = ["ownership"];
+        gate = { passed: false, seconds: 0, skipped: [], findings: [{ rule: "ownership", ok: false, detail: `this turn rewrote git history (rebase, reset, or amend); the orchestrator discarded it. Commit on top of HEAD; never rewrite what is already committed` }] };
+        prompt = `${gateFeedbackNote(attempt + 1, gate)}${base}`;
+        continue;
       }
       gate = await io.gate("task", { allowedFiles: unit.touches, baseSha, taskCommands });
       record.failing = failingRules(gate);

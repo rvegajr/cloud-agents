@@ -493,3 +493,19 @@ test("look back: a stale LOOKBACK.md from an earlier pass is cleared first; a hi
   assert.match(files["LOOKBACK.md"]!, /Outcome: complete/);
 });
 
+test("a Hand turn that rewrote history is discarded and retried; the gate never sees it", async () => {
+  const { io, calls } = makeIO();
+  let turns = 0;
+  const resets: string[] = [];
+  io.isAncestor = () => turns !== 1; // the first U1 turn rebased
+  io.resetTo = (sha) => resets.push(sha);
+  const { send, sent } = makeSend({ "carry-out": (p) => { if (/unit U1/.test(p)) turns++; return json({ unit_id: p.match(/unit (U\d+)/)?.[1], done: true }); } });
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  assert.equal(out.unitRecords.find((r) => r.id === "U1")!.attempts, 2);
+  assert.deepEqual(resets, ["sha2"]);
+  assert.match(sent[3]!.prompt, /rewrote git history/);
+  // Only one task gate ran for U1: the discarded turn was never judged.
+  assert.equal(calls.gate.filter((g) => g.kind === "task" && g.allowed?.includes("src/app.js")).length, 1);
+});
+
