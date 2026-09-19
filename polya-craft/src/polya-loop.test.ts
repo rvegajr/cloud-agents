@@ -425,3 +425,23 @@ test("look back (d): a \"No lesson\" entry stays in LOOKBACK.md and is not appen
   assert.match(files["LOOKBACK.md"]!, /No lesson: the plan held/);
 });
 
+
+test("a PROBLEM.md or PLAN.md already on disk and workable skips the Solver turn; a re-plan note does not", async () => {
+  const { io } = makeIO();
+  const { send, sent } = makeSend({});
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  assert.deepEqual(sent.map((s) => s.kind), ["carry-out", "carry-out", "verify", "look-back"]);
+  // A plan on disk with a gap still gets the (one) Solver turn.
+  const { io: io2 } = makeIO({ files: { "PLAN.md": PLAN_MD.replace("Given:    `src/app.js`; the red test `test/notfound.test.js`", "Given:") } });
+  const { send: s2, sent: sent2 } = makeSend({});
+  await runPolyaLoop(s2, { ...base, io: io2, lessons: null });
+  assert.equal(sent2[0]!.kind, "devise");
+  assert.match(sent2[0]!.prompt, /^## Plan not workable/);
+  // A resume after a Hand's question always re-plans.
+  const { io: io3 } = makeIO();
+  const { send: s3, sent: sent3 } = makeSend({});
+  await runPolyaLoop(s3, { ...base, io: io3, lessons: null }, { phase: "devise", replanNote: "U2 asked: which?", unitRecords: [{ id: "U1", attempts: 1, passed: true }] });
+  assert.equal(sent3[0]!.kind, "devise");
+  assert.match(sent3[0]!.prompt, /^## Re-plan/);
+});

@@ -348,11 +348,16 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       repo: opts.repo,
       prior_lessons: priorLessonsNote(offered, artifact(ARTIFACTS.lookback)),
     });
-    const r = await strongTurn<Parameters<typeof renderProblem>[0]>(prompt, ARTIFACTS.problem, "understand: PROBLEM.md", renderProblem);
-    if (typeof r === "string") return stop(r, "understand turn did not finish");
+    const gapsOf = () => problemGaps(readProblem(), { maxDone: 8, software, offeredLessons: offered.map((l) => l.id) });
+    // Already on disk and complete (a resume, or a person wrote it): do not pay for the turn again.
+    if (artifact(ARTIFACTS.problem) && !gapsOf().length) {
+      log(`${ARTIFACTS.problem} is on disk and complete; skipping the Solver turn`);
+    } else {
+      const r = await strongTurn<Parameters<typeof renderProblem>[0]>(prompt, ARTIFACTS.problem, "understand: PROBLEM.md", renderProblem);
+      if (typeof r === "string") return stop(r, "understand turn did not finish");
+    }
     let problem = readProblem();
     if (!problem) return stop("unparseable-report", `${ARTIFACTS.problem} is missing or has no title`);
-    const gapsOf = () => problemGaps(readProblem(), { maxDone: 8, software, offeredLessons: offered.map((l) => l.id) });
     let gaps = gapsOf();
     if (gaps.length) {
       log(`understanding has gaps; asking the Solver once more:\n${gaps.join("\n")}`);
@@ -379,9 +384,6 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     const carried = problem.done.map((d) => d.id);
     const replan = state.replanNote ? `## Re-plan\n\nThe previous plan stopped because a Hand had to ask a question. ${state.replanNote}\n\nRewrite the unit it names so the question is answered inside the unit; leave the units that already passed unchanged.\n\n---\n\n` : "";
     const prompt = `${replan}${buildPrompt(`${PROMPTS}/devise`, "", { problem_md: problemMd, max_units: String(maxUnits), done_ids: carried.join(" ") })}`;
-    const r = await strongTurn<Parameters<typeof renderPlan>[0]>(prompt, ARTIFACTS.plan, "devise: PLAN.md", renderPlan);
-    if (typeof r === "string") return stop(r, "devise turn did not finish");
-    state.replanNote = undefined;
     const exists = (p: string) => artifact(p) !== undefined;
     const gapsOf = (): string[] => {
       const plan = readPlan();
@@ -393,6 +395,14 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       if (!plan.outer.length) lines.push("- no `## Outer test` steps");
       return lines;
     };
+    // Already on disk and workable, and no question to re-plan for: do not pay for the turn again.
+    if (artifact(ARTIFACTS.plan) && !state.replanNote && !gapsOf().length) {
+      log(`${ARTIFACTS.plan} is on disk and workable; skipping the Solver turn`);
+    } else {
+      const r = await strongTurn<Parameters<typeof renderPlan>[0]>(prompt, ARTIFACTS.plan, "devise: PLAN.md", renderPlan);
+      if (typeof r === "string") return stop(r, "devise turn did not finish");
+      state.replanNote = undefined;
+    }
     let gaps = gapsOf();
     if (gaps.length) {
       log(`plan is not workable; asking the Solver once more:\n${gaps.join("\n")}`);

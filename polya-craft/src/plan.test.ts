@@ -281,3 +281,24 @@ test("parsePlan: the live Solver's plan yields one lawful unit whose Check is `n
   const p = parseProblem(LIVE)!;
   assert.deepEqual(validateUnits(plan.units, p, { requireCommand: true }), []);
 });
+
+// The PLAN.md and PROBLEM.md a live Claude Max Solver wrote for the snippet-vault build ($2.84 of Max): h3 unit
+// headings, `Do:` with steps on the next lines carrying whole files in fences, a trace of objects.
+const LIVE_SV_PLAN = readFileSync(new URL("./fixtures-live-plan-sv.md", import.meta.url), "utf8");
+const LIVE_SV_PROBLEM = readFileSync(new URL("./fixtures-live-problem-sv.md", import.meta.url), "utf8");
+
+test("parsePlan: the live snippet-vault plan yields five lawful units", () => {
+  const p = parseProblem(LIVE_SV_PROBLEM)!;
+  assert.deepEqual(problemGaps(p, { software: true }), []);
+  const plan = parsePlan(LIVE_SV_PLAN);
+  assert.deepEqual(plan.units.map((u) => u.id), ["U1", "U2", "U3", "U4", "U5"]);
+  const u1 = plan.units[0]!;
+  assert.deepEqual(u1.serves, ["D2", "D8"]);
+  assert.ok(u1.do.includes("Create `package.json`"), "Do starts on the next line");
+  assert.ok(u1.do.includes('"name": "snippet-vault"'), "Do carries the fenced file");
+  assert.ok(u1.touches.length >= 1 && u1.touches.every((t) => !/^\d+\./.test(t)));
+  assert.ok(u1.command, `U1 check should be a command: ${u1.check.slice(0, 80)}`);
+  assert.deepEqual(plan.trace.D1, ["U3", "U4", "U5"]);
+  assert.deepEqual(plan.units[1]!.depends, ["U1"]);
+  assert.deepEqual(validateUnits(plan.units, p, { requireCommand: true }), []);
+});

@@ -260,7 +260,11 @@ export function problemGaps(p: Problem | undefined, opts: { maxDone?: number; so
 
 const UNIT_FIELDS = ["Serves", "Level", "Produces", "Given", "Do", "Touches", "Check", "Depends", "Not"] as const;
 
-/** Field values may continue on indented lines until the next `Field:` at column 0. */
+/**
+ * A field runs from its `Field:` line to the next field line at column 0. Its
+ * value may start on the next line (`Do:` then numbered steps), carry fenced
+ * code (a whole file the Hand must type), and contain blank lines.
+ */
 function parseUnitFields(body: string): Record<string, string> {
   const out: Record<string, string> = {};
   let current: string | undefined;
@@ -271,10 +275,29 @@ function parseUnitFields(body: string): Record<string, string> {
       out[current] = m[2]!.trim();
       continue;
     }
-    if (current && /^\s+\S/.test(line)) out[current] = `${out[current]} ${line.trim()}`.trim();
-    else if (current && !line.trim()) current = undefined;
+    if (current) out[current] = out[current] ? `${out[current]}\n${line}` : line;
   }
+  for (const k of Object.keys(out)) out[k] = out[k]!.trim();
   return out;
+}
+
+/** Numbered steps in a Do, not counting lines inside fenced code. */
+function countSteps(doText: string): number {
+  let inFence = false;
+  let n = 0;
+  for (const line of doText.split("\n")) {
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence && /^\s*\d+[.)]\s/.test(line)) n++;
+  }
+  return n;
+}
+
+/** One line of a multi-line field, for single-line fields like Serves and Touches. */
+function firstLine(v: string | undefined): string | undefined {
+  return v?.split("\n")[0]?.trim();
 }
 
 interface PlanBlock {
@@ -286,41 +309,54 @@ interface PlanBlock {
 
 export function parsePlan(md: string): Plan {
   const units: Unit[] = [];
-  const sections = md.split(/^(?=##\s+U\d+[a-z]?:)/m).filter((s) => /^##\s+U\d+/.test(s));
+  // Units are `## U1:` or `### U1:`; a unit ends at the next unit heading, the next `## ` section, or the json block.
+  const sections = md.split(/^(?=#{2,3}\s+U\d+[a-z]?:)/m).filter((s) => /^#{2,3}\s+U\d+/.test(s));
   for (const sec of sections) {
-    const header = sec.match(/^##\s+(U\d+[a-z]?):\s*(.*)$/m);
+    const header = sec.match(/^#{2,3}\s+(U\d+[a-z]?):\s*(.*)$/m);
     if (!header) continue;
-    const bodyEnd = sec.search(/\n```json|\n##\s|$/);
-    const body = sec.slice(0, bodyEnd === -1 ? undefined : bodyEnd).trim();
+    const rest = sec.slice(header[0].length);
+    // A fenced block may contain "## " lines (a README the Hand must write); only count fences outside them.
+    let bodyEnd = -1;
+    let inFence = false;
+    let offset = 0;
+    for (const line of rest.split("\n")) {
+      if (/^\s*```/.test(line)) inFence = !inFence;
+      else if (!inFence && /^(##\s|```json)/.test(line)) {
+        bodyEnd = offset;
+        break;
+      }
+      offset += line.length + 1;
+    }
+    const body = (header[0] + (bodyEnd === -1 ? rest : rest.slice(0, bodyEnd))).trim();
     const f = parseUnitFields(body);
-    const list = (v: string | undefined) => (v ?? "").split(",").map(strip).filter((s) => s && s !== "-" && !/^none$/i.test(s) && !/^<.*>$/.test(s));
-    const check = (f.Check ?? "").replace(/\s+(?:—|–|--|-)\s+Now:\s*(?:unmet|met)\s*$/i, "").trim();
+    const list = (v: string | undefined) => (firstLine(v) ?? "").split(",").map(strip).filter((s) => s && s !== "-" && !/^none$/i.test(s) && !/^<.*>$/.test(s));
+    const check = (f.Check ?? "").replace(/\s+(?:—|–|--|-)\s+[Nn]ow:\s*(?:unmet|met)[^\n]*$/i, "").trim();
     units.push({
       id: header[1]!,
       title: header[2]!.trim(),
-      serves: idList(f.Serves, "D"),
-      level: strip(f.Level ?? "") || undefined,
+      serves: idList(firstLine(f.Serves), "D"),
+      level: strip(firstLine(f.Level) ?? "") || undefined,
       produces: f.Produces ?? "",
       given: f.Given ?? "",
       do: f.Do ?? "",
       touches: list(f.Touches),
       check,
       command: commandOf(check),
-      depends: idList(f.Depends, "U"),
+      depends: idList(firstLine(f.Depends), "U"),
       not: f.Not || undefined,
       body,
     });
   }
   const block = extractTaggedJson<PlanBlock>(md, "plan");
-  if (!units.length && block?.units?.length) {
-    for (const u of block.units) {
+  if (!units.length && arr(block?.units).length) {
+    for (const u of arr<NonNullable<PlanBlock["units"]>[number]>(block?.units)) {
       if (!u?.id) continue;
       const check = u.check ?? "";
       const body =
         `## ${u.id}: ${u.title ?? ""}\nServes:   ${(u.serves ?? []).join(" ")}\nLevel:    ${u.level ?? ""}\nProduces: ${u.produces ?? ""}\n` +
         `Given:    ${u.given ?? ""}\nDo:       ${u.do ?? ""}\nTouches:  ${(u.touches ?? []).join(", ")}\nCheck:    ${check} — Now: unmet\n` +
         `Depends:  ${(u.depends ?? []).join(", ") || "none"}\nNot:      ${u.not ?? ""}`;
-      units.push({ id: u.id, title: u.title ?? "", serves: (u.serves ?? []).map(String), level: u.level, produces: u.produces ?? "", given: u.given ?? "", do: u.do ?? "", touches: (u.touches ?? []).map(String), check, command: commandOf(check), depends: (u.depends ?? []).map(String), not: u.not, body });
+      units.push({ id: u.id, title: u.title ?? "", serves: arr<unknown>(u.serves).map(String), level: u.level, produces: u.produces ?? "", given: u.given ?? "", do: u.do ?? "", touches: arr<unknown>(u.touches).map(String), check, command: commandOf(check), depends: arr<unknown>(u.depends).map(String), not: u.not, body });
     }
   }
   const shape = section(md, "Shape") ?? "";
@@ -328,12 +364,19 @@ export function parsePlan(md: string): Plan {
   const outerText = (section(md, "Outer test") ?? "").trim();
   const outer = bullets(outerText).map((text, i) => ({ step: i + 1, d: idList(text, "D")[0], text }));
   const trace: Record<string, string[]> = {};
-  for (const m of (section(md, "Trace") ?? "").matchAll(/^\s*[-*]\s*(D\d+)\s*(?:→|->|:)\s*([^\n]*)$/gim)) trace[m[1]!] = idList(m[2], "U");
+  for (const m of (section(md, "(?:Order and )?Trace") ?? "").matchAll(/^\s*(?:[-*]|\|)?\s*\*{0,2}(D\d+)\*{0,2}\s*(?:→|->|:|\|)\s*([^\n]*)$/gim)) trace[m[1]!] = idList(m[2], "U");
+  const traceBlock: Record<string, string[]> = {};
+  if (block?.trace && typeof block.trace === "object") {
+    for (const [k, v] of Object.entries(block.trace as Record<string, unknown>)) {
+      const units = Array.isArray(v) ? v : v && typeof v === "object" ? (v as { units?: unknown }).units : typeof v === "string" ? [v] : [];
+      traceBlock[k] = arr<unknown>(units).map(String);
+    }
+  }
   return {
     units,
-    levels: levels.length ? levels : (block?.levels ?? []).filter((l) => l?.id).map((l) => ({ id: String(l.id), check: String(l.check ?? "") })),
-    outer: outer.length ? outer : (block?.outer ?? []).map((o, i) => ({ step: o.step ?? i + 1, d: o.d, text: o.text ?? "" })),
-    trace: Object.keys(trace).length ? trace : Object.fromEntries(Object.entries(block?.trace ?? {}).map(([k, v]) => [k, (v ?? []).map(String)])),
+    levels: levels.length ? levels : arr<{ id?: string; check?: string }>(block?.levels).filter((l) => l?.id).map((l) => ({ id: String(l.id), check: String(l.check ?? "") })),
+    outer: outer.length ? outer : arr<{ step?: number; d?: string; text?: string }>(block?.outer).map((o, i) => ({ step: o.step ?? i + 1, d: o.d, text: o.text ?? "" })),
+    trace: Object.keys(trace).length ? trace : traceBlock,
     outerText,
   };
 }
@@ -354,9 +397,10 @@ export function validateUnits(
   opts: { maxTouches?: number; maxBodyLines?: number; maxDoSteps?: number; requireCommand?: boolean; exists?: (path: string) => boolean; doneIds?: string[] } = {},
 ): UnitProblem[] {
   const out: UnitProblem[] = [];
-  const maxTouches = opts.maxTouches ?? 4;
-  const maxBody = opts.maxBodyLines ?? 60;
-  const maxDo = opts.maxDoSteps ?? 7;
+  const maxTouches = opts.maxTouches ?? 6;
+  // A unit that carries the exact content of the files it produces is long and still one sitting; ~400 lines is about a 12 KB packet.
+  const maxBody = opts.maxBodyLines ?? 400;
+  const maxDo = opts.maxDoSteps ?? 9;
   const doneIds = new Set(opts.doneIds ?? problem?.done.map((d) => d.id) ?? []);
   const ids = new Set(units.map((u) => u.id));
   for (const u of units) {
@@ -386,7 +430,7 @@ export function validateUnits(
     }
     const forbidden = u.do.match(FORBIDDEN_IN_DO);
     if (forbidden) push(`Do: contains "${forbidden[0]}"; every choice is made in the plan, not by the Hand`);
-    const steps = (u.do.match(/(?:^|\s)\d+[.)]\s/g) ?? []).length;
+    const steps = countSteps(u.do);
     if (steps > maxDo) push(`Do: ${steps} steps; more than ${maxDo} is more than one sitting (split the unit)`);
     const lines = u.body.split("\n").length;
     if (lines > maxBody) push(`unit block is ${lines} lines; more than ${maxBody} will not fit a Hand's packet (split the unit)`);
