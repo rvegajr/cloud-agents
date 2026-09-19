@@ -349,9 +349,9 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       prior_lessons: priorLessonsNote(offered, artifact(ARTIFACTS.lookback)),
     });
     const gapsOf = () => problemGaps(readProblem(), { maxDone: 8, software, offeredLessons: offered.map((l) => l.id) });
-    // Already on disk and complete (a resume, or a person wrote it): do not pay for the turn again.
-    if (artifact(ARTIFACTS.problem) && !gapsOf().length) {
-      log(`${ARTIFACTS.problem} is on disk and complete; skipping the Solver turn`);
+    // Already on disk (a resume, or a person wrote it): do not pay for the full turn again. Gaps get the one targeted retry below.
+    if (artifact(ARTIFACTS.problem)) {
+      log(`${ARTIFACTS.problem} is on disk; ${gapsOf().length ? "it has gaps, asking the Solver to fix only those" : "skipping the Solver turn"}`);
     } else {
       const r = await strongTurn<Parameters<typeof renderProblem>[0]>(prompt, ARTIFACTS.problem, "understand: PROBLEM.md", renderProblem);
       if (typeof r === "string") return stop(r, "understand turn did not finish");
@@ -395,9 +395,9 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       if (!plan.outer.length) lines.push("- no `## Outer test` steps");
       return lines;
     };
-    // Already on disk and workable, and no question to re-plan for: do not pay for the turn again.
-    if (artifact(ARTIFACTS.plan) && !state.replanNote && !gapsOf().length) {
-      log(`${ARTIFACTS.plan} is on disk and workable; skipping the Solver turn`);
+    // Already on disk and no question to re-plan for: do not pay for the full turn again. Gaps get the one targeted retry below.
+    if (artifact(ARTIFACTS.plan) && !state.replanNote) {
+      log(`${ARTIFACTS.plan} is on disk; ${gapsOf().length ? "it has gaps, asking the Solver to fix only those" : "skipping the Solver turn"}`);
     } else {
       const r = await strongTurn<Parameters<typeof renderPlan>[0]>(prompt, ARTIFACTS.plan, "devise: PLAN.md", renderPlan);
       if (typeof r === "string") return stop(r, "devise turn did not finish");
