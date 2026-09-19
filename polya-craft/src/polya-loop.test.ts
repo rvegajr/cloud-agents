@@ -144,7 +144,7 @@ test("happy path: understand → devise → two gated units → finish check →
   assert.deepEqual(calls.gate[0]!.taskCommands, ["node --test test/notfound.test.js"]);
   assert.deepEqual(calls.gate[1]!.taskCommands, ["node --test test/notfound.test.js", 'grep -q "npm start" README.md']);
   assert.equal(calls.gate[2]!.kind, "finish");
-  assert.deepEqual(calls.gate[2]!.allowed, ["src/app.js", "README.md"]);
+  assert.deepEqual(calls.gate[2]!.allowed, ["src/app.js", "README.md", "PROBLEM.md", "PLAN.md", "LOOKBACK.md"]);
   assert.equal(calls.gate[2]!.base, out.baselineSha);
   // (b): D1 ran mechanically in the clone; D2 went to the Verifier in the same clone, fresh.
   assert.equal(calls.clones, 1);

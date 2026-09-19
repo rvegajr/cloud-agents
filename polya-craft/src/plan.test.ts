@@ -314,3 +314,9 @@ test("commandOf: commands mentioned inside a sentence are an observation, not a 
   assert.equal(commandOf("`npm test`; `npm run lint`"), "npm test && npm run lint");
   assert.equal(commandOf("`jq`"), undefined);
 });
+
+test("parsePlan: a parenthetical note inside Touches is not a file", () => {
+  const plan = parsePlan(PLAN_MD.replace("Touches:  src/app.js", "Touches:  `src/app.js`, `node_modules/` (generated, gitignored)"));
+  assert.deepEqual(plan.units[0]!.touches, ["src/app.js", "node_modules/"]);
+});
+

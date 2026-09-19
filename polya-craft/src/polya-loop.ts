@@ -479,6 +479,8 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
   }
 
   const allTouches = union(...state.units.map((u) => u.touches));
+  // The finish check spans the whole job; the loop's own artifacts (written on an earlier pass, or corrected by hand) are not the Hand's doing.
+  const finishAllowed = union(allTouches, [ARTIFACTS.problem, ARTIFACTS.plan, ARTIFACTS.lookback]);
 
   // ---- 4. Look back ---------------------------------------------------------
   if (state.phase === "look-back") {
@@ -488,7 +490,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
 
     // (a) the finish check: ownership over the whole job, hygiene, the bar, clean start, vacuous suite.
     log("look back (a): checks from a clean state");
-    let gate = await io.gate("finish", { allowedFiles: allTouches, baseSha: state.baselineSha });
+    let gate = await io.gate("finish", { allowedFiles: finishAllowed, baseSha: state.baselineSha });
     if (!gate.passed) {
       const what = gate.findings.filter((f) => !f.ok).map((f) => `- [${f.rule}] ${f.detail}${f.command ? ` (\`${f.command}\`)` : ""}${f.output ? `\n  ${tail(f.output, 30).replace(/\n/g, "\n  ")}` : ""}`).join("\n");
       log(`finish check failed: ${failingRules(gate).join(", ")}; one fix turn`);
@@ -499,7 +501,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
         state.finish = { passed: false, failing: fix.record.failing ?? failingRules(gate) };
         return stop("finish-check-failed", `fix turn failed the gate: ${state.finish.failing.join(", ")}`);
       }
-      gate = await io.gate("finish", { allowedFiles: allTouches, baseSha: state.baselineSha });
+      gate = await io.gate("finish", { allowedFiles: finishAllowed, baseSha: state.baselineSha });
     }
     state.finish = { passed: gate.passed, failing: failingRules(gate) };
     await persist();

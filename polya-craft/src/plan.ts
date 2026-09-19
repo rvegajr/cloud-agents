@@ -336,7 +336,8 @@ export function parsePlan(md: string): Plan {
     }
     const body = (header[0] + (bodyEnd === -1 ? rest : rest.slice(0, bodyEnd))).trim();
     const f = parseUnitFields(body);
-    const list = (v: string | undefined) => (firstLine(v) ?? "").split(",").map(strip).filter((s) => s && s !== "-" && !/^none$/i.test(s) && !/^<.*>$/.test(s));
+    // "`node_modules/` (generated, gitignored)" is one entry with a note, not three.
+    const list = (v: string | undefined) => (firstLine(v) ?? "").replace(/\([^)]*\)/g, "").split(",").map(strip).filter((s) => s && s !== "-" && !/^none$/i.test(s) && !/^<.*>$/.test(s));
     const check = (f.Check ?? "").replace(/\s+(?:—|–|--|-)\s+[Nn]ow:\s*(?:unmet|met)[^\n]*$/i, "").trim();
     units.push({
       id: header[1]!,
