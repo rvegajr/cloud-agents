@@ -149,7 +149,7 @@ test("parsePlan: units with continued fields, commands, depends, levels, outer t
   assert.deepEqual(u1.touches, ["src/app.js"]);
   assert.equal(u1.check, "`node --test test/notfound.test.js`");
   assert.equal(u1.command, "node --test test/notfound.test.js");
-  assert.match(u1.do, /1\. Move.*2\. Run Check/);
+  assert.match(u1.do, /1\. Move[\s\S]*2\. Run Check/);
   assert.deepEqual(u1.depends, []);
   assert.deepEqual(plan.units[1]!.depends, ["U1"]);
   assert.match(u1.body, /^## U1:/);
@@ -181,14 +181,15 @@ test("validateUnits: each mechanical row of the stranger test", () => {
   assert.match(problems({ given: "" }), /no Given/);
   assert.match(problems({ touches: ["test/notfound.test.js"] }), /test file/);
   assert.match(problems({ touches: ["PLAN.md"] }), /plan artifact/);
-  assert.match(problems({ touches: ["a", "b", "c", "d", "e"] }), /more than 4/);
+  assert.match(problems({ touches: ["a", "b", "c", "d", "e", "f", "g"] }), /more than 6/);
   assert.match(problems({ check: "looks right to me", command: undefined }), /prose/);
   assert.match(problems({ do: "1. Choose the best handler order." }), /"Choose"/i);
-  assert.match(problems({ do: "1. a 2. b 3. c 4. d 5. e 6. f 7. g 8. h" }), /8 steps/);
+  assert.match(problems({ do: Array.from({ length: 10 }, (_, i) => `${i + 1}. step`).join("\n") }), /10 steps/);
+  assert.equal(problems({ do: "1. a\n```json\n1. not a step\n2. nor this\n```\n2. b" }).includes("steps"), false);
   assert.match(problems({ serves: [] }), /names no D/);
   assert.match(problems({ serves: ["D9"] }), /D9/);
   assert.match(problems({ depends: ["U7"] }), /U7/);
-  assert.match(problems({ body: Array.from({ length: 70 }, () => "x").join("\n") }), /70 lines/);
+  assert.match(problems({ body: Array.from({ length: 450 }, () => "x").join("\n") }), /450 lines/);
   assert.match(problems({}, { exists: () => false }), /not on disk/);
   assert.equal(problems({ check: "a stranger reads it", command: undefined }, { requireCommand: false }), "D2 is served by no unit");
 });

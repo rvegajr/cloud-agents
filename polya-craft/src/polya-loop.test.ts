@@ -16,13 +16,25 @@ import { initialPolyaState, polyaResumePhase, runPolyaLoop, type PolyaIO, type P
 const pass: GateResult = { passed: true, findings: [], seconds: 1, skipped: [] };
 const fail = (rule: "quality-bar" | "ownership"): GateResult => ({ passed: false, findings: [{ rule, ok: false, detail: `${rule} failed`, command: "npm test", output: "boom" }], seconds: 1, skipped: [] });
 
-function makeIO(overrides: Partial<PolyaIO> & { files?: Record<string, string>; gates?: GateResult[]; commands?: Record<string, number> } = {}) {
+/** What the fake Solver writes when its turn runs; a test may override either. */
+let seed: { problem: string; plan: string } = { problem: PROBLEM_MD, plan: PLAN_MD };
+let currentIO: PolyaIO | undefined;
+
+function makeIO(overrides: Partial<PolyaIO> & { files?: Record<string, string>; gates?: GateResult[]; commands?: Record<string, number>; preload?: boolean } = {}) {
+  const given = { ...(overrides.files ?? {}) };
+  seed = { problem: given["PROBLEM.md"] ?? PROBLEM_MD, plan: given["PLAN.md"] ?? PLAN_MD };
+  // The artifacts are written by the Solver's turns, not pre-loaded, unless a test resumes past them.
+  if (overrides.preload) {
+    given["PROBLEM.md"] = seed.problem;
+    given["PLAN.md"] = seed.plan;
+  } else {
+    delete given["PROBLEM.md"];
+    delete given["PLAN.md"];
+  }
   const files: Record<string, string> = {
-    "PROBLEM.md": PROBLEM_MD,
-    "PLAN.md": PLAN_MD,
     "README.md": "# app\nnpm ci && npm start",
     "test/notfound.test.js": "test('D1 not found', ...)",
-    ...(overrides.files ?? {}),
+    ...given,
   };
   const gates = overrides.gates ?? [];
   const calls = { gate: [] as { kind: string; allowed?: string[]; base?: string; taskCommands?: string[] }[], commands: [] as { command: string; cwd?: string }[], commits: [] as string[], clones: 0, writes: [] as string[] };
@@ -58,6 +70,7 @@ function makeIO(overrides: Partial<PolyaIO> & { files?: Record<string, string>; 
     diffStat: () => " 2 files changed",
     ...overrides,
   };
+  currentIO = io;
   return { io, calls, files };
 }
 
@@ -97,8 +110,14 @@ function makeSend(script: Script) {
 
 const json = (o: unknown) => `done\n\`\`\`json\n${JSON.stringify(o)}\n\`\`\``;
 const defaultScript: Script = {
-  understand: () => json({ written: ["PROBLEM.md"], done_ids: ["D1", "D2"] }),
-  devise: () => json({ written: ["PLAN.md"], units: ["U1", "U2"] }),
+  understand: () => {
+    currentIO?.writeFile("PROBLEM.md", seed.problem);
+    return json({ written: ["PROBLEM.md"], done_ids: ["D1", "D2"] });
+  },
+  devise: () => {
+    currentIO?.writeFile("PLAN.md", seed.plan);
+    return json({ written: ["PLAN.md"], units: ["U1", "U2"] });
+  },
   "carry-out": (p) => json({ unit_id: p.match(/unit (U[\w-]+)/)?.[1] ?? "?", done: true, blocked: false, check_passed: true }),
   verify: () => json({ started: true, results: [{ step: 2, d: "D2", passed: true, evidence: "started on :3000" }] }),
   "look-back": () => json({ verdict: "done", answers_problem: true, another_check: "the access log", findings: [], worked: ["U1 first time"], did_not: [], confirmed: ["L-2026-09-18-01"], lessons: [{ tags: ["kind:repair", "stage:devise"], when: "a middleware order bug", lesson: "check the static handler after any middleware change", evidence: "this repair, U1" }] }),
@@ -309,8 +328,7 @@ test("review: the result does not answer the restated problem → review-unresol
 });
 
 test("materialise: a Solver that only reports bare JSON gets a reminder, then PROBLEM.md is written from its report", async () => {
-  const { io, calls, files } = makeIO({ files: { "PROBLEM.md": undefined as unknown as string } });
-  delete files["PROBLEM.md"];
+  const { io, calls } = makeIO();
   const report = { title: "unknown routes answer 404", kind: "repair", size: "S", restated: "the handler order is wrong", done: [{ id: "D1", text: "404", check: "node --test test/notfound.test.js" }, { id: "D2", text: "README works", check: "a stranger follows the README" }], bar: { test: "npm test" } };
   const { send, sent } = makeSend({ understand: () => JSON.stringify(report) });
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
@@ -322,7 +340,7 @@ test("materialise: a Solver that only reports bare JSON gets a reminder, then PR
 });
 
 test("resume at carry-out re-attempts the unit that stopped and never re-runs understand or devise; PLAN.md on disk wins", async () => {
-  const { io } = makeIO({ files: { "PLAN.md": PLAN_MD.replace("## U2: document the start command", "## U2: document the start command (edited by hand)") } });
+  const { io } = makeIO({ preload: true, files: { "PLAN.md": PLAN_MD.replace("## U2: document the start command", "## U2: document the start command (edited by hand)") } });
   const { send, sent } = makeSend({});
   const stale: PolyaState = { ...initialPolyaState(), phase: "carry-out", units: [], unitIndex: 1, unitRecords: [{ id: "U1", attempts: 1, passed: true }], baselineSha: "sha0" };
   const out = await runPolyaLoop(send, { ...base, io, lessons: null }, stale);
@@ -427,19 +445,19 @@ test("look back (d): a \"No lesson\" entry stays in LOOKBACK.md and is not appen
 
 
 test("a PROBLEM.md or PLAN.md already on disk and workable skips the Solver turn; a re-plan note does not", async () => {
-  const { io } = makeIO();
+  const { io } = makeIO({ preload: true });
   const { send, sent } = makeSend({});
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "complete");
   assert.deepEqual(sent.map((s) => s.kind), ["carry-out", "carry-out", "verify", "look-back"]);
   // A plan on disk with a gap still gets the (one) Solver turn.
-  const { io: io2 } = makeIO({ files: { "PLAN.md": PLAN_MD.replace("Given:    `src/app.js`; the red test `test/notfound.test.js`", "Given:") } });
+  const { io: io2 } = makeIO({ preload: true, files: { "PLAN.md": PLAN_MD.replace("Given:    `src/app.js`; the red test `test/notfound.test.js`", "Given:") } });
   const { send: s2, sent: sent2 } = makeSend({});
   await runPolyaLoop(s2, { ...base, io: io2, lessons: null });
   assert.equal(sent2[0]!.kind, "devise");
   assert.match(sent2[0]!.prompt, /^## Plan not workable/);
   // A resume after a Hand's question always re-plans.
-  const { io: io3 } = makeIO();
+  const { io: io3 } = makeIO({ preload: true });
   const { send: s3, sent: sent3 } = makeSend({});
   await runPolyaLoop(s3, { ...base, io: io3, lessons: null }, { phase: "devise", replanNote: "U2 asked: which?", unitRecords: [{ id: "U1", attempts: 1, passed: true }] });
   assert.equal(sent3[0]!.kind, "devise");
