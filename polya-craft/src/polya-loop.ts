@@ -123,6 +123,8 @@ export interface PolyaOptions {
   unitRetries?: number;
   /** After the cheap Verifier fails to report twice, run it on this tier. */
   verifyFallbackTier?: "claude";
+  /** Prose done-checks per Verifier turn (default 2): a local model walking five pages in one turn hits its tool-call cap. */
+  verifyBatch?: number;
   /** Software problems: unit Checks must be commands and the quality bar must name `test`. Default true. */
   software?: boolean;
   /** The engine can give a turn a real browser (Playwright MCP); a unit or a done-check that names a page is sent with `browser: true`. */
@@ -571,36 +573,44 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       const prose: DoneCheck[] = problem.done.filter((d) => !d.command);
       if (prose.length) {
         const mechanical = checks.map((c) => `- ${c.id}: ${c.passed ? "PASS" : "FAIL"} — ${c.evidence}`).join("\n") || "(none)";
-        const outer = plan?.outerText || prose.map((d) => `- ${d.id}: ${d.text} — Check: ${d.check}`).join("\n");
         const readme = (artifact("README.md") ?? "(no README)").slice(0, 4000);
-        const outerFull = `${outer}\n\nDone-checks a stranger observes:\n${prose.map((d) => `- ${d.id}: ${d.text} — Check: ${d.check}`).join("\n")}`;
-        const needsBrowser = scenarioNeedsBrowser(outerFull);
-        const browser = needsBrowser && opts.browser === true;
-        const prompt = buildPrompt(`${PROMPTS}/verify`, "", {
-          outer_test: outerFull,
-          mechanical_results: mechanical,
-          run_instructions: readme,
-          browser_tools: browserToolNote(!needsBrowser ? "unneeded" : browser ? "available" : "absent"),
-        });
-        const attempts: { note: string; tier?: "claude" }[] = [{ note: "" }, { note: "## Your previous reply had no results block\n\nWalk the steps and end with the single fenced json block the Output section specifies. Nothing after it.\n\n---\n\n" }];
-        if (opts.verifyFallbackTier === "claude") attempts.push({ note: "", tier: "claude" });
-        let report: { results?: { step?: number; d?: string; passed?: boolean; evidence?: string; where?: string }[] } | undefined;
-        for (const [ai, a] of attempts.entries()) {
-          log(`verifier${ai ? ` (attempt ${ai + 1}${a.tier ? `, ${a.tier}` : ""})` : ""}: ${prose.map((d) => d.id).join(", ")}`);
-          const t = await send(`${a.note}${prompt}`, { mode: "agent", fresh: true, cwd: clone, ...(browser ? { browser: true } : {}), ...(a.tier ? { tier: a.tier } : {}) });
-          track(t);
-          if (t.status !== "finished") continue;
-          const r = lenientJson<typeof report>(t.result);
-          if (r?.results && Array.isArray(r.results)) {
-            report = r;
-            break;
+        const size = Math.max(1, opts.verifyBatch ?? 2);
+        const batches: DoneCheck[][] = [];
+        for (let i = 0; i < prose.length; i += size) batches.push(prose.slice(i, i + size));
+        for (const [bi, batch] of batches.entries()) {
+          const ids = new Set(batch.map((d) => d.id));
+          // Only the outer-test steps this batch exercises; the whole walk is what overflowed one turn.
+          const steps = (plan?.outer ?? []).filter((o) => o.d && ids.has(o.d)).map((o) => `${o.step}. ${o.text}`);
+          const lines = batch.map((d) => `- ${d.id}: ${d.text} — Check: ${d.check}`).join("\n");
+          const outerFull = `${steps.length ? `${steps.join("\n")}\n\n` : ""}Done-checks a stranger observes (walk only these):\n${lines}`;
+          const needsBrowser = scenarioNeedsBrowser(outerFull);
+          const browser = needsBrowser && opts.browser === true;
+          const prompt = buildPrompt(`${PROMPTS}/verify`, "", {
+            outer_test: outerFull,
+            mechanical_results: mechanical,
+            run_instructions: readme,
+            browser_tools: browserToolNote(!needsBrowser ? "unneeded" : browser ? "available" : "absent"),
+          });
+          const attempts: { note: string; tier?: "claude" }[] = [{ note: "" }, { note: "## Your previous reply had no results block\n\nWalk the steps and end with the single fenced json block the Output section specifies. Nothing after it.\n\n---\n\n" }];
+          if (opts.verifyFallbackTier === "claude") attempts.push({ note: "", tier: "claude" });
+          let report: { results?: { step?: number; d?: string; passed?: boolean; evidence?: string; where?: string }[] } | undefined;
+          for (const [ai, a] of attempts.entries()) {
+            log(`verifier batch ${bi + 1}/${batches.length}${ai ? ` (attempt ${ai + 1}${a.tier ? `, ${a.tier}` : ""})` : ""}: ${batch.map((d) => d.id).join(", ")}`);
+            const t = await send(`${a.note}${prompt}`, { mode: "agent", fresh: true, cwd: clone, ...(browser ? { browser: true } : {}), ...(a.tier ? { tier: a.tier } : {}) });
+            track(t);
+            if (t.status !== "finished") continue;
+            const r = lenientJson<typeof report>(t.result);
+            if (r?.results && Array.isArray(r.results)) {
+              report = r;
+              break;
+            }
           }
-        }
-        if (!report) return stop("unparseable-report", "the Verifier returned no results block");
-        for (const d of prose) {
-          const mine = report.results!.filter((r) => r.d === d.id);
-          const passed = mine.length > 0 && mine.every((r) => r.passed);
-          checks.push({ id: d.id, passed, how: "verifier", evidence: mine.map((r) => r.evidence).filter(Boolean).join("; ") || (mine.length ? "" : "not walked"), where: mine.find((r) => !r.passed)?.where });
+          if (!report) return stop("unparseable-report", `the Verifier returned no results block for ${batch.map((d) => d.id).join(", ")}`);
+          for (const d of batch) {
+            const mine = report.results!.filter((r) => r.d === d.id);
+            const passed = mine.length > 0 && mine.every((r) => r.passed);
+            checks.push({ id: d.id, passed, how: "verifier", evidence: mine.map((r) => r.evidence).filter(Boolean).join("; ") || (mine.length ? "" : "not walked"), where: mine.find((r) => !r.passed)?.where });
+          }
         }
       }
       state.checks = checks;

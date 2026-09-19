@@ -541,3 +541,29 @@ test("the artifacts live under .polya/, and a unit whose Touches names .polya/ i
   assert.match(out.stopDetail!, /plan artifact/);
 });
 
+test("the Verifier walks prose done-checks two per turn, each batch in the same clone, a silent batch falling back alone", async () => {
+  const problem = PROBLEM_MD.replace(
+    "- D2: a stranger can start the app from the README — Check: a stranger follows the README and the app starts — Now: unmet",
+    ["D2", "D3", "D4", "D5", "D6"].map((id) => `- ${id}: ${id} holds — Check: a stranger observes ${id} — Now: unmet`).join("\n"),
+  );
+  const plan = PLAN_MD.replace("Serves:   D2", "Serves:   D2 D3 D4 D5 D6");
+  const { io } = makeIO({ files: { ".polya/PROBLEM.md": problem, ".polya/PLAN.md": plan } });
+  const { send, sent } = makeSend({
+    walk: (p, o) => {
+      const ids = [...p.matchAll(/^- (D\d+): D\d+ holds/gm)].map((m) => m[1]!);
+      // The second batch's local turns stay silent; its frontier fallback reports.
+      if (ids.includes("D4") && o?.tier !== "claude") return "no block";
+      return json({ results: ids.map((d, i) => ({ step: i + 1, d, passed: true, evidence: `saw ${d}` })) });
+    },
+  });
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null, verifyFallbackTier: "claude" });
+  assert.equal(out.stopReason, "complete");
+  const walks = sent.filter((s) => s.kind === "walk");
+  // Three batches (D2 D3 | D4 D5 | D6); batch 2 took two local tries and one fallback.
+  assert.equal(walks.length, 5);
+  assert.deepEqual(walks.map((w) => w.opts?.tier ?? "local"), ["local", "local", "local", "claude", "local"]);
+  assert.ok(walks.every((w) => w.opts?.cwd === "/tmp/clone-1"));
+  assert.doesNotMatch(walks[0]!.prompt, /D4 holds/);
+  assert.deepEqual(out.checks!.filter((c) => c.how === "verifier").map((c) => c.id), ["D2", "D3", "D4", "D5", "D6"]);
+});
+
