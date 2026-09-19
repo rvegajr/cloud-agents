@@ -362,3 +362,10 @@ test("validateUnits: a Check that inspects git is not workable under the loop (l
   assert.match(validateUnits([r0], parseProblem(LIVE_R0_PROBLEM)).map((p) => p.problem).join("\n"), /inspects git/);
 });
 
+test("commandOf: one command inside a sentence about what a stranger does is the Verifier's (live R0, D1 and D5)", () => {
+  assert.equal(commandOf("a stranger performs this after `npm ci && npm run dev`, opening `http://localhost:3000/` (this build's own documented default port/URL)."), undefined);
+  assert.equal(commandOf("create a snippet, confirm a `*.db` file exists under the project directory, stop the server, start it again, `curl -sf localhost:3000/api/snippets/<id>` still returns it; `git status --porcelain` shows nothing for the db file"), undefined);
+  assert.equal(commandOf("`npm test` exits 0"), "npm test");
+  assert.equal(commandOf("`node --test test/db.test.js` passes"), "node --test test/db.test.js");
+});
+

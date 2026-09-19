@@ -618,3 +618,20 @@ test("look back (b): a check that starts its own server runs before the loop sta
   assert.deepEqual(out.checks!.map((c) => c.id), ["D1", "D3", "D2"]);
 });
 
+test("look back (b): a bar with no start falls back to the repo's npm start for checks that curl the app (live R0)", async () => {
+  const problem = PROBLEM_MD.replace("| start | `npm start` |\n", "").replace(
+    "- D1: GET /nope answers 404 — Check: `node --test test/notfound.test.js` — Now: unmet",
+    "- D1: GET /nope answers 404 — Check: `test \"$(curl -s -o /dev/null -w '%{http_code}' localhost:4571/nope)\" = 404` — Now: unmet",
+  );
+  const started: string[] = [];
+  const { io } = makeIO({ files: { ".polya/PROBLEM.md": problem, "package.json": '{ "scripts": { "start": "node src/server.js", "test": "node --test" } }' } });
+  io.start = async (command) => {
+    started.push(command);
+    return { stop: () => {} };
+  };
+  const out = await runPolyaLoop(makeSend({}).send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  assert.equal(out.problem!.bar.start, undefined);
+  assert.deepEqual(started, ["npm start"]);
+});
+

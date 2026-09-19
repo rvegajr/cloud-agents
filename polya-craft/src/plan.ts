@@ -146,10 +146,17 @@ function idList(s: string | undefined, prefix: string): string[] {
  */
 export function commandOf(check: string | undefined): string | undefined {
   if (!check) return undefined;
+  // Why it is red today is not the check.
+  check = check.replace(/\s*(?:—|–|--|-)?\s*\b[Nn]ow:[\s\S]*$/, "");
   const isCommand = (c: string) => COMMAND_HEAD.test(c) && !LOOKS_LIKE_PATH.test(c) && /\s/.test(c) && !/<[a-z][\w-]*>/i.test(c);
   const segments = [...check.matchAll(/`([^`]+)`/g)].map((m) => m[1]!.trim());
   const ticked = segments.filter(isCommand);
-  if (ticked.length === 1) return ticked[0];
+  // One command with a note ("`npm test` exits 0 with 1 pass") is that command. One command inside a sentence about
+  // a person acting ("a stranger performs this after `npm ci && npm run dev`, opening …"; "create a snippet, stop the
+  // server, …") is an observation: the Verifier's.
+  const residue = check.replace(/`[^`]+`/g, " ");
+  const someoneActs = /\b(stranger|person|someone|reader|user|opens?|opening|clicks?|clicking|types?|typing|pastes?|performs?|follows?|walks?|confirms?|creates?|stops?|restarts?|sees?|observes?)\b/i.test(residue);
+  if (ticked.length === 1) return someoneActs ? undefined : ticked[0];
   if (ticked.length > 1) {
     // Several backticked commands are one check only when nothing but connectors sits between them
     // ("`a` and `b`"). Commands mentioned inside a sentence ("run `npm ci`, then `npm start` and open …")

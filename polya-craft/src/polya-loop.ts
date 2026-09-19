@@ -589,9 +589,11 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       const rest = mechanical.filter((d) => !selfServing.includes(d));
       for (const d of selfServing) record(d, await run(d.command!));
       let running: { stop(): void } | undefined;
-      if (problem.bar.start && io.start && rest.some((d) => NEEDS_SERVER.test(d.command!))) {
-        log(`starting \`${problem.bar.start}\` in the clone for the done-checks`);
-        running = await io.start(problem.bar.start, clone);
+      // A build's Understand runs before the app exists, so its bar may name no `start`; the repo's own start script is the fallback.
+      const startCmd = problem.bar.start ?? (/"start"\s*:/.test(artifact("package.json") ?? "") ? "npm start" : undefined);
+      if (startCmd && io.start && rest.some((d) => NEEDS_SERVER.test(d.command!))) {
+        log(`starting \`${startCmd}\` in the clone for the done-checks`);
+        running = await io.start(startCmd, clone);
       }
       try {
         for (const d of rest) record(d, await run(d.command!));
