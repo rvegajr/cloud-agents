@@ -334,3 +334,19 @@ test("oracle: parsed from ## Oracle; every line needs a disposition, and an adop
   assert.match(oracleNote(), /^## Oracle: cases a done-check list forgets[\s\S]*\*\*O7\*\*/);
 });
 
+
+// R0 (Sonnet, curated ledger, 2026-09-19): the Solver applied the sha256 lesson; each Check is one node -e command,
+// followed by a multi-line `Now:` clause that quotes other commands.
+const LIVE_R0_PLAN = readFileSync(new URL("./fixtures-live-plan-r0.md", import.meta.url), "utf8");
+const LIVE_R0_PROBLEM = readFileSync(new URL("./fixtures-live-problem-r0.md", import.meta.url), "utf8");
+
+test("parsePlan: a multi-line Now: clause is not part of the Check (live R0 plan)", () => {
+  const plan = parsePlan(LIVE_R0_PLAN);
+  assert.equal(plan.units.length, 6);
+  for (const u of plan.units) {
+    assert.ok(u.command, `${u.id} has no command: ${u.check.slice(0, 120)}`);
+    assert.match(u.command!, /^node -e "const c=require\('crypto'\)/);
+    assert.doesNotMatch(u.check, /Now:|Cannot find module/);
+  }
+  assert.deepEqual(validateUnits(plan.units, parseProblem(LIVE_R0_PROBLEM), { requireCommand: true }), []);
+});

@@ -378,7 +378,12 @@ export function parsePlan(md: string): Plan {
     const f = parseUnitFields(body);
     // "`node_modules/` (generated, gitignored)" is one entry with a note, not three.
     const list = (v: string | undefined) => (firstLine(v) ?? "").replace(/\([^)]*\)/g, "").split(",").map(strip).filter((s) => s && s !== "-" && !/^none$/i.test(s) && !/^<.*>$/.test(s));
-    const check = (f.Check ?? "").replace(/\s+(?:—|–|--|-)\s+[Nn]ow:\s*(?:unmet|met)[^\n]*$/i, "").trim();
+    // The `Now:` clause says why the Check is red today and may run over several lines quoting commands of its
+    // own ("`npm ci` fails with …"); none of that is the Check. Nor is "— exits 0 when met".
+    const check = (f.Check ?? "")
+      .replace(/\s*(?:—|–|--|-)?\s*\b[Nn]ow:[\s\S]*$/, "")
+      .replace(/\s*(?:—|–|--|-)\s*exits? 0 when met\.?\s*$/i, "")
+      .trim();
     units.push({
       id: header[1]!,
       title: header[2]!.trim(),
