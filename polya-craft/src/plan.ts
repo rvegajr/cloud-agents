@@ -474,6 +474,9 @@ export function validateUnits(
     if (docs.length) push(`Touches: names plan artifact(s) (${docs.join(", ")})`);
     if (u.touches.length > maxTouches) push(`Touches: ${u.touches.length} entries; more than ${maxTouches} is more than one sitting (split the unit)`);
     if (u.check && opts.requireCommand && !u.command) push(`Check: is prose, not a command (${JSON.stringify(u.check.slice(0, 80))}); for software the Check is a command that exits 0 when met`);
+    if (u.command && /\bgit\s+(status|diff|log|show|ls-files)\b/.test(u.command)) {
+      push("Check: inspects git; the loop commits the Hand's work before the Check runs and its ownership gate already enforces Touches, so check the files and the behaviour instead");
+    }
     if (u.command) {
       if (opts.exists) {
         const paths = u.command.match(/[\w./-]+\.(?:test|spec)\.[jt]sx?|(?:^|\s)(?:test|tests|spec)\/[\w./-]+/g) ?? [];

@@ -67,6 +67,10 @@ outer-test step.
   measures nothing.
 - One owner per fact. If `Given` would paste content that also lives in a
   file, name the file instead.
+- The loop commits the Hand's work before it runs the Check, and its
+  ownership gate rejects any change outside `Touches`. A Check never
+  inspects `git status`, `git diff`, or the commit; it checks the files and
+  the behaviour.
 
 ## Output
 

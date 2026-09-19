@@ -348,5 +348,17 @@ test("parsePlan: a multi-line Now: clause is not part of the Check (live R0 plan
     assert.match(u.command!, /^node -e "const c=require\('crypto'\)/);
     assert.doesNotMatch(u.check, /Now:|Cannot find module/);
   }
-  assert.deepEqual(validateUnits(plan.units, parseProblem(LIVE_R0_PROBLEM), { requireCommand: true }), []);
+  // Every unit parses to one command, and every one also inspects git status, which the git rule rejects.
+  const gaps = validateUnits(plan.units, parseProblem(LIVE_R0_PROBLEM), { requireCommand: true });
+  assert.deepEqual(gaps.map((p) => p.id), ["U1", "U2", "U3", "U4", "U5", "U6"]);
+  assert.ok(gaps.every((p) => /inspects git/.test(p.problem)));
 });
+
+test("validateUnits: a Check that inspects git is not workable under the loop (live R0, U1)", () => {
+  const u = parsePlan(PLAN_MD).units[0]!;
+  const withGit = { ...u, check: "`node --test test/notfound.test.js && test -z \"$(git status --porcelain)\"`", command: 'node --test test/notfound.test.js && test -z "$(git status --porcelain)"' };
+  assert.match(validateUnits([withGit], parseProblem(PROBLEM_MD)).map((p) => p.problem).join("\n"), /inspects git/);
+  const r0 = parsePlan(LIVE_R0_PLAN).units[0]!;
+  assert.match(validateUnits([r0], parseProblem(LIVE_R0_PROBLEM)).map((p) => p.problem).join("\n"), /inspects git/);
+});
+
