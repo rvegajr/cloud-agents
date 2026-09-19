@@ -596,3 +596,25 @@ test("oracle on: the understand prompt carries the checklist, and a PROBLEM.md w
   void off;
 });
 
+test("look back (b): a check that starts its own server runs before the loop starts the app; runCheck is used when present", async () => {
+  const problem = PROBLEM_MD.replace(
+    "- D1: GET /nope answers 404 — Check: `node --test test/notfound.test.js` — Now: unmet",
+    "- D1: GET /nope answers 404 — Check: `test \"$(curl -s -o /dev/null -w '%{http_code}' localhost:4571/nope)\" = 404` — Now: unmet\n- D3: npm run dev serves — Check: `git clone . scratch && cd scratch && npm ci && npm run dev & sleep 2; test \"$(curl -s -o /dev/null -w '%{http_code}' http://localhost:4571/)\" = 200` — Now: unmet",
+  );
+  const order: string[] = [];
+  const { io } = makeIO({ files: { ".polya/PROBLEM.md": problem, ".polya/PLAN.md": PLAN_MD.replace("Serves:   D2", "Serves:   D2 D3") } });
+  io.start = async () => {
+    order.push("app started");
+    return { stop: () => order.push("app stopped") };
+  };
+  io.runCheck = async (command) => {
+    order.push(/npm run dev/.test(command) ? "D3 (self-serving)" : "D1 (curl)");
+    return { code: 0, output: "ok" };
+  };
+  const out = await runPolyaLoop(makeSend({}).send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  assert.deepEqual(order, ["D3 (self-serving)", "app started", "D1 (curl)", "app stopped"]);
+  // PROBLEM.md in this test lists D1, D3, D2; results follow that order.
+  assert.deepEqual(out.checks!.map((c) => c.id), ["D1", "D3", "D2"]);
+});
+

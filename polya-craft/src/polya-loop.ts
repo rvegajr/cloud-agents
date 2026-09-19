@@ -31,7 +31,16 @@ export type PolyaIO = BlueprintIO & {
   resetTo?(sha: string): void;
   /** Delete a file from the working tree (the next commit records it). */
   removeFile?(rel: string): boolean;
+  /**
+   * Run a done-check: finished when its shell exits, whatever it left running in the background, and everything it
+   * started is killed with it. `runCommand` waits for every holder of the output pipe, so a check that starts a
+   * watch-mode server never returns.
+   */
+  runCheck?(command: string, cwd: string): Promise<{ code: number; output: string }>;
 };
+
+/** A check that backgrounds its own server (`npm run dev &`, `node server.js &`) needs the port free. */
+const SELF_SERVES = /(?:npm\s+(?:start|run\s+\S+)|node\s+\S+)[^;&|\n]*&(?!&)/;
 
 /** The kit seeds a template AGENTS.md and a QWEN.md of ACG gate rules; on a polya run both are false for the repo and the prompts carry the rules. */
 const SEEDED_AGENTS = /Copy this file to the root of any repository you want cloud agents to work on/;
@@ -571,20 +580,25 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       if (problem.bar.install) await io.runCommand(problem.bar.install, clone);
       const checks: CheckResult[] = [];
       const mechanical = problem.done.filter((d) => d.command);
-      // A check that curls the app needs the app up: start the bar's `start` in the clone for the duration of the checks.
+      const run = (command: string) => (io.runCheck ? io.runCheck(command, clone) : io.runCommand(command, clone));
+      const record = (d: DoneCheck, r: { code: number; output: string }) =>
+        checks.push({ id: d.id, passed: r.code === 0, how: "mechanical", evidence: `\`${d.command}\` exited ${r.code}${r.code ? `: ${tail(r.output, 5)}` : ""}` });
+      // Checks that start their own server go first, while the port is free; then the loop starts the app for the
+      // checks that only curl it, and stops it after.
+      const selfServing = mechanical.filter((d) => SELF_SERVES.test(d.command!));
+      const rest = mechanical.filter((d) => !selfServing.includes(d));
+      for (const d of selfServing) record(d, await run(d.command!));
       let running: { stop(): void } | undefined;
-      if (problem.bar.start && io.start && mechanical.some((d) => NEEDS_SERVER.test(d.command!))) {
+      if (problem.bar.start && io.start && rest.some((d) => NEEDS_SERVER.test(d.command!))) {
         log(`starting \`${problem.bar.start}\` in the clone for the done-checks`);
         running = await io.start(problem.bar.start, clone);
       }
       try {
-        for (const d of mechanical) {
-          const r = await io.runCommand(d.command!, clone);
-          checks.push({ id: d.id, passed: r.code === 0, how: "mechanical", evidence: `\`${d.command}\` exited ${r.code}${r.code ? `: ${tail(r.output, 5)}` : ""}` });
-        }
+        for (const d of rest) record(d, await run(d.command!));
       } finally {
         running?.stop();
       }
+
       const prose: DoneCheck[] = problem.done.filter((d) => !d.command);
       if (prose.length) {
         const mechanical = checks.map((c) => `- ${c.id}: ${c.passed ? "PASS" : "FAIL"} — ${c.evidence}`).join("\n") || "(none)";
@@ -628,6 +642,8 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
           }
         }
       }
+      // Report in the order PROBLEM.md lists them.
+      checks.sort((a, b) => problem.done.findIndex((d) => d.id === a.id) - problem.done.findIndex((d) => d.id === b.id));
       state.checks = checks;
       await persist();
       const failed = checks.filter((c) => !c.passed);
