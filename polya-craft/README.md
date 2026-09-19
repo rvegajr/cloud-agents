@@ -11,6 +11,7 @@ four steps, for any problem: a bug, a product, a proposal, a house.
 | `WALKTHROUGH.md` | The pattern by hand: two chat windows and a terminal, on a grant proposal and a one-line bug | written |
 | `THEORY.md` | Two pages an AI can act on: the claim, the four moves, the contract, the rules, operating instructions | written |
 | `PATTERN.md` | The specification: roles, artifacts with templates, the workable-unit contract and the stranger test, stages, the ledger, mechanical checks, mapping to architect-crew-gate | written |
+| `examples/kitchen-sink.md` | A leaking sink, cause unknown at the start; you are both Solver and Hand; one page, one afternoon | written |
 | `examples/house.md` | A house, every stage, with a human crew as the Hand | written |
 | `ARTICLE.md` | Where it comes from and why it is a fresh loop, with sources | written |
 | `ROADMAP.md` | Built, known limitations, not built, measurement | written |
