@@ -436,7 +436,7 @@ export async function createHybridHandle(args: HybridHandleArgs): Promise<AgentH
   /** Fresh-session, read-only reviewers: ACG's review and polya-craft's look back. */
   const reviewerKinds: TurnKind[] = ["review", "look-back"];
   /** Turns that carry their whole context in the prompt; only the milestone loop replays the transcript. */
-  const selfContained: TurnKind[] = ["task", "qa", "review", "understand", "devise", "carry-out", "look-back"];
+  const selfContained: TurnKind[] = ["task", "qa", "review", "understand", "devise", "carry-out", "walk", "look-back"];
   const runTier = async (tier: Tier, kind: TurnKind, prompt: string, o: SendOpts | undefined): Promise<TurnResult> => {
     if (tier === "claude") {
       if (reviewerKinds.includes(kind)) return claudeReviewSend(prompt, { ...o, fresh: true });

@@ -303,3 +303,14 @@ test("parsePlan: the live snippet-vault plan yields five lawful units", () => {
   assert.deepEqual(plan.units[1]!.depends, ["U1"]);
   assert.deepEqual(validateUnits(plan.units, p, { requireCommand: true }), []);
 });
+
+test("commandOf: commands mentioned inside a sentence are an observation, not a command (live snippet-vault D1, D4, D5)", () => {
+  assert.equal(commandOf("A stranger runs `npm ci`, then `npm run dev` or `npm start`, and opens the page"), undefined);
+  assert.equal(commandOf("type `jq` in the box; `curl -s 'localhost:3000/api/snippets?q=id' | grep -q '\"id\"'` prints a match and `curl -s 'localhost:3000/api/snippets?q=jq'` lists it"), undefined);
+  // One real command inside annotation is that command (the live 404 plan's U1).
+  assert.equal(commandOf("`jq` appears; `curl -s 'localhost:3000/api/snippets?q=id' | grep -q '\"id\"'` prints a match"), `curl -s 'localhost:3000/api/snippets?q=id' | grep -q '"id"'`);
+  assert.equal(commandOf("`ls <projectdir>/*.db` shows a file and `curl -sf localhost:3000/api/snippets/<id>` returns it"), undefined);
+  assert.equal(commandOf("`npm test` and `npm run lint`"), "npm test && npm run lint");
+  assert.equal(commandOf("`npm test`; `npm run lint`"), "npm test && npm run lint");
+  assert.equal(commandOf("`jq`"), undefined);
+});

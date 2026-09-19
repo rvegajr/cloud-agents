@@ -119,12 +119,19 @@ function idList(s: string | undefined, prefix: string): string[] {
  */
 export function commandOf(check: string | undefined): string | undefined {
   if (!check) return undefined;
-  // Several backticked commands ("`a` and `b`") are one check: all must pass.
-  const ticked = [...check.matchAll(/`([^`]+)`/g)].map((m) => m[1]!.trim()).filter((c) => COMMAND_HEAD.test(c) && !LOOKS_LIKE_PATH.test(c));
-  if (ticked.length) return ticked.join(" && ");
+  const isCommand = (c: string) => COMMAND_HEAD.test(c) && !LOOKS_LIKE_PATH.test(c) && /\s/.test(c) && !/<[a-z][\w-]*>/i.test(c);
+  const segments = [...check.matchAll(/`([^`]+)`/g)].map((m) => m[1]!.trim());
+  const ticked = segments.filter(isCommand);
+  if (ticked.length === 1) return ticked[0];
+  if (ticked.length > 1) {
+    // Several backticked commands are one check only when nothing but connectors sits between them
+    // ("`a` and `b`"). Commands mentioned inside a sentence ("run `npm ci`, then `npm start` and open …")
+    // describe what a stranger does: that is the Verifier's, not a command.
+    const residue = check.replace(/`[^`]+`/g, " ").replace(/\b(and|then|also|&&|;|,)\b/gi, " ").replace(/[\s,;.—–-]+/g, " ").trim();
+    return residue ? undefined : ticked.join(" && ");
+  }
   const candidate = check.trim();
-  if (!COMMAND_HEAD.test(candidate)) return undefined;
-  if (looksLikeProse(candidate)) return undefined;
+  if (!isCommand(candidate) || looksLikeProse(candidate)) return undefined;
   return candidate;
 }
 

@@ -28,10 +28,11 @@ export type TurnKind =
   | "task"
   | "qa"
   | "review"
-  // polya-craft (polya-craft/PATTERN.md, polya-craft/prompts/): the Verifier reuses `verify`.
+  // polya-craft (polya-craft/PATTERN.md, polya-craft/prompts/). `walk` is the Verifier walking the outer test.
   | "understand"
   | "devise"
   | "carry-out"
+  | "walk"
   | "look-back"
   | "other";
 
@@ -97,7 +98,7 @@ export function classifyPrompt(prompt: string): TurnKind {
   if (/^# Understand the problem/m.test(head)) return "understand";
   if (/^# Devise a plan/m.test(head)) return "devise";
   if (/^# Carry out: unit /m.test(head)) return "carry-out";
-  if (/^# Look back: verify/m.test(head)) return "verify";
+  if (/^# Look back: verify/m.test(head)) return "walk";
   if (/^# Look back: review/m.test(head)) return "look-back";
   return "other";
 }
@@ -146,6 +147,7 @@ export function preferredTier(kind: TurnKind, policy: RoutingPolicy): Tier {
       return policy.implement;
     case "verify":
     case "finish":
+    case "walk":
       return policy.verify;
     case "qa":
       return policy.qa;
