@@ -30,12 +30,35 @@ export interface LessonsStore {
   list(): Lesson[];
   /** Active entries whose tags intersect; the whole ledger when it is small. */
   select(tags: string[], opts?: { wholeBelow?: number }): Lesson[];
-  append(entries: NewLesson[], date?: Date): Lesson[];
+  /**
+   * One result per entry, in order. An entry whose lesson says what an active entry already says (word overlap
+   * at or above `MERGE_OVERLAP`) confirms that entry instead and comes back as it, with `merged: true`.
+   */
+  append(entries: NewLesson[], date?: Date): (Lesson & { merged?: boolean })[];
   /** A consulted lesson that helped: candidate -> confirmed(1), confirmed(n) -> confirmed(n+1). */
   confirm(ids: string[]): void;
 }
 
 const ENTRY = /^##\s+(L-[\w-]+)\s*$/m;
+
+/** Two lessons whose content words overlap this much (against the shorter one) say the same thing. */
+export const MERGE_OVERLAP = 0.6;
+
+const STOP = new Set("the a an and or of to in on for with that this is are be by it its as at from not no when then than one each any every into".split(" "));
+
+function words(text: string): Set<string> {
+  return new Set((text.toLowerCase().match(/[a-z0-9][a-z0-9_.-]{2,}/g) ?? []).filter((w) => !STOP.has(w)));
+}
+
+/** |A ∩ B| / min(|A|, |B|) over content words; 0 when either is empty. */
+export function lessonOverlap(a: string, b: string): number {
+  const A = words(a);
+  const B = words(b);
+  if (!A.size || !B.size) return 0;
+  let common = 0;
+  for (const w of A) if (B.has(w)) common++;
+  return common / Math.min(A.size, B.size);
+}
 
 export function parseLessons(md: string): Lesson[] {
   const out: Lesson[] = [];
@@ -88,16 +111,26 @@ export function fileLessonsStore(path = defaultLessonsPath()): LessonsStore {
       const lessons = parseLessons(original);
       const day = date.toISOString().slice(0, 10);
       let n = lessons.filter((l) => l.id.startsWith(`L-${day}-`)).length;
-      const added: Lesson[] = [];
+      const out: (Lesson & { merged?: boolean })[] = [];
+      let changed = false;
       for (const e of entries) {
-        if (!e.lesson?.trim()) continue;
+        if (!e.lesson?.trim() || !e.when?.trim()) continue;
+        const same = lessons.find((l) => l.status !== "retired" && lessonOverlap(l.lesson, e.lesson) >= MERGE_OVERLAP);
+        if (same) {
+          same.status = "confirmed";
+          same.confirmations += 1;
+          out.push({ ...same, merged: true });
+          changed = true;
+          continue;
+        }
         n++;
         const l: Lesson = { id: `L-${day}-${String(n).padStart(2, "0")}`, tags: e.tags.filter(Boolean), when: e.when.trim(), lesson: e.lesson.trim(), evidence: e.evidence.trim(), status: "candidate", confirmations: 0 };
         lessons.push(l);
-        added.push(l);
+        out.push(l);
+        changed = true;
       }
-      if (added.length) write(lessons, original);
-      return added;
+      if (changed) write(lessons, original);
+      return out;
     },
     confirm: (ids) => {
       const original = read();

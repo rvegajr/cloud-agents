@@ -125,6 +125,8 @@ export interface PolyaOptions {
   verifyFallbackTier?: "claude";
   /** Prose done-checks per Verifier turn (default 2): a local model walking five pages in one turn hits its tool-call cap. */
   verifyBatch?: number;
+  /** New lessons the ledger takes per run (default 2); the rest stay in LOOKBACK.md. */
+  lessonsPerRun?: number;
   /** Software problems: unit Checks must be commands and the quality bar must name `test`. Default true. */
   software?: boolean;
   /** The engine can give a turn a real browser (Playwright MCP); a unit or a done-check that names a page is sent with `browser: true`. */
@@ -196,7 +198,8 @@ function unitBlockForFix(id: string, what: string, touches: string[], check: str
 }
 
 /** LOOKBACK.md, rendered by the loop from evidence (PATTERN.md section 2.3). */
-export function renderLookback(state: PolyaState, problem: Problem | undefined, added: { id: string }[] = []): string {
+/** `labels[i]` names what became of the reviewer's i-th lesson in the ledger. */
+export function renderLookback(state: PolyaState, problem: Problem | undefined, labels: string[] = []): string {
   const title = problem?.title ?? "(untitled)";
   const results = (problem?.done ?? []).map((d) => {
     const c = state.checks?.find((x) => x.id === d.id);
@@ -209,7 +212,7 @@ export function renderLookback(state: PolyaState, problem: Problem | undefined, 
     ...(r?.did_not ?? []),
     ...state.unitRecords.filter((u) => u.attempts > 1 || !u.passed || u.question).map((u) => `${u.id}: ${u.question ? `asked "${u.question}"` : `${u.attempts} attempt(s)${u.failing?.length ? `, ${u.failing.join(", ")}` : ""}${u.passed ? "" : ", not passed"}`}`),
   ];
-  const lessons = (r?.lessons ?? []).map((l, i) => `## ${added[i]?.id ?? "(not appended)"}\nTags:     ${l.tags.join(" ")}\nWhen:     ${l.when}\nLesson:   ${l.lesson}\nEvidence: ${l.evidence}\nStatus:   candidate`);
+  const lessons = (r?.lessons ?? []).map((l, i) => `## ${labels[i] ?? "(not appended)"}\nTags:     ${(l.tags ?? []).join(" ")}\nWhen:     ${l.when ?? ""}\nLesson:   ${l.lesson}\nEvidence: ${l.evidence ?? ""}\nStatus:   candidate`);
   return (
     `# Look back: ${title}\n\n` +
     `Outcome: ${state.stopReason ?? "in progress"}${state.stopDetail ? ` — ${state.stopDetail}` : ""}\n\n` +
@@ -220,7 +223,7 @@ export function renderLookback(state: PolyaState, problem: Problem | undefined, 
     `## Lessons\n${lessons.join("\n\n") || "No lesson: the plan held."}\n\n` +
     (r?.confirmed?.length ? `Confirmed: ${r.confirmed.join(", ")}\n\n` : "") +
     `## Units\n${gateSummary(state.unitRecords, state.finish)}\n\n` +
-    `${FENCE}json lookback\n${JSON.stringify({ verdict: r?.verdict ?? (state.stopReason === "complete" ? "done" : "stop"), results: (problem?.done ?? []).map((d) => ({ id: d.id, met: state.checks?.find((x) => x.id === d.id)?.passed ?? null })), findings: r?.findings ?? [], lessons: added.map((a) => a.id), confirmed: r?.confirmed ?? [] }, null, 2)}\n${FENCE}\n`
+    `${FENCE}json lookback\n${JSON.stringify({ verdict: r?.verdict ?? (state.stopReason === "complete" ? "done" : "stop"), results: (problem?.done ?? []).map((d) => ({ id: d.id, met: state.checks?.find((x) => x.id === d.id)?.passed ?? null })), findings: r?.findings ?? [], lessons: labels.filter((x) => /^L-/.test(x)).map((x) => x.split(" ")[0]), confirmed: r?.confirmed ?? [] }, null, 2)}\n${FENCE}\n`
   );
 }
 
@@ -255,13 +258,22 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     lookbackWritten = true;
     const problem = state.problem ?? readProblem();
     const report = state.review;
-    let added: { id: string }[] = [];
+    const cap = opts.lessonsPerRun ?? 2;
+    const all = report?.lessons ?? [];
+    // Every lesson stays in LOOKBACK.md; what the ledger takes is labelled there.
+    const labels: string[] = all.map((l) =>
+      !l?.lesson || /^\s*no lesson\b/i.test(l.lesson) ? "(no lesson)" : !l.when?.trim() ? "(not appended: no When)" : "(not appended: over the per-run cap)",
+    );
+    let added = 0;
     let confirmed = 0;
     if (lessons) {
       try {
-        // "No lesson: the plan held" is an entry in LOOKBACK.md, never in the ledger.
-        const real = (report?.lessons ?? []).filter((l) => l && l.lesson && !/^\s*no lesson\b/i.test(l.lesson));
-        if (real.length) added = lessons.append(real.map((l) => ({ tags: l.tags ?? [], when: l.when ?? problem?.title ?? "", lesson: l.lesson, evidence: l.evidence ?? problem?.title ?? "" })));
+        const eligible = all.map((l, i) => ({ l, i })).filter(({ i }) => labels[i] === "(not appended: over the per-run cap)").slice(0, cap);
+        const results = eligible.length ? lessons.append(eligible.map(({ l }) => ({ tags: l.tags ?? [], when: l.when!, lesson: l.lesson, evidence: l.evidence ?? problem?.title ?? "" }))) : [];
+        results.forEach((res, k) => {
+          labels[eligible[k]!.i] = res.merged ? `${res.id} (confirmed: says what this entry already said)` : res.id;
+          if (!res.merged) added++;
+        });
         if (report?.confirmed?.length) {
           lessons.confirm(report.confirmed);
           confirmed = report.confirmed.length;
@@ -270,10 +282,10 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
         log(`ledger: could not write (${(err as Error).message})`);
       }
     }
-    io.writeFile(ARTIFACTS.lookback, renderLookback(state, problem, added));
+    io.writeFile(ARTIFACTS.lookback, renderLookback(state, problem, labels));
     io.commit("look back: LOOKBACK.md");
-    state.lookback = { written: true, lessons: added.length, confirmed };
-    log(`look back written: ${added.length} lesson(s) appended, ${confirmed} confirmed`);
+    state.lookback = { written: true, lessons: added, confirmed };
+    log(`look back written: ${added} lesson(s) appended, ${confirmed} confirmed`);
   };
 
   const stop = async (reason: PolyaStopReason, detail?: string, phase: PolyaPhase = "stopped") => {

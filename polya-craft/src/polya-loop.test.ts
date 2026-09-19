@@ -567,3 +567,18 @@ test("the Verifier walks prose done-checks two per turn, each batch in the same 
   assert.deepEqual(out.checks!.filter((c) => c.how === "verifier").map((c) => c.id), ["D2", "D3", "D4", "D5", "D6"]);
 });
 
+test("look back (d): the ledger takes at most two lessons per run; the rest, and any without a When, stay in LOOKBACK.md labelled", async () => {
+  const { io, files } = makeIO();
+  const lessons = memLessons();
+  const l = (n: number, when = "w") => ({ tags: ["kind:repair"], when, lesson: `lesson number ${n}`, evidence: "e" });
+  const { send } = makeSend({ "look-back": () => json({ verdict: "done", findings: [], lessons: [l(1), l(2, ""), l(3), l(4)] }) });
+  const out = await runPolyaLoop(send, { ...base, io, lessons });
+  assert.equal(out.stopReason, "complete");
+  assert.deepEqual(lessons.added.map((x) => x.lesson), ["lesson number 1", "lesson number 3"]);
+  assert.equal(out.lookback?.lessons, 2);
+  const lb = files[".polya/LOOKBACK.md"]!;
+  assert.match(lb, /## L-new-1\n[\s\S]*lesson number 1/);
+  assert.match(lb, /## \(not appended: no When\)\n[\s\S]*lesson number 2/);
+  assert.match(lb, /## \(not appended: over the per-run cap\)\n[\s\S]*lesson number 4/);
+});
+
