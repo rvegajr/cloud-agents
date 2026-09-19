@@ -463,3 +463,20 @@ test("a PROBLEM.md or PLAN.md already on disk and workable skips the Solver turn
   assert.equal(sent3[0]!.kind, "devise");
   assert.match(sent3[0]!.prompt, /^## Re-plan/);
 });
+
+test("ownership failure: the orchestrator reverts what the Hand wrote outside Touches and tells it", async () => {
+  const { io } = makeIO({ gates: [fail("ownership"), pass] });
+  const reverts: { base?: string; allowed: string[] }[] = [];
+  io.revertOutside = (base, allowed) => {
+    reverts.push({ base, allowed });
+    return ["src/main.ts"];
+  };
+  const { send, sent } = makeSend({});
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  assert.deepEqual(reverts, [{ base: "sha2", allowed: ["src/app.js"] }]);
+  assert.match(sent[3]!.prompt, /^## Files outside Touches were reverted\n\nThe orchestrator put src\/main\.ts back/);
+  assert.match(sent[3]!.prompt, /## Quality gate failed \(attempt 1\)/);
+  assert.equal(out.unitRecords[0]!.attempts, 2);
+});
+

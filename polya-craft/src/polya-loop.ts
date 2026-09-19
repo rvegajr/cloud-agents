@@ -23,6 +23,8 @@ import { ARTIFACTS, parsePlan, parseProblem, problemGaps, renderPlan, renderProb
 export type PolyaIO = BlueprintIO & {
   /** Start a long-running command (the quality bar's `start`) in `cwd`; resolve once it has had time to listen. The loop stops it. */
   start?(command: string, cwd: string): Promise<{ stop(): void }>;
+  /** Put every file changed since `baseSha` that is not in `allowed` back as it was, and commit. Returns what was reverted. */
+  revertOutside?(baseSha: string, allowed: string[]): string[];
 };
 
 /** A done-check that curls a server needs the server running. */
@@ -334,7 +336,17 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
         record.passed = true;
         return { record, gate };
       }
-      prompt = `${gateFeedbackNote(attempt + 1, gate)}${base}`;
+      // Rule 1 of the pattern is enforced by the orchestrator, not delegated: what the Hand wrote outside
+      // Touches is put back, so the next attempt starts inside its scope and is told why.
+      let revertNote = "";
+      if (record.failing.includes("ownership") && io.revertOutside) {
+        const reverted = io.revertOutside(baseSha, unit.touches);
+        if (reverted.length) {
+          log(`reverted outside Touches: ${reverted.join(", ")}`);
+          revertNote = `## Files outside Touches were reverted\n\nThe orchestrator put ${reverted.join(", ")} back as they were. Only ${unit.touches.join(", ")} may change. If the unit cannot be done inside them, say so in \`notes\` and stop.\n\n`;
+        }
+      }
+      prompt = `${revertNote}${gateFeedbackNote(attempt + 1, gate)}${base}`;
     }
     return { record, gate };
   };
