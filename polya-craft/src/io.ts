@@ -59,6 +59,13 @@ export function makePolyaIO(
           }, 150);
         });
       }),
+    changedFiles: (sha) => {
+      try {
+        return git(["diff", "--name-only", `${sha}..HEAD`]).split("\n").filter(Boolean);
+      } catch {
+        return [];
+      }
+    },
     removeFile: (rel) => {
       const p = join(cwd, rel);
       if (!existsSync(p)) return false;

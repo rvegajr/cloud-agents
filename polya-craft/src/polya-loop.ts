@@ -31,6 +31,8 @@ export type PolyaIO = BlueprintIO & {
   resetTo?(sha: string): void;
   /** Delete a file from the working tree (the next commit records it). */
   removeFile?(rel: string): boolean;
+  /** Paths changed between `sha` and HEAD. */
+  changedFiles?(sha: string): string[];
   /**
    * Run a done-check: finished when its shell exits, whatever it left running in the background, and everything it
    * started is killed with it. `runCommand` waits for every holder of the output pipe, so a check that starts a
@@ -110,6 +112,8 @@ export interface PolyaState {
   baselineSha?: string;
   /** A Hand's question, carried into the next Devise turn on resume. */
   replanNote?: string;
+  /** Files the Solver itself committed after the baseline (a repair's red test); the finish check allows them. */
+  solverFiles?: string[];
   finish?: { passed: boolean; failing: string[] };
   checks?: CheckResult[];
   verifyAttempts: number;
@@ -410,6 +414,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       next_id: nextId,
     });
     log(`repair (${stage}): asking the Solver for units from ${nextId}`);
+    const beforeSha = io.headSha();
     let t = await send(prompt, { mode: "agent" });
     track(t);
     if (t.status !== "finished") return { reason: "run-failed", detail: "repair turn did not finish" };
@@ -437,6 +442,8 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     for (const u of units) {
       if (u.command && (await io.runCommand(u.command)).code === 0) return { reason: stopFor, detail: `repair ${u.id}'s Check already passes; it measures nothing` };
     }
+    // The red test the Solver wrote for the repair is the Solver's file, not a Hand's: the finish check allows it.
+    state.solverFiles = union(state.solverFiles, io.changedFiles?.(beforeSha) ?? []);
     state.units = [...state.units, ...units];
     await persist();
     for (const u of units) {
@@ -598,7 +605,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
 
   const allTouches = union(...state.units.map((u) => u.touches));
   // The finish check spans the whole job; the loop's own artifacts (written on an earlier pass, or corrected by hand) are not the Hand's doing.
-  const finishAllowed = union(allTouches, [ARTIFACTS.problem, ARTIFACTS.plan, ARTIFACTS.lookback]);
+  const finishAllowed = () => union(allTouches, ...state.units.map((u) => u.touches), state.solverFiles, [ARTIFACTS.problem, ARTIFACTS.plan, ARTIFACTS.lookback]);
 
   // ---- 4. Look back ---------------------------------------------------------
   if (state.phase === "look-back") {
@@ -613,9 +620,25 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       log("cleared the previous pass's LOOKBACK.md");
     }
 
+    // A unit that has not passed its gate (a repair from an earlier pass, or a resume mid-stage) runs first.
+    for (const u of state.units.filter((x) => !state.unitRecords.find((r) => r.id === x.id)?.passed)) {
+      log(`carry out ${u.id} (unfinished): ${u.title}`);
+      const passedCommands = state.unitRecords.filter((r) => r.passed).map((r) => state.units.find((x) => x.id === r.id)?.command).filter((c): c is string => Boolean(c));
+      const r = await handTurn({ id: u.id, block: u.body, touches: u.touches, command: u.command }, `${problem.restated ?? ""}\n\nDone-checks this unit serves:\n${doneLines(problem, u)}`, union(passedCommands, u.command ? [u.command] : []));
+      if (r === "run-failed") return stop("run-failed", `${u.id} turn did not finish`);
+      state.unitRecords = state.unitRecords.filter((x) => x.id !== u.id);
+      state.unitRecords.push(r.record);
+      await persist();
+      if (r.blocked) {
+        state.replanNote = `Unit ${u.id} asked: "${r.blocked}"`;
+        return stop("unit-not-workable", `${u.id} asked: ${r.blocked}`);
+      }
+      if (!r.record.passed) return stop("unit-gate-failed", `${u.id} failed the gate after ${r.record.attempts} attempt(s): ${(r.record.failing ?? []).join(", ")}`);
+    }
+
     // (a) the finish check: ownership over the whole job, hygiene, the bar, clean start, vacuous suite.
     log("look back (a): checks from a clean state");
-    let gate = await io.gate("finish", { allowedFiles: finishAllowed, baseSha: state.baselineSha });
+    let gate = await io.gate("finish", { allowedFiles: finishAllowed(), baseSha: state.baselineSha });
     if (!gate.passed) {
       const what = gate.findings.filter((f) => !f.ok).map((f) => `- [${f.rule}] ${f.detail}${f.command ? ` (\`${f.command}\`)` : ""}${f.output ? `\n  ${tail(f.output, 30).replace(/\n/g, "\n  ")}` : ""}`).join("\n");
       log(`finish check failed: ${failingRules(gate).join(", ")}; the Solver devises a repair`);
@@ -624,7 +647,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
         state.finish = { passed: false, failing: failingRules(gate) };
         return stop(stopped.reason, stopped.detail);
       }
-      gate = await io.gate("finish", { allowedFiles: union(finishAllowed, ...state.units.map((u) => u.touches)), baseSha: state.baselineSha });
+      gate = await io.gate("finish", { allowedFiles: finishAllowed(), baseSha: state.baselineSha });
     }
     state.finish = { passed: gate.passed, failing: failingRules(gate) };
     await persist();

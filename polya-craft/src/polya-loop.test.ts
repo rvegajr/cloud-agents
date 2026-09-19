@@ -70,6 +70,7 @@ function makeIO(overrides: Partial<PolyaIO> & { files?: Record<string, string>; 
       return `/tmp/clone-${calls.clones}`;
     },
     diffStat: () => " 2 files changed",
+    changedFiles: () => ["test/repair.red-until-fixed.test.js"],
     removeFile: (rel) => {
       if (!(rel in files)) return false;
       delete files[rel];
@@ -684,5 +685,24 @@ test("repair: the Solver may say the check is wrong; an unworkable repair gets o
   const out3 = await runPolyaLoop(makeSend({ walk: failing, devise: green }).send, { ...base, io: io3, lessons: null });
   assert.equal(out3.stopReason, "verify-failed");
   assert.match(out3.stopDetail!, /U3's Check already passes; it measures nothing/);
+});
+
+test("look back: an unfinished unit runs before the finish check, and the Solver's repair test is allowed there", async () => {
+  const plan = `${PLAN_MD}\n\n## Repairs\n\n## U3: repair\nServes:   D1\nProduces: x\nGiven:    y\nDo:       1. Fix src/app.js.\nTouches:  src/app.js\nCheck:    \`node --test test/repair.red-until-fixed.test.js\`\nDepends:  none\nNot:      z\n`;
+  const { io, calls } = makeIO({ preload: true, files: { ".polya/PLAN.md": plan } });
+  const { send, sent } = makeSend({});
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null }, {
+    phase: "look-back",
+    units: parsePlan(plan).units,
+    unitRecords: [{ id: "U1", attempts: 1, passed: true }, { id: "U2", attempts: 1, passed: true }, { id: "U3", attempts: 3, passed: false }],
+    baselineSha: "sha0",
+    solverFiles: ["test/repair.red-until-fixed.test.js"],
+  });
+  assert.equal(out.stopReason, "complete");
+  assert.ok(sent.some((s) => /# Carry out: unit U3/.test(s.prompt)), "the unfinished repair unit ran first");
+  assert.equal(out.unitRecords.find((r) => r.id === "U3")!.passed, true);
+  const finish = calls.gate.find((g) => g.kind === "finish")!;
+  assert.ok(finish.allowed!.includes("test/repair.red-until-fixed.test.js"), finish.allowed!.join(", "));
+  assert.ok(finish.allowed!.includes("src/app.js"));
 });
 
