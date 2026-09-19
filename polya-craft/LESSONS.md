@@ -1,0 +1,26 @@
+# Lessons
+
+<!-- The ledger. Append-only. One entry per lesson; PATTERN.md section 5 has the rules.
+     Read at Understand; written at Look back. Entries here are cross-project and process
+     lessons. A target repo may keep its own at .polya/LESSONS.md; both are read. -->
+
+## L-2026-09-18-01
+Tags:     kind:build kind:change stage:devise domain:software
+When:     a unit's Given pastes content that also lives in a file the Hand can read
+Lesson:   name the file as the owner and let the packet be assembled from it when the unit runs; never paste a copy that can drift
+Evidence: polya-craft design; the window that did not fit its opening in examples/house.md, U8
+Status:   candidate
+
+## L-2026-09-18-02
+Tags:     kind:build stage:understand
+When:     a done-check depends on work in more than one sub-problem
+Lesson:   keep the D in PROBLEM.md, list it in every sub-plan's Trace that carries it, and read the next draft plan against Still-open at each look back
+Evidence: polya-craft design; the hollow-core door found at P2 look back in examples/house.md
+Status:   candidate
+
+## L-2026-09-18-03
+Tags:     stage:devise
+When:     a check already exists for a level (an inspection, a CI job, a rubric)
+Lesson:   adopt it verbatim as the level check and name the units that close it; do not write a parallel one
+Evidence: polya-craft design; the county inspection schedule in examples/house.md
+Status:   candidate

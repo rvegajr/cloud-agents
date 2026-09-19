@@ -23,6 +23,11 @@ stage contract, and gate rule, and worked examples for a repair and an upgrade),
 `prompts/` (the seven turns), `templates/` (fill-in artifact files), `src/` (the
 deterministic quality gate and its tests), and `ROADMAP.md` (what is built and
 what is not).
+`polya-craft/` is a fresh loop beside it on Pólya's four steps, for any problem,
+not only software: `WALKTHROUGH.md` (by hand, two chat windows, on a grant
+proposal and a bug), `THEORY.md`, `PATTERN.md`, `examples/house.md`, five
+prompts, four templates, and `LESSONS.md`, the ledger the next problem reads
+first. Its loop is not built yet.
 `IMPLEMENTATION-GUIDE.md` is the same setup as a recipe an AI agent can execute:
 every credential and scope in the order it is needed, with the browser-only steps
 marked as human gates, and `npm run doctor` to prove each one. `CHANGELOG.md` is
@@ -506,6 +511,9 @@ cloud-agents/
   slack-app-manifest.json        paste at api.slack.com/apps
   railway.json                   start command for npm run slack
   .env.example                   credentials + target repo + Slack tokens
+  polya-craft/                   fresh loop on Pólya's four steps; any problem
+    WALKTHROUGH.md THEORY.md PATTERN.md ARTICLE.md ROADMAP.md LESSONS.md
+    examples/house.md  templates/  prompts/
   briefs/
     TEMPLATE.md                  the brief skeleton, with a rationale per section
     example-health-endpoint.md   a filled-in, runnable example

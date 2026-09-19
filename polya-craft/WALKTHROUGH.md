@@ -16,7 +16,9 @@ You need:
 
 The worked problem below is a grant proposal, on purpose. If the pattern only
 worked for code it would be a build pipeline, not a way to solve problems.
-Section 6 does the same walk for a one-line bug in fifteen lines.
+Section 6 does the same walk for a one-line bug in fifteen lines, and
+`examples/house.md` walks a whole house, every stage, with a human crew as
+the Hand.
 
 ---
 
