@@ -16,6 +16,7 @@ four steps, for any problem: a bug, a product, a proposal, a house.
 | `examples/site-inspection.md` | Find as many bugs as possible in a site; kind: answer; the deliverable is a report, and Understand refuses "all" | written |
 | `ARTICLE.md` | Where it comes from and why it is a fresh loop, with sources | written |
 | `ROADMAP.md` | Built, known limitations, not built, measurement | written |
+| `NEXT-SESSION.md` | The experiments queued for the next session: files under `.polya/`, Verifier batching, ledger hygiene, the oracle, and the Sonnet reruns that measure them | written |
 | `templates/` | `PROBLEM.md`, `PLAN.md`, `LOOKBACK.md`, `ONE-PAGE.md` | written |
 | `prompts/` | The five turns: `understand`, `devise`, `carry-out`, `verify`, `look-back` | written, render-tested |
 | `LESSONS.md` | The ledger, seeded with three process lessons | written |
@@ -23,7 +24,7 @@ four steps, for any problem: a bug, a product, a proposal, a house.
 | `src/lessons.ts` | The ledger store: select by tags, append, confirm; the prior-lessons note | built |
 | `src/io.ts` | `makePolyaIO`: architect-crew-gate's repo I/O with the gate reading PROBLEM.md's quality bar | built |
 | `src/polya-loop.ts` | The loop: understand → devise → gated units → look back (a, b, c, d); LOOKBACK.md written from evidence; a unit or done-check that names a page gets a browser for that turn | built |
-| `src/*.test.ts` | Parsers, validator, ledger, prompt render/classify/route, the loop with a faked Hand and Solver, end to end on a real bare origin with the real gate | 50 tests, passing |
+| `src/*.test.ts` | Parsers, validator, ledger, prompt render/classify/route, the loop with a faked Hand and Solver, end to end on a real bare origin with the real gate | 68 tests, passing |
 
 ## Read in this order
 

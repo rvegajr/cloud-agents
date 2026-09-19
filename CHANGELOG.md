@@ -45,6 +45,48 @@ npm run deploy                        # stamp the commit, then ship
   page gets Playwright attached for that turn, through the engine's existing
   path. 50 tests, including end to end on a real bare origin with the real
   gate.
+- **Solver comparison: Sonnet vs Opus vs Fable 5.1, both at max effort and a
+  full thinking budget, on the snippet-vault build.** `CLAUDE_EFFORT` and
+  `CLAUDE_THINKING_TOKENS` env vars, applied to every Claude turn (the
+  Solver, on the hybrid engine). Same idea, same Hand, three independent
+  runs, blind-scored together: Sonnet 29/35 (merge-with-followup), Opus
+  34/35 (merge, all 3 repeats), Fable 5.1 34/35 (merge, all 3 repeats).
+  Both stronger Solvers closed the tests and UX gap unprompted — negative-
+  case tests, empty-state and failed-save messages — confirming the gap was
+  judgment at Understand/Devise, not the Hand. Neither improved structure,
+  which stays capped by the loop's own artifacts at the repo root
+  regardless of Solver strength. Cost: Sonnet $6.39, Opus $35.78, Fable
+  $31.51 (Max API-eq). `ROADMAP.md` has the full table and reading.
+- **First live polya run and what it fixed.** A repair on the hybrid engine
+  (Claude Max Solver, qwen3-coder-next Hand) completed end to end:
+  understand, devise with one plan-lint retry, one Hand turn gate-green,
+  finish check, five done-checks met against a server the loop started in a
+  fresh clone, a clean review, LOOKBACK.md. Two orchestrator defects surfaced
+  and are fixed with the live artifacts as fixtures: the parser crashed on the
+  Solver's json block and missed its bold multi-line done-checks (now lenient,
+  aliases accepted, never throws); a backticked path in a Check was joined into
+  a shell command (now a path is a name). Done-checks that curl the app start
+  the bar's `start` in the clone. "No lesson" stays out of the ledger. 258
+  tests. The same repair then ran under `--loop blueprint` and both PRs were
+  scored blind: identical source diff; polya 32.5, blueprint 27, and the gap
+  is one reviewer repeat that sent `GET //` and crashed a line in the original
+  fixture that neither loop's look back had probed. That crash is now a ledger
+  entry; `ROADMAP.md` has the table and the reading.
+- **Second live polya run: the snippet-vault build.** Five units, every one
+  gate-green on its first attempt, zero Hand questions; the Verifier walked
+  five prose done-checks in a browser on the local model alone; 8/8 met, one
+  of them the malformed-path probe that entered the ledger from the repair the
+  day before. Blind score in one invocation with the existing builds: Claude
+  31, Cursor 30, **polya 29**, ACG 28.5; polya best of four on correctness,
+  security and validation, behind on tests, UX and structure. Eight
+  orchestrator defects surfaced and are fixed with the live artifacts as
+  fixtures: the plan parser (h3 units, next-line fields, fenced files, object
+  traces, no throw); paid turns skipped when the artifact is on disk; the unit
+  gate runs only the unit's Check; the orchestrator reverts files outside
+  Touches; prose that mentions commands is the Verifier's; the Verifier is the
+  `walk` turn kind, never rescued; a stale LOOKBACK.md is cleared before a
+  pass and findings about the record never reach the Hand; a Hand turn that
+  rewrites git history is discarded. 268 tests.
 - **`architect-crew-gate/`: the pattern in its own folder.** `THEORY.md` is the
   claim, five principles, and operating instructions an AI or a person can act
   on directly; `PATTERN.md` is

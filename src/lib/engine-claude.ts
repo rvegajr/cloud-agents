@@ -112,6 +112,20 @@ export function scrubbedEnv(): Record<string, string | undefined> {
   return out;
 }
 
+/**
+ * `CLAUDE_EFFORT=low|medium|high|xhigh|max` and `CLAUDE_THINKING_TOKENS=<n>` (extended thinking with that budget)
+ * for every Claude turn. Unset = the SDK's defaults. `max` is honoured on select models; `xhigh` falls back to
+ * `high` where unsupported.
+ */
+export function claudeReasoningFromEnv(env: NodeJS.ProcessEnv = process.env): Pick<Options, "effort" | "thinking"> {
+  const out: Pick<Options, "effort" | "thinking"> = {};
+  const effort = env.CLAUDE_EFFORT?.trim().toLowerCase();
+  if (effort === "low" || effort === "medium" || effort === "high" || effort === "xhigh" || effort === "max") out.effort = effort;
+  const budget = Number(env.CLAUDE_THINKING_TOKENS);
+  if (Number.isFinite(budget) && budget > 0) out.thinking = { type: "enabled", budgetTokens: Math.floor(budget) };
+  return out;
+}
+
 export function assertClaudeCredential(): void {
   if (process.env.ANTHROPIC_API_KEY?.trim()) {
     throw new Error("ANTHROPIC_API_KEY is set; unset it so ENGINE=claude bills Max, not the API.");
@@ -235,6 +249,8 @@ export function makeClaudeSend(opts: {
       cwd: o?.cwd ?? opts.cwd,
       resume: fresh ? undefined : sessionId,
       model: opts.model ?? (process.env.CLAUDE_MODEL?.trim() || "sonnet"),
+      // Judgment turns are the only Claude turns on the hybrid engine, so the effort and thinking budget apply to all of them.
+      ...claudeReasoningFromEnv(),
       permissionMode: o?.mode === "plan" ? "plan" : "acceptEdits",
       allowedTools: [...(opts.tools?.allowed ?? ["Read", "Grep", "Glob", "Edit", "Write", "Bash"]), ...(browser ? ["mcp__playwright"] : [])],
       ...(opts.tools?.disallowed?.length ? { disallowedTools: opts.tools.disallowed } : {}),

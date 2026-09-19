@@ -149,7 +149,7 @@ test("parsePlan: units with continued fields, commands, depends, levels, outer t
   assert.deepEqual(u1.touches, ["src/app.js"]);
   assert.equal(u1.check, "`node --test test/notfound.test.js`");
   assert.equal(u1.command, "node --test test/notfound.test.js");
-  assert.match(u1.do, /1\. Move.*2\. Run Check/);
+  assert.match(u1.do, /1\. Move[\s\S]*2\. Run Check/);
   assert.deepEqual(u1.depends, []);
   assert.deepEqual(plan.units[1]!.depends, ["U1"]);
   assert.match(u1.body, /^## U1:/);
@@ -181,14 +181,15 @@ test("validateUnits: each mechanical row of the stranger test", () => {
   assert.match(problems({ given: "" }), /no Given/);
   assert.match(problems({ touches: ["test/notfound.test.js"] }), /test file/);
   assert.match(problems({ touches: ["PLAN.md"] }), /plan artifact/);
-  assert.match(problems({ touches: ["a", "b", "c", "d", "e"] }), /more than 4/);
+  assert.match(problems({ touches: ["a", "b", "c", "d", "e", "f", "g"] }), /more than 6/);
   assert.match(problems({ check: "looks right to me", command: undefined }), /prose/);
   assert.match(problems({ do: "1. Choose the best handler order." }), /"Choose"/i);
-  assert.match(problems({ do: "1. a 2. b 3. c 4. d 5. e 6. f 7. g 8. h" }), /8 steps/);
+  assert.match(problems({ do: Array.from({ length: 10 }, (_, i) => `${i + 1}. step`).join("\n") }), /10 steps/);
+  assert.equal(problems({ do: "1. a\n```json\n1. not a step\n2. nor this\n```\n2. b" }).includes("steps"), false);
   assert.match(problems({ serves: [] }), /names no D/);
   assert.match(problems({ serves: ["D9"] }), /D9/);
   assert.match(problems({ depends: ["U7"] }), /U7/);
-  assert.match(problems({ body: Array.from({ length: 70 }, () => "x").join("\n") }), /70 lines/);
+  assert.match(problems({ body: Array.from({ length: 450 }, () => "x").join("\n") }), /450 lines/);
   assert.match(problems({}, { exists: () => false }), /not on disk/);
   assert.equal(problems({ check: "a stranger reads it", command: undefined }, { requireCommand: false }), "D2 is served by no unit");
 });
@@ -225,3 +226,97 @@ test("renderProblem / renderPlan round-trip through the parsers", () => {
   assert.equal(plan.outer[0]!.d, "D1");
   assert.equal(renderPlan({}), undefined);
 });
+
+// The PROBLEM.md a live Claude Max Solver wrote on 2026-09-18 for the polya-live-404 repair: bold ids, three-line
+// done-checks, "met (invariant)", a three-column bar table, and a json block with its own field names.
+import { readFileSync } from "node:fs";
+const LIVE = readFileSync(new URL("./fixtures-live-problem.md", import.meta.url), "utf8");
+
+test("parseProblem: the live Solver's drifted format parses without a gap", () => {
+  const p = parseProblem(LIVE)!;
+  assert.equal(p.kind, "repair");
+  assert.deepEqual(p.done.map((d) => d.id), ["D1", "D2", "D3", "D4", "D5"]);
+  assert.equal(p.done[0]!.command, `test "$(curl -s -o /dev/null -w '%{http_code}' localhost:4571/nope)" = "404" && test "$(curl -s localhost:4571/nope)" = "not found"`);
+  assert.match(p.done[0]!.text, /^`GET \/nope` on the running app answers 404/);
+  assert.equal(p.done[0]!.now, "unmet");
+  assert.equal(p.done[2]!.now, "met");
+  assert.equal(p.done[4]!.command, "npm test");
+  assert.deepEqual(p.bar, { install: "npm install", test: "npm test", start: "npm start" });
+  assert.match(p.restated!, /catch-all handler/);
+  assert.deepEqual(p.split, []);
+  assert.deepEqual(problemGaps(p, { software: true }), []);
+});
+
+test("parseProblem: a json block with aliases and a false split never throws", () => {
+  const md = '# Problem: x\n\n```json problem\n{ "kind": "repair", "done_checks": [ { "id": "D1", "statement": "s", "check": "npm test", "status": "met (invariant)" } ], "quality_bar": { "test": "npm test" }, "split": false, "lessons": null }\n```\n';
+  const p = parseProblem(md)!;
+  assert.equal(p.done[0]!.text, "s");
+  assert.equal(p.done[0]!.now, "met");
+  assert.equal(p.bar.test, "npm test");
+  assert.deepEqual(p.split, []);
+  assert.deepEqual(p.lessons, []);
+});
+
+test("commandOf: several backticked commands are one check", () => {
+  assert.equal(commandOf("`npm test` and `npm run lint`"), "npm test && npm run lint");
+});
+
+test("commandOf: a backticked path or glob is not a command; `test` needs an argument", () => {
+  assert.equal(commandOf("`npm test` — now: unmet. This command is outside Touches (it runs `test/*.test.js`, and `src/app.js` is not a test file)."), "npm test");
+  assert.equal(commandOf("`test/app.test.js`"), undefined);
+  assert.equal(commandOf("test"), undefined);
+  assert.equal(commandOf(`test "$(curl -s localhost:4571/nope)" = "not found"`), `test "$(curl -s localhost:4571/nope)" = "not found"`);
+});
+
+// The PLAN.md the same live Solver wrote: a fenced Given, multi-line Do with fenced blocks, prose in the Check field.
+const LIVE_PLAN = readFileSync(new URL("./fixtures-live-plan.md", import.meta.url), "utf8");
+
+test("parsePlan: the live Solver's plan yields one lawful unit whose Check is `npm test`", () => {
+  const plan = parsePlan(LIVE_PLAN);
+  assert.equal(plan.units.length, 1);
+  const u = plan.units[0]!;
+  assert.equal(u.id, "U1");
+  assert.deepEqual(u.serves, ["D1", "D2", "D3", "D4", "D5"]);
+  assert.deepEqual(u.touches, ["src/app.js"]);
+  assert.equal(u.command, "npm test");
+  const p = parseProblem(LIVE)!;
+  assert.deepEqual(validateUnits(plan.units, p, { requireCommand: true }), []);
+});
+
+// The PLAN.md and PROBLEM.md a live Claude Max Solver wrote for the snippet-vault build ($2.84 of Max): h3 unit
+// headings, `Do:` with steps on the next lines carrying whole files in fences, a trace of objects.
+const LIVE_SV_PLAN = readFileSync(new URL("./fixtures-live-plan-sv.md", import.meta.url), "utf8");
+const LIVE_SV_PROBLEM = readFileSync(new URL("./fixtures-live-problem-sv.md", import.meta.url), "utf8");
+
+test("parsePlan: the live snippet-vault plan yields five lawful units", () => {
+  const p = parseProblem(LIVE_SV_PROBLEM)!;
+  assert.deepEqual(problemGaps(p, { software: true }), []);
+  const plan = parsePlan(LIVE_SV_PLAN);
+  assert.deepEqual(plan.units.map((u) => u.id), ["U1", "U2", "U3", "U4", "U5"]);
+  const u1 = plan.units[0]!;
+  assert.deepEqual(u1.serves, ["D2", "D8"]);
+  assert.ok(u1.do.includes("Create `package.json`"), "Do starts on the next line");
+  assert.ok(u1.do.includes('"name": "snippet-vault"'), "Do carries the fenced file");
+  assert.ok(u1.touches.length >= 1 && u1.touches.every((t) => !/^\d+\./.test(t)));
+  assert.ok(u1.command, `U1 check should be a command: ${u1.check.slice(0, 80)}`);
+  assert.deepEqual(plan.trace.D1, ["U3", "U4", "U5"]);
+  assert.deepEqual(plan.units[1]!.depends, ["U1"]);
+  assert.deepEqual(validateUnits(plan.units, p, { requireCommand: true }), []);
+});
+
+test("commandOf: commands mentioned inside a sentence are an observation, not a command (live snippet-vault D1, D4, D5)", () => {
+  assert.equal(commandOf("A stranger runs `npm ci`, then `npm run dev` or `npm start`, and opens the page"), undefined);
+  assert.equal(commandOf("type `jq` in the box; `curl -s 'localhost:3000/api/snippets?q=id' | grep -q '\"id\"'` prints a match and `curl -s 'localhost:3000/api/snippets?q=jq'` lists it"), undefined);
+  // One real command inside annotation is that command (the live 404 plan's U1).
+  assert.equal(commandOf("`jq` appears; `curl -s 'localhost:3000/api/snippets?q=id' | grep -q '\"id\"'` prints a match"), `curl -s 'localhost:3000/api/snippets?q=id' | grep -q '"id"'`);
+  assert.equal(commandOf("`ls <projectdir>/*.db` shows a file and `curl -sf localhost:3000/api/snippets/<id>` returns it"), undefined);
+  assert.equal(commandOf("`npm test` and `npm run lint`"), "npm test && npm run lint");
+  assert.equal(commandOf("`npm test`; `npm run lint`"), "npm test && npm run lint");
+  assert.equal(commandOf("`jq`"), undefined);
+});
+
+test("parsePlan: a parenthetical note inside Touches is not a file", () => {
+  const plan = parsePlan(PLAN_MD.replace("Touches:  src/app.js", "Touches:  `src/app.js`, `node_modules/` (generated, gitignored)"));
+  assert.deepEqual(plan.units[0]!.touches, ["src/app.js", "node_modules/"]);
+});
+

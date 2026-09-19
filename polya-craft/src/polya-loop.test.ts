@@ -5,6 +5,7 @@ import { classifyPrompt } from "../../src/lib/routing.js";
 import type { GateResult } from "../../architect-crew-gate/src/quality-gate.js";
 import type { Lesson, LessonsStore, NewLesson } from "./lessons.js";
 import { PLAN_MD, PROBLEM_MD } from "./plan.test.js";
+import { parsePlan } from "./plan.js";
 import { initialPolyaState, polyaResumePhase, runPolyaLoop, type PolyaIO, type PolyaState } from "./polya-loop.js";
 
 /**
@@ -16,13 +17,25 @@ import { initialPolyaState, polyaResumePhase, runPolyaLoop, type PolyaIO, type P
 const pass: GateResult = { passed: true, findings: [], seconds: 1, skipped: [] };
 const fail = (rule: "quality-bar" | "ownership"): GateResult => ({ passed: false, findings: [{ rule, ok: false, detail: `${rule} failed`, command: "npm test", output: "boom" }], seconds: 1, skipped: [] });
 
-function makeIO(overrides: Partial<PolyaIO> & { files?: Record<string, string>; gates?: GateResult[]; commands?: Record<string, number> } = {}) {
+/** What the fake Solver writes when its turn runs; a test may override either. */
+let seed: { problem: string; plan: string } = { problem: PROBLEM_MD, plan: PLAN_MD };
+let currentIO: PolyaIO | undefined;
+
+function makeIO(overrides: Partial<PolyaIO> & { files?: Record<string, string>; gates?: GateResult[]; commands?: Record<string, number>; preload?: boolean } = {}) {
+  const given = { ...(overrides.files ?? {}) };
+  seed = { problem: given["PROBLEM.md"] ?? PROBLEM_MD, plan: given["PLAN.md"] ?? PLAN_MD };
+  // The artifacts are written by the Solver's turns, not pre-loaded, unless a test resumes past them.
+  if (overrides.preload) {
+    given["PROBLEM.md"] = seed.problem;
+    given["PLAN.md"] = seed.plan;
+  } else {
+    delete given["PROBLEM.md"];
+    delete given["PLAN.md"];
+  }
   const files: Record<string, string> = {
-    "PROBLEM.md": PROBLEM_MD,
-    "PLAN.md": PLAN_MD,
     "README.md": "# app\nnpm ci && npm start",
     "test/notfound.test.js": "test('D1 not found', ...)",
-    ...(overrides.files ?? {}),
+    ...given,
   };
   const gates = overrides.gates ?? [];
   const calls = { gate: [] as { kind: string; allowed?: string[]; base?: string; taskCommands?: string[] }[], commands: [] as { command: string; cwd?: string }[], commits: [] as string[], clones: 0, writes: [] as string[] };
@@ -58,6 +71,7 @@ function makeIO(overrides: Partial<PolyaIO> & { files?: Record<string, string>; 
     diffStat: () => " 2 files changed",
     ...overrides,
   };
+  currentIO = io;
   return { io, calls, files };
 }
 
@@ -97,10 +111,16 @@ function makeSend(script: Script) {
 
 const json = (o: unknown) => `done\n\`\`\`json\n${JSON.stringify(o)}\n\`\`\``;
 const defaultScript: Script = {
-  understand: () => json({ written: ["PROBLEM.md"], done_ids: ["D1", "D2"] }),
-  devise: () => json({ written: ["PLAN.md"], units: ["U1", "U2"] }),
+  understand: () => {
+    currentIO?.writeFile("PROBLEM.md", seed.problem);
+    return json({ written: ["PROBLEM.md"], done_ids: ["D1", "D2"] });
+  },
+  devise: () => {
+    currentIO?.writeFile("PLAN.md", seed.plan);
+    return json({ written: ["PLAN.md"], units: ["U1", "U2"] });
+  },
   "carry-out": (p) => json({ unit_id: p.match(/unit (U[\w-]+)/)?.[1] ?? "?", done: true, blocked: false, check_passed: true }),
-  verify: () => json({ started: true, results: [{ step: 2, d: "D2", passed: true, evidence: "started on :3000" }] }),
+  walk: () => json({ started: true, results: [{ step: 2, d: "D2", passed: true, evidence: "started on :3000" }] }),
   "look-back": () => json({ verdict: "done", answers_problem: true, another_check: "the access log", findings: [], worked: ["U1 first time"], did_not: [], confirmed: ["L-2026-09-18-01"], lessons: [{ tags: ["kind:repair", "stage:devise"], when: "a middleware order bug", lesson: "check the static handler after any middleware change", evidence: "this repair, U1" }] }),
 };
 
@@ -113,7 +133,7 @@ test("happy path: understand → devise → two gated units → finish check →
   const out = await runPolyaLoop(send, { ...base, io, lessons });
   assert.equal(out.stopReason, "complete");
   assert.equal(out.phase, "done");
-  assert.deepEqual(sent.map((s) => s.kind), ["understand", "devise", "carry-out", "carry-out", "verify", "look-back"]);
+  assert.deepEqual(sent.map((s) => s.kind), ["understand", "devise", "carry-out", "carry-out", "walk", "look-back"]);
   // The Solver saw the ledger slot; the Hand's packet carries the unit block and the D lines it serves.
   assert.match(sent[0]!.prompt, /\(no prior lessons\)/);
   assert.match(sent[2]!.prompt, /## U1: reorder the not-found handler/);
@@ -125,7 +145,7 @@ test("happy path: understand → devise → two gated units → finish check →
   assert.deepEqual(calls.gate[0]!.taskCommands, ["node --test test/notfound.test.js"]);
   assert.deepEqual(calls.gate[1]!.taskCommands, ["node --test test/notfound.test.js", 'grep -q "npm start" README.md']);
   assert.equal(calls.gate[2]!.kind, "finish");
-  assert.deepEqual(calls.gate[2]!.allowed, ["src/app.js", "README.md"]);
+  assert.deepEqual(calls.gate[2]!.allowed, ["src/app.js", "README.md", "PROBLEM.md", "PLAN.md", "LOOKBACK.md"]);
   assert.equal(calls.gate[2]!.base, out.baselineSha);
   // (b): D1 ran mechanically in the clone; D2 went to the Verifier in the same clone, fresh.
   assert.equal(calls.clones, 1);
@@ -212,14 +232,14 @@ test("unit-not-workable: a Hand that asks a question stops the run, drafts a can
   assert.equal(again.stopReason, "complete");
   assert.match(sent2[0]!.prompt, /^## Re-plan[\s\S]*U2 asked: "which README section\?"/);
   // U1 passed before the question; it is kept, not re-run.
-  assert.deepEqual(sent2.map((s) => s.kind), ["devise", "carry-out", "verify", "look-back"]);
+  assert.deepEqual(sent2.map((s) => s.kind), ["devise", "carry-out", "walk", "look-back"]);
   assert.match(sent2[1]!.prompt, /unit U2/);
   assert.equal(sent.length, 4);
 });
 
 test("look back (b): an unmet done-check gets one fix turn and a second run in a new clone", async () => {
   const { io, calls } = makeIO();
-  const { send, sent } = makeSend({ verify: (_p, _o, n) => json({ results: [{ step: 2, d: "D2", passed: n === 1 ? false : true, evidence: n === 1 ? "no Run section" : "started", where: n === 1 ? "README.md" : undefined }] }) });
+  const { send, sent } = makeSend({ walk: (_p, _o, n) => json({ results: [{ step: 2, d: "D2", passed: n === 1 ? false : true, evidence: n === 1 ? "no Run section" : "started", where: n === 1 ? "README.md" : undefined }] }) });
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "complete");
   assert.equal(out.verifyAttempts, 2);
@@ -232,7 +252,7 @@ test("look back (b): an unmet done-check gets one fix turn and a second run in a
 
 test("verify-failed: still unmet after the fix turn and the second run", async () => {
   const { io } = makeIO();
-  const { send } = makeSend({ verify: () => json({ results: [{ step: 2, d: "D2", passed: false, evidence: "nope" }] }) });
+  const { send } = makeSend({ walk: () => json({ results: [{ step: 2, d: "D2", passed: false, evidence: "nope" }] }) });
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "verify-failed");
   assert.match(out.stopDetail!, /D2/);
@@ -241,15 +261,15 @@ test("verify-failed: still unmet after the fix turn and the second run", async (
 
 test("verifier silent twice → the fallback tier; silent again → unparseable-report", async () => {
   const { io } = makeIO();
-  const { send, sent } = makeSend({ verify: (_p, o) => (o?.tier === "claude" ? json({ results: [{ step: 2, d: "D2", passed: true }] }) : "no block here") });
+  const { send, sent } = makeSend({ walk: (_p, o) => (o?.tier === "claude" ? json({ results: [{ step: 2, d: "D2", passed: true }] }) : "no block here") });
   const out = await runPolyaLoop(send, { ...base, io, lessons: null, verifyFallbackTier: "claude" });
   assert.equal(out.stopReason, "complete");
-  const verifies = sent.filter((s) => s.kind === "verify");
+  const verifies = sent.filter((s) => s.kind === "walk");
   assert.equal(verifies.length, 3);
   assert.equal(verifies[2]!.opts?.tier, "claude");
   assert.match(verifies[1]!.prompt, /^## Your previous reply had no results block/);
   const { io: io2 } = makeIO();
-  const { send: s2 } = makeSend({ verify: () => "nothing" });
+  const { send: s2 } = makeSend({ walk: () => "nothing" });
   assert.equal((await runPolyaLoop(s2, { ...base, io: io2, lessons: null })).stopReason, "unparseable-report");
 });
 
@@ -260,7 +280,7 @@ test("the Verifier is skipped when every done-check is a command", async () => {
   const { send, sent } = makeSend({});
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "complete");
-  assert.ok(!sent.some((s) => s.kind === "verify"));
+  assert.ok(!sent.some((s) => s.kind === "walk"));
   assert.deepEqual(out.checks!.map((c) => c.how), ["mechanical"]);
 });
 
@@ -309,8 +329,7 @@ test("review: the result does not answer the restated problem → review-unresol
 });
 
 test("materialise: a Solver that only reports bare JSON gets a reminder, then PROBLEM.md is written from its report", async () => {
-  const { io, calls, files } = makeIO({ files: { "PROBLEM.md": undefined as unknown as string } });
-  delete files["PROBLEM.md"];
+  const { io, calls } = makeIO();
   const report = { title: "unknown routes answer 404", kind: "repair", size: "S", restated: "the handler order is wrong", done: [{ id: "D1", text: "404", check: "node --test test/notfound.test.js" }, { id: "D2", text: "README works", check: "a stranger follows the README" }], bar: { test: "npm test" } };
   const { send, sent } = makeSend({ understand: () => JSON.stringify(report) });
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
@@ -322,12 +341,12 @@ test("materialise: a Solver that only reports bare JSON gets a reminder, then PR
 });
 
 test("resume at carry-out re-attempts the unit that stopped and never re-runs understand or devise; PLAN.md on disk wins", async () => {
-  const { io } = makeIO({ files: { "PLAN.md": PLAN_MD.replace("## U2: document the start command", "## U2: document the start command (edited by hand)") } });
+  const { io } = makeIO({ preload: true, files: { "PLAN.md": PLAN_MD.replace("## U2: document the start command", "## U2: document the start command (edited by hand)") } });
   const { send, sent } = makeSend({});
   const stale: PolyaState = { ...initialPolyaState(), phase: "carry-out", units: [], unitIndex: 1, unitRecords: [{ id: "U1", attempts: 1, passed: true }], baselineSha: "sha0" };
   const out = await runPolyaLoop(send, { ...base, io, lessons: null }, stale);
   assert.equal(out.stopReason, "complete");
-  assert.deepEqual(sent.map((s) => s.kind), ["carry-out", "verify", "look-back"]);
+  assert.deepEqual(sent.map((s) => s.kind), ["carry-out", "walk", "look-back"]);
   assert.match(sent[0]!.prompt, /edited by hand/);
   assert.equal(out.unitRecords.length, 2);
 });
@@ -368,7 +387,7 @@ test("browser: a unit that names a page is sent with browser:true when the run h
   assert.equal(u2!.opts?.browser, true);
   assert.match(u2!.prompt, /You have a real headless browser/);
   // The Verifier's D2 does not name a page here, so no browser for it.
-  assert.equal(sent.find((s) => s.kind === "verify")!.opts?.browser, undefined);
+  assert.equal(sent.find((s) => s.kind === "walk")!.opts?.browser, undefined);
   // Without a browser in the run, the unit is told so and is not sent the flag.
   const { io: io2 } = makeIO({ files: { "PLAN.md": plan } });
   const { send: s2, sent: sent2 } = makeSend({});
@@ -384,9 +403,109 @@ test("browser: a prose done-check that names a page sends the Verifier with brow
   const { send, sent } = makeSend({});
   const out = await runPolyaLoop(send, { ...base, io, lessons: null, browser: true });
   assert.equal(out.stopReason, "complete");
-  const v = sent.find((s) => s.kind === "verify")!;
+  const v = sent.find((s) => s.kind === "walk")!;
   assert.equal(v.opts?.browser, true);
   assert.equal(v.opts?.cwd, "/tmp/clone-1");
   assert.match(v.prompt, /browser_navigate/);
+});
+
+
+test("look back (b): a done-check that curls localhost starts the bar's start command in the clone and stops it after", async () => {
+  const problem = PROBLEM_MD.replace("- D1: GET /nope answers 404 — Check: `node --test test/notfound.test.js` — Now: unmet", "- D1: GET /nope answers 404 — Check: `test \"$(curl -s -o /dev/null -w '%{http_code}' localhost:4571/nope)\" = 404` — Now: unmet");
+  const started: { command: string; cwd: string; stopped: boolean }[] = [];
+  const { io, calls } = makeIO({ files: { "PROBLEM.md": problem } });
+  io.start = async (command, cwd) => {
+    const rec = { command, cwd, stopped: false };
+    started.push(rec);
+    return { stop: () => { rec.stopped = true; } };
+  };
+  const { send } = makeSend({});
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  assert.deepEqual(started, [{ command: "npm start", cwd: "/tmp/clone-1", stopped: true }]);
+  const check = calls.commands.find((c) => c.command.startsWith("test \"$(curl"));
+  assert.equal(check?.cwd, "/tmp/clone-1");
+  // Without a server-shaped check, nothing is started.
+  const { io: io2 } = makeIO();
+  let startedAgain = false;
+  io2.start = async () => { startedAgain = true; return { stop: () => {} }; };
+  await runPolyaLoop(makeSend({}).send, { ...base, io: io2, lessons: null });
+  assert.equal(startedAgain, false);
+});
+
+test("look back (d): a \"No lesson\" entry stays in LOOKBACK.md and is not appended to the ledger", async () => {
+  const { io, files } = makeIO();
+  const lessons = memLessons();
+  const { send } = makeSend({ "look-back": () => json({ verdict: "done", findings: [], lessons: [{ tags: ["kind:repair"], when: "w", lesson: "No lesson: the plan held.", evidence: "e" }] }) });
+  const out = await runPolyaLoop(send, { ...base, io, lessons });
+  assert.equal(out.stopReason, "complete");
+  assert.equal(lessons.added.length, 0);
+  assert.equal(out.lookback?.lessons, 0);
+  assert.match(files["LOOKBACK.md"]!, /No lesson: the plan held/);
+});
+
+
+test("a PROBLEM.md or PLAN.md already on disk and workable skips the Solver turn; a re-plan note does not", async () => {
+  const { io } = makeIO({ preload: true });
+  const { send, sent } = makeSend({});
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  assert.deepEqual(sent.map((s) => s.kind), ["carry-out", "carry-out", "walk", "look-back"]);
+  // A plan on disk with a gap still gets the (one) Solver turn.
+  const { io: io2 } = makeIO({ preload: true, files: { "PLAN.md": PLAN_MD.replace("Given:    `src/app.js`; the red test `test/notfound.test.js`", "Given:") } });
+  const { send: s2, sent: sent2 } = makeSend({});
+  await runPolyaLoop(s2, { ...base, io: io2, lessons: null });
+  assert.equal(sent2[0]!.kind, "devise");
+  assert.match(sent2[0]!.prompt, /^## Plan not workable/);
+  // A resume after a Hand's question always re-plans.
+  const { io: io3 } = makeIO({ preload: true });
+  const { send: s3, sent: sent3 } = makeSend({});
+  await runPolyaLoop(s3, { ...base, io: io3, lessons: null }, { phase: "devise", replanNote: "U2 asked: which?", unitRecords: [{ id: "U1", attempts: 1, passed: true }] });
+  assert.equal(sent3[0]!.kind, "devise");
+  assert.match(sent3[0]!.prompt, /^## Re-plan/);
+});
+
+test("ownership failure: the orchestrator reverts what the Hand wrote outside Touches and tells it", async () => {
+  const { io } = makeIO({ gates: [fail("ownership"), pass] });
+  const reverts: { base?: string; allowed: string[] }[] = [];
+  io.revertOutside = (base, allowed) => {
+    reverts.push({ base, allowed });
+    return ["src/main.ts"];
+  };
+  const { send, sent } = makeSend({});
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  assert.deepEqual(reverts, [{ base: "sha2", allowed: ["src/app.js"] }]);
+  assert.match(sent[3]!.prompt, /^## Files outside Touches were reverted\n\nThe orchestrator put src\/main\.ts back/);
+  assert.match(sent[3]!.prompt, /## Quality gate failed \(attempt 1\)/);
+  assert.equal(out.unitRecords[0]!.attempts, 2);
+});
+
+test("look back: a stale LOOKBACK.md from an earlier pass is cleared first; a high finding about the record spawns no fix turn", async () => {
+  const { io, calls, files } = makeIO({ preload: true, files: { "LOOKBACK.md": "# Look back: old\n\nOutcome: verify-failed\n" } });
+  const { send, sent } = makeSend({ "look-back": () => json({ verdict: "done", answers_problem: true, findings: [{ severity: "high", where: "LOOKBACK.md", what: "the record says verify-failed", check: { command: "grep -q done LOOKBACK.md", expect_exit: 0 } }], lessons: [] }) });
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null }, { phase: "look-back", units: parsePlan(PLAN_MD).units, unitRecords: [{ id: "U1", attempts: 1, passed: true }, { id: "U2", attempts: 1, passed: true }], baselineSha: "sha0" });
+  assert.equal(out.stopReason, "complete");
+  assert.ok(calls.commits.includes("look back: clear the previous pass's LOOKBACK.md"));
+  assert.ok(!sent.some((s) => /U-FIX/.test(s.prompt)), "no fix turn for a finding about the record");
+  assert.equal(out.reviewChecks, undefined);
+  assert.match(files["LOOKBACK.md"]!, /\[high\] LOOKBACK\.md — the record says verify-failed/);
+  assert.match(files["LOOKBACK.md"]!, /Outcome: complete/);
+});
+
+test("a Hand turn that rewrote history is discarded and retried; the gate never sees it", async () => {
+  const { io, calls } = makeIO();
+  let turns = 0;
+  const resets: string[] = [];
+  io.isAncestor = () => turns !== 1; // the first U1 turn rebased
+  io.resetTo = (sha) => resets.push(sha);
+  const { send, sent } = makeSend({ "carry-out": (p) => { if (/unit U1/.test(p)) turns++; return json({ unit_id: p.match(/unit (U\d+)/)?.[1], done: true }); } });
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  assert.equal(out.unitRecords.find((r) => r.id === "U1")!.attempts, 2);
+  assert.deepEqual(resets, ["sha2"]);
+  assert.match(sent[3]!.prompt, /rewrote git history/);
+  // Only one task gate ran for U1: the discarded turn was never judged.
+  assert.equal(calls.gate.filter((g) => g.kind === "task" && g.allowed?.includes("src/app.js")).length, 1);
 });
 

@@ -22,7 +22,7 @@ function makeOrigin(): string {
   const work = join(root, "work");
   mkdirSync(join(work, "src"), { recursive: true });
   writeFileSync(join(work, "README.md"), "# fixture\n\nnpm test\n");
-  writeFileSync(join(work, "package.json"), JSON.stringify({ name: "fixture", version: "0.0.0", private: true, type: "module", scripts: { test: "node --test test/*.test.js" } }, null, 2));
+  writeFileSync(join(work, "package.json"), JSON.stringify({ name: "fixture", version: "0.0.0", private: true, type: "module", scripts: { test: "node --test test/*.test.js", lint: "node -e \"process.exit(0)\"" } }, null, 2));
   writeFileSync(join(work, ".gitignore"), "node_modules/\n");
   const git = (args: string[]) => execFileSync("git", args, { cwd: work, stdio: "ignore" });
   git(["init", "-q", "-b", "main"]);
@@ -62,6 +62,7 @@ There is no greet function; the test that defines it is red.
 | Purpose | Command |
 | --- | --- |
 | test | \`npm test\` |
+| lint | \`npm run lint\` |
 `;
 
 const PLAN = `# Plan for: greet returns a greeting
@@ -148,9 +149,11 @@ test("polya loop end to end: real clone, real gate, a faked model that writes fi
   const u1 = out.unitRecords[0]!;
   assert.equal(u1.attempts, 2);
   assert.equal(u1.passed, true);
-  // The unit gate ran the unit's Check, not the whole suite; the finish check ran the bar.
+  // The unit gate ran the unit's Check and nothing else from the bar; the finish check ran the bar (test and lint).
   assert.ok(ran.some((c) => c.includes("node --test test/greet.test.js")), ran.join("\n"));
   assert.ok(ran.some((c) => /npm test/.test(c)), ran.join("\n"));
+  const lintRuns = ran.filter((c) => /npm run lint/.test(c)).length;
+  assert.equal(lintRuns, 1, `lint should run once, at the finish check; ran:\n${ran.join("\n")}`);
   assert.equal(out.finish?.passed, true);
   assert.deepEqual(out.checks?.map((c) => [c.id, c.passed, c.how]), [["D1", true, "mechanical"]]);
   const history = execFileSync("git", ["log", "--format=%s"], { cwd: clone, encoding: "utf8" });

@@ -33,7 +33,11 @@ imply.
    skip one because it "obviously" passes.
 3. For each step record: passed or failed, the evidence (a response body, a
    status code, a page count, a reading, a quotation), and where it went
-   wrong if it did.
+   wrong if it did. A step that happens on a page is evidenced by what the
+   page showed: a snapshot line, a button's label after the click, a
+   result count. Reading the source and saying it would work is not
+   evidence; if the browser is attached and you did not use it for a page
+   step, that step is not walked.
 4. Stop after the last step. Do not diagnose. Do not propose fixes.
 
 ## Output

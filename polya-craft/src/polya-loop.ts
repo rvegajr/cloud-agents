@@ -20,7 +20,19 @@ import { ARTIFACTS, parsePlan, parseProblem, problemGaps, renderPlan, renderProb
  * by this loop from evidence, not by the reviewer.
  */
 
-export type PolyaIO = BlueprintIO;
+export type PolyaIO = BlueprintIO & {
+  /** Start a long-running command (the quality bar's `start`) in `cwd`; resolve once it has had time to listen. The loop stops it. */
+  start?(command: string, cwd: string): Promise<{ stop(): void }>;
+  /** Put every file changed since `baseSha` that is not in `allowed` back as it was, and commit. Returns what was reverted. */
+  revertOutside?(baseSha: string, allowed: string[]): string[];
+  /** Is `sha` an ancestor of HEAD? False after a Hand rebased, reset, or amended history. */
+  isAncestor?(sha: string): boolean;
+  /** Discard everything after `sha`: the answer to a turn that rewrote history. */
+  resetTo?(sha: string): void;
+};
+
+/** A done-check that curls a server needs the server running. */
+const NEEDS_SERVER = /\b(localhost|127\.0\.0\.1|0\.0\.0\.0)\b|:\d{4,5}\//;
 
 export type PolyaPhase = "understand" | "devise" | "carry-out" | "look-back" | "done" | "stopped";
 
@@ -239,7 +251,9 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     let confirmed = 0;
     if (lessons) {
       try {
-        if (report?.lessons?.length) added = lessons.append(report.lessons.filter((l) => l && l.lesson).map((l) => ({ tags: l.tags ?? [], when: l.when ?? problem?.title ?? "", lesson: l.lesson, evidence: l.evidence ?? problem?.title ?? "" })));
+        // "No lesson: the plan held" is an entry in LOOKBACK.md, never in the ledger.
+        const real = (report?.lessons ?? []).filter((l) => l && l.lesson && !/^\s*no lesson\b/i.test(l.lesson));
+        if (real.length) added = lessons.append(real.map((l) => ({ tags: l.tags ?? [], when: l.when ?? problem?.title ?? "", lesson: l.lesson, evidence: l.evidence ?? problem?.title ?? "" })));
         if (report?.confirmed?.length) {
           lessons.confirm(report.confirmed);
           confirmed = report.confirmed.length;
@@ -319,6 +333,16 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
         record.question = report.question;
         return { record, blocked: report.question };
       }
+      // The gate diffs base..HEAD; a rebase, reset, or amend makes that diff lie. A turn that rewrote history is
+      // discarded whole and the Hand is told; nothing it did survives to be judged.
+      if (io.isAncestor && !io.isAncestor(baseSha)) {
+        log(`gate ${unit.id}: history rewritten (base ${baseSha.slice(0, 8)} is no longer an ancestor of HEAD); turn discarded, attempt ${attempt + 1}`);
+        io.resetTo?.(baseSha);
+        record.failing = ["ownership"];
+        gate = { passed: false, seconds: 0, skipped: [], findings: [{ rule: "ownership", ok: false, detail: `this turn rewrote git history (rebase, reset, or amend); the orchestrator discarded it. Commit on top of HEAD; never rewrite what is already committed` }] };
+        prompt = `${gateFeedbackNote(attempt + 1, gate)}${base}`;
+        continue;
+      }
       gate = await io.gate("task", { allowedFiles: unit.touches, baseSha, taskCommands });
       record.failing = failingRules(gate);
       log(`gate ${unit.id}: ${gate.passed ? "PASS" : `FAIL (${record.failing.join(", ")})`} attempt ${attempt + 1}`);
@@ -326,7 +350,17 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
         record.passed = true;
         return { record, gate };
       }
-      prompt = `${gateFeedbackNote(attempt + 1, gate)}${base}`;
+      // Rule 1 of the pattern is enforced by the orchestrator, not delegated: what the Hand wrote outside
+      // Touches is put back, so the next attempt starts inside its scope and is told why.
+      let revertNote = "";
+      if (record.failing.includes("ownership") && io.revertOutside) {
+        const reverted = io.revertOutside(baseSha, unit.touches);
+        if (reverted.length) {
+          log(`reverted outside Touches: ${reverted.join(", ")}`);
+          revertNote = `## Files outside Touches were reverted\n\nThe orchestrator put ${reverted.join(", ")} back as they were. Only ${unit.touches.join(", ")} may change. If the unit cannot be done inside them, say so in \`notes\` and stop.\n\n`;
+        }
+      }
+      prompt = `${revertNote}${gateFeedbackNote(attempt + 1, gate)}${base}`;
     }
     return { record, gate };
   };
@@ -340,11 +374,16 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       repo: opts.repo,
       prior_lessons: priorLessonsNote(offered, artifact(ARTIFACTS.lookback)),
     });
-    const r = await strongTurn<Parameters<typeof renderProblem>[0]>(prompt, ARTIFACTS.problem, "understand: PROBLEM.md", renderProblem);
-    if (typeof r === "string") return stop(r, "understand turn did not finish");
+    const gapsOf = () => problemGaps(readProblem(), { maxDone: 8, software, offeredLessons: offered.map((l) => l.id) });
+    // Already on disk (a resume, or a person wrote it): do not pay for the full turn again. Gaps get the one targeted retry below.
+    if (artifact(ARTIFACTS.problem)) {
+      log(`${ARTIFACTS.problem} is on disk; ${gapsOf().length ? "it has gaps, asking the Solver to fix only those" : "skipping the Solver turn"}`);
+    } else {
+      const r = await strongTurn<Parameters<typeof renderProblem>[0]>(prompt, ARTIFACTS.problem, "understand: PROBLEM.md", renderProblem);
+      if (typeof r === "string") return stop(r, "understand turn did not finish");
+    }
     let problem = readProblem();
     if (!problem) return stop("unparseable-report", `${ARTIFACTS.problem} is missing or has no title`);
-    const gapsOf = () => problemGaps(readProblem(), { maxDone: 8, software, offeredLessons: offered.map((l) => l.id) });
     let gaps = gapsOf();
     if (gaps.length) {
       log(`understanding has gaps; asking the Solver once more:\n${gaps.join("\n")}`);
@@ -371,9 +410,6 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     const carried = problem.done.map((d) => d.id);
     const replan = state.replanNote ? `## Re-plan\n\nThe previous plan stopped because a Hand had to ask a question. ${state.replanNote}\n\nRewrite the unit it names so the question is answered inside the unit; leave the units that already passed unchanged.\n\n---\n\n` : "";
     const prompt = `${replan}${buildPrompt(`${PROMPTS}/devise`, "", { problem_md: problemMd, max_units: String(maxUnits), done_ids: carried.join(" ") })}`;
-    const r = await strongTurn<Parameters<typeof renderPlan>[0]>(prompt, ARTIFACTS.plan, "devise: PLAN.md", renderPlan);
-    if (typeof r === "string") return stop(r, "devise turn did not finish");
-    state.replanNote = undefined;
     const exists = (p: string) => artifact(p) !== undefined;
     const gapsOf = (): string[] => {
       const plan = readPlan();
@@ -385,6 +421,14 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       if (!plan.outer.length) lines.push("- no `## Outer test` steps");
       return lines;
     };
+    // Already on disk and no question to re-plan for: do not pay for the full turn again. Gaps get the one targeted retry below.
+    if (artifact(ARTIFACTS.plan) && !state.replanNote) {
+      log(`${ARTIFACTS.plan} is on disk; ${gapsOf().length ? "it has gaps, asking the Solver to fix only those" : "skipping the Solver turn"}`);
+    } else {
+      const r = await strongTurn<Parameters<typeof renderPlan>[0]>(prompt, ARTIFACTS.plan, "devise: PLAN.md", renderPlan);
+      if (typeof r === "string") return stop(r, "devise turn did not finish");
+      state.replanNote = undefined;
+    }
     let gaps = gapsOf();
     if (gaps.length) {
       log(`plan is not workable; asking the Solver once more:\n${gaps.join("\n")}`);
@@ -449,16 +493,25 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
   }
 
   const allTouches = union(...state.units.map((u) => u.touches));
+  // The finish check spans the whole job; the loop's own artifacts (written on an earlier pass, or corrected by hand) are not the Hand's doing.
+  const finishAllowed = union(allTouches, [ARTIFACTS.problem, ARTIFACTS.plan, ARTIFACTS.lookback]);
 
   // ---- 4. Look back ---------------------------------------------------------
   if (state.phase === "look-back") {
     const problem = readProblem();
     const plan = readPlan();
     if (!problem) return stop("unparseable-report", `${ARTIFACTS.problem} missing at look back`);
+    // A LOOKBACK.md on disk is from an earlier pass that stopped. It is regenerated from evidence at the end of this
+    // one; left in place it reads as the current verdict to the reviewer and to anyone opening the PR.
+    if (artifact(ARTIFACTS.lookback)) {
+      io.writeFile(ARTIFACTS.lookback, `# Look back: ${problem.title}\n\n(in progress: an earlier pass stopped; this file is rewritten when the pass ends)\n`);
+      io.commit("look back: clear the previous pass's LOOKBACK.md");
+      log("cleared the previous pass's LOOKBACK.md");
+    }
 
     // (a) the finish check: ownership over the whole job, hygiene, the bar, clean start, vacuous suite.
     log("look back (a): checks from a clean state");
-    let gate = await io.gate("finish", { allowedFiles: allTouches, baseSha: state.baselineSha });
+    let gate = await io.gate("finish", { allowedFiles: finishAllowed, baseSha: state.baselineSha });
     if (!gate.passed) {
       const what = gate.findings.filter((f) => !f.ok).map((f) => `- [${f.rule}] ${f.detail}${f.command ? ` (\`${f.command}\`)` : ""}${f.output ? `\n  ${tail(f.output, 30).replace(/\n/g, "\n  ")}` : ""}`).join("\n");
       log(`finish check failed: ${failingRules(gate).join(", ")}; one fix turn`);
@@ -469,7 +522,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
         state.finish = { passed: false, failing: fix.record.failing ?? failingRules(gate) };
         return stop("finish-check-failed", `fix turn failed the gate: ${state.finish.failing.join(", ")}`);
       }
-      gate = await io.gate("finish", { allowedFiles: allTouches, baseSha: state.baselineSha });
+      gate = await io.gate("finish", { allowedFiles: finishAllowed, baseSha: state.baselineSha });
     }
     state.finish = { passed: gate.passed, failing: failingRules(gate) };
     await persist();
@@ -482,10 +535,20 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       const clone = await io.freshClone();
       if (problem.bar.install) await io.runCommand(problem.bar.install, clone);
       const checks: CheckResult[] = [];
-      for (const d of problem.done) {
-        if (!d.command) continue;
-        const r = await io.runCommand(d.command, clone);
-        checks.push({ id: d.id, passed: r.code === 0, how: "mechanical", evidence: `\`${d.command}\` exited ${r.code}${r.code ? `: ${tail(r.output, 5)}` : ""}` });
+      const mechanical = problem.done.filter((d) => d.command);
+      // A check that curls the app needs the app up: start the bar's `start` in the clone for the duration of the checks.
+      let running: { stop(): void } | undefined;
+      if (problem.bar.start && io.start && mechanical.some((d) => NEEDS_SERVER.test(d.command!))) {
+        log(`starting \`${problem.bar.start}\` in the clone for the done-checks`);
+        running = await io.start(problem.bar.start, clone);
+      }
+      try {
+        for (const d of mechanical) {
+          const r = await io.runCommand(d.command!, clone);
+          checks.push({ id: d.id, passed: r.code === 0, how: "mechanical", evidence: `\`${d.command}\` exited ${r.code}${r.code ? `: ${tail(r.output, 5)}` : ""}` });
+        }
+      } finally {
+        running?.stop();
       }
       const prose: DoneCheck[] = problem.done.filter((d) => !d.command);
       if (prose.length) {
@@ -557,8 +620,12 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     if (!review || !Array.isArray(review.findings) || !review.verdict) return stop("unparseable-report", "the review returned no findings block");
     state.review = review;
     await persist();
-    const high = review.findings.filter((f) => f.severity === "high");
-    log(`review: ${review.verdict}, ${review.findings.length} finding(s), ${high.length} high, ${review.lessons?.length ?? 0} lesson(s)`);
+    // A finding about the loop's own record (PROBLEM.md, PLAN.md, LOOKBACK.md) is a process finding: it is recorded in
+    // LOOKBACK.md and the ledger, never handed to the Hand, which may not touch those files.
+    const artifactRe = /\b(PROBLEM|PLAN|LOOKBACK)\.md\b/;
+    const process = review.findings.filter((f) => f.severity === "high" && (artifactRe.test(f.where ?? "") || artifactRe.test(f.check?.command ?? "")));
+    const high = review.findings.filter((f) => f.severity === "high" && !process.includes(f));
+    log(`review: ${review.verdict}, ${review.findings.length} finding(s), ${high.length} high${process.length ? ` (+${process.length} about the record, kept in LOOKBACK.md)` : ""}, ${review.lessons?.length ?? 0} lesson(s)`);
     if (high.length || review.answers_problem === false) {
       if (review.answers_problem === false && !high.length) return stop("review-unresolved", "the review says the result does not answer the restated problem; the done-checks were wrong (a stage:understand lesson)");
       const allowed = union(allTouches, high.map((f) => f.where).filter((w): w is string => Boolean(w && /[/.]/.test(w) && !/\s/.test(w))));

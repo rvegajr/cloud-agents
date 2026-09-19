@@ -13,7 +13,7 @@ const SLOTS: Record<string, Record<string, string>> = {
 };
 
 test("every polya prompt renders with its declared slots and classifies to its kind", () => {
-  const kinds: Record<string, string> = { understand: "understand", devise: "devise", "carry-out": "carry-out", verify: "verify", "look-back": "look-back" };
+  const kinds: Record<string, string> = { understand: "understand", devise: "devise", "carry-out": "carry-out", verify: "walk", "look-back": "look-back" };
   for (const [name, vars] of Object.entries(SLOTS)) {
     const prompt = buildPrompt(`polya-craft/prompts/${name}`, "", vars);
     assert.doesNotMatch(prompt, /\{\{\s*\w+\s*\}\}/, `${name} left a slot unrendered`);
@@ -26,7 +26,7 @@ test("hybrid policy: Solver turns on the frontier, Hand and Verifier local", () 
   assert.equal(preferredTier("understand", policy), "claude");
   assert.equal(preferredTier("devise", policy), "claude");
   assert.equal(preferredTier("carry-out", policy), "local");
-  assert.equal(preferredTier("verify", policy), "local");
+  assert.equal(preferredTier("walk", policy), "local");
   assert.equal(preferredTier("look-back", policy), "claude");
   const local = policyFromEnv("local", {});
   assert.equal(preferredTier("understand", local), "local");
