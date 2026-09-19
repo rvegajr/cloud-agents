@@ -42,8 +42,8 @@ Status:   confirmed(2)
 ## L-2026-09-19-03
 Tags:     kind:build stage:devise stage:carry-out check
 When:     a unit's Do gives the whole content of one or more files verbatim
-Lesson:   make that unit's Check compare each file with the plan's text (a sha256 recorded in the plan), because behavioural tests pass on transcription drift; do not check `git status` in a Check, since the loop commits the Hand's work before the Check runs and its ownership gate already rejects any file outside Touches
-Evidence: snippet-vault (Opus): U5 typed SFMenlo-Regular for SFMono-Regular and every test passed. R0 (Sonnet): a Check that also required `git status` to list the unit's files could never pass, because the loop commits first; three Hand turns spent on it. Merged from L-2026-09-19-03 and -07, corrected after R0.
+Lesson:   make that unit's Check compare each file it writes whole with the plan's text (a sha256 recorded in the plan), because behavioural tests pass on transcription drift; never hash a file that already exists, and never check `git status`, because the loop commits before the Check runs and its ownership gate already enforces Touches
+Evidence: snippet-vault (Opus): U5 typed SFMenlo-Regular for SFMono-Regular and every test passed. R0: a Check that also required `git status` could never pass; then repair U7 hashed the post-fix public/app.js, and three Hand turns that made its red test pass all failed the hash. Merged from -03 and -07, corrected twice after R0.
 Status:   confirmed(1)
 ## L-2026-09-19-04
 Tags:     kind:build stage:devise

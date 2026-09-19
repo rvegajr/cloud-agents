@@ -369,3 +369,14 @@ test("commandOf: one command inside a sentence about what a stranger does is the
   assert.equal(commandOf("`node --test test/db.test.js` passes"), "node --test test/db.test.js");
 });
 
+
+test("validateUnits: a Check may hash a file the unit writes whole, never one that already exists (live R0, U7)", () => {
+  const u = parsePlan(PLAN_MD).units[0]!;
+  const hashCmd = `node -e "const c=require('crypto'),f=require('fs');const h=c.createHash('sha256').update(f.readFileSync('src/app.js')).digest('hex');if(h!=='45c0'){process.exit(1)}" && node --test test/notfound.test.js`;
+  const unit = { ...u, check: `\`${hashCmd}\``, command: hashCmd };
+  const problem = parseProblem(PROBLEM_MD);
+  assert.match(validateUnits([unit], problem, { exists: (p) => p === "src/app.js" }).map((p) => p.problem).join("\n"), /hashes src\/app\.js, which already exists/);
+  // A file this unit writes whole (not on disk yet) may be hashed.
+  const creating = validateUnits([unit], problem, { exists: (p) => p === "test/notfound.test.js" }).map((p) => p.problem);
+  assert.ok(!creating.some((p) => /hashes/.test(p)), creating.join("\n"));
+});
