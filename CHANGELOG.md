@@ -17,6 +17,18 @@ npm run deploy                        # stamp the commit, then ship
 
 ### Added
 
+- **`polya-craft/`: a fresh problem-solving loop on Pólya's four steps.**
+  Understand ends with the done-checks (`D1` is the answer in use); Devise is
+  judged by whether every unit passes the stranger test; Carry out is one unit
+  per fresh cheap session with a check after each; Look back re-runs everything
+  from a clean state, has a stranger walk the outer test, reviews in a fresh
+  session, and appends lessons to `LESSONS.md`, which the next Understand reads
+  first. Four roles, two model tiers. Written for any problem: `WALKTHROUGH.md`
+  runs it by hand on a grant proposal and a one-line bug; `examples/house.md`
+  runs a house with a framing crew as the Hand. `THEORY.md`, `PATTERN.md`,
+  `ARTICLE.md`, `ROADMAP.md`, four templates, five render-tested prompts. The
+  loop (`src/`, `--loop polya`) is not built; it will borrow
+  `architect-crew-gate`'s gate and repo I/O and never edit them.
 - **`architect-crew-gate/`: the pattern in its own folder.** `THEORY.md` is the
   claim, five principles, and operating instructions an AI or a person can act
   on directly; `PATTERN.md` is
