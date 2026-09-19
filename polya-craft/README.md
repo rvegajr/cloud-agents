@@ -13,6 +13,7 @@ four steps, for any problem: a bug, a product, a proposal, a house.
 | `PATTERN.md` | The specification: roles, artifacts with templates, the workable-unit contract and the stranger test, stages, the ledger, mechanical checks, mapping to architect-crew-gate | written |
 | `examples/kitchen-sink.md` | A leaking sink, cause unknown at the start; you are both Solver and Hand; one page, one afternoon | written |
 | `examples/house.md` | A house, every stage, with a human crew as the Hand | written |
+| `examples/site-inspection.md` | Find as many bugs as possible in a site; kind: answer; the deliverable is a report, and Understand refuses "all" | written |
 | `ARTICLE.md` | Where it comes from and why it is a fresh loop, with sources | written |
 | `ROADMAP.md` | Built, known limitations, not built, measurement | written |
 | `templates/` | `PROBLEM.md`, `PLAN.md`, `LOOKBACK.md`, `ONE-PAGE.md` | written |
