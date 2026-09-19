@@ -8,7 +8,7 @@
     "node": ">=22.13"
   },
   "scripts": {
-    "test": "tsx --test src/**/*.test.ts architect-crew-gate/**/*.test.ts",
+    "test": "tsx --test src/**/*.test.ts architect-crew-gate/**/*.test.ts polya-craft/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "login": "tsx src/00-login.ts",
     "smoke": "tsx src/01-local-smoke.ts",

@@ -18,6 +18,7 @@
   },
   "include": [
     "src/**/*.ts",
-    "architect-crew-gate/**/*.ts"
+    "architect-crew-gate/**/*.ts",
+    "polya-craft/**/*.ts"
   ]
 }

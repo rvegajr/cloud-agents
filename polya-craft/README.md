@@ -11,13 +11,19 @@ four steps, for any problem: a bug, a product, a proposal, a house.
 | `WALKTHROUGH.md` | The pattern by hand: two chat windows and a terminal, on a grant proposal and a one-line bug | written |
 | `THEORY.md` | Two pages an AI can act on: the claim, the four moves, the contract, the rules, operating instructions | written |
 | `PATTERN.md` | The specification: roles, artifacts with templates, the workable-unit contract and the stranger test, stages, the ledger, mechanical checks, mapping to architect-crew-gate | written |
+| `examples/kitchen-sink.md` | A leaking sink, cause unknown at the start; you are both Solver and Hand; one page, one afternoon | written |
 | `examples/house.md` | A house, every stage, with a human crew as the Hand | written |
+| `examples/site-inspection.md` | Find as many bugs as possible in a site; kind: answer; the deliverable is a report, and Understand refuses "all" | written |
 | `ARTICLE.md` | Where it comes from and why it is a fresh loop, with sources | written |
 | `ROADMAP.md` | Built, known limitations, not built, measurement | written |
 | `templates/` | `PROBLEM.md`, `PLAN.md`, `LOOKBACK.md`, `ONE-PAGE.md` | written |
 | `prompts/` | The five turns: `understand`, `devise`, `carry-out`, `verify`, `look-back` | written, render-tested |
 | `LESSONS.md` | The ledger, seeded with three process lessons | written |
-| `src/` | The loop, plan-lint, ledger, borrowed gate wiring; `--loop polya` | not built |
+| `src/plan.ts` | Parsers for the three artifacts; `validateUnits`, the mechanical half of the stranger test; `contractOf` for the borrowed gate | built |
+| `src/lessons.ts` | The ledger store: select by tags, append, confirm; the prior-lessons note | built |
+| `src/io.ts` | `makePolyaIO`: architect-crew-gate's repo I/O with the gate reading PROBLEM.md's quality bar | built |
+| `src/polya-loop.ts` | The loop: understand → devise → gated units → look back (a, b, c, d); LOOKBACK.md written from evidence; a unit or done-check that names a page gets a browser for that turn | built |
+| `src/*.test.ts` | Parsers, validator, ledger, prompt render/classify/route, the loop with a faked Hand and Solver, end to end on a real bare origin with the real gate | 50 tests, passing |
 
 ## Read in this order
 
@@ -34,12 +40,26 @@ two sections are the instructions.
 
 **By hand, any two models** — `WALKTHROUGH.md`.
 
-**With this kit** — not yet. `PATTERN.md` section 9 has the intended
-commands; `ROADMAP.md` has the modules.
+**With this kit**:
+
+```bash
+npm run build-app -- --loop polya --engine hybrid --idea "<problem>" --repo <url>      # Max: Solver; local: Hand, Verifier
+npm run build-app -- --loop polya --engine local  --idea-file ideas/x.md --create-repo my-app
+npm run build-app -- --resume cc-…                                                    # restarts at the stage that stopped
+npm test && npx tsc --noEmit
+```
+
+Env: `POLYA_LESSONS_FILE` (the ledger; default `polya-craft/LESSONS.md`),
+`LOCAL_GATE*` (the borrowed gate), `HYBRID_QA_FALLBACK` (the Verifier's
+fallback tier), `QA_BROWSER` (Playwright for any turn that names a page, on
+by default), `--max-units` (default 8).
 
 ## Layout rules
 
 Everything about the pattern lives here. It imports
-`../architect-crew-gate/src/quality-gate.ts` and `io.ts` as utilities and
-never edits them. `src/lib/routing.ts` will know the five prompts' H1 lines
-so it can route each to a tier; that is the only coupling.
+`../architect-crew-gate/src/quality-gate.ts`, `io.ts`, and two helpers from
+`blueprint-loop.ts` and `blueprint.ts` as utilities and never edits them.
+`src/lib/routing.ts` knows the five prompts' H1 lines so it can route each
+to a tier; `src/lib/engine-local.ts` treats Understand and Devise as
+architect turns and Look back as a read-only reviewer; `src/lib/build-app.ts`
+wires `--loop polya`. That is the whole coupling.

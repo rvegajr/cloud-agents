@@ -27,7 +27,7 @@ what is not).
 not only software: `WALKTHROUGH.md` (by hand, two chat windows, on a grant
 proposal and a bug), `THEORY.md`, `PATTERN.md`, `examples/house.md`, five
 prompts, four templates, and `LESSONS.md`, the ledger the next problem reads
-first. Its loop is not built yet.
+first. `--loop polya` runs it on the hybrid or local engine.
 `IMPLEMENTATION-GUIDE.md` is the same setup as a recipe an AI agent can execute:
 every credential and scope in the order it is needed, with the browser-only steps
 marked as human gates, and `npm run doctor` to prove each one. `CHANGELOG.md` is

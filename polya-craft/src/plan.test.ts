@@ -1,0 +1,227 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { commandOf, contractOf, parsePlan, parseProblem, problemGaps, renderPlan, renderProblem, validateUnits } from "./plan.js";
+
+export const PROBLEM_MD = `# Problem: unknown routes answer 404
+Kind: repair
+Size: S
+
+## Given
+- the repo at main; \`src/app.js\` registers routes (owner: the file)
+
+## Unknown
+GET /nope answers 404.
+
+## Condition
+The suite stays green.
+
+## Restated
+The catch-all handler is registered before the not-found handler, so every miss falls through to it.
+
+## Done-check
+- D1: GET /nope answers 404 — Check: \`node --test test/notfound.test.js\` — Now: unmet
+- D2: a stranger can start the app from the README — Check: a stranger follows the README and the app starts — Now: unmet
+
+## Not this
+- no other route changes
+
+## Lessons consulted
+- L-2026-09-18-01: not applicable because nothing is pasted into a unit
+
+## Quality bar
+| Purpose | Command |
+| --- | --- |
+| install | \`npm ci\` |
+| test | \`npm test\` |
+| start | \`npm start\` |
+
+\`\`\`json problem
+{ "kind": "repair", "size": "S", "done": [ { "id": "D1", "outer": true } ], "bar": { "test": "npm test" } }
+\`\`\`
+`;
+
+export const PLAN_MD = `# Plan for: unknown routes answer 404
+
+## Approach
+Reorder the middleware; borrow from every Express not-found example.
+
+## Shape
+- L2 whole — check: the outer test passes
+- L1:routes — check: \`npm test\`
+
+## Outer test
+1. \`curl /nope\` prints 404 (D1)
+2. a stranger follows the README and the app starts (D2)
+
+## Units
+
+## U1: reorder the not-found handler
+Serves:   D1
+Level:    L1:routes
+Produces: \`src/app.js\` with the not-found handler registered last
+Given:    \`src/app.js\`; the red test \`test/notfound.test.js\`
+Do:       1. Move the not-found handler below the catch-all.
+          2. Run Check.
+Touches:  src/app.js
+Check:    \`node --test test/notfound.test.js\` — Now: unmet
+Depends:  none
+Not:      any other route.
+
+## U2: document the start command
+Serves:   D2
+Level:    L1:routes
+Produces: \`README.md\` with a Run section
+Given:    package.json scripts
+Do:       1. Add a Run section naming \`npm start\`.
+Touches:  README.md
+Check:    \`grep -q "npm start" README.md\` — Now: unmet
+Depends:  U1
+Not:      anything else.
+
+## Order
+U1 → U2
+
+## Trace
+- D1 → U1 → step 1
+- D2 → U2 → step 2
+
+\`\`\`json plan
+{ "units": [ { "id": "U1" }, { "id": "U2" } ] }
+\`\`\`
+`;
+
+test("parseProblem: title, kind, size, done-checks with commands, lessons, bar", () => {
+  const p = parseProblem(PROBLEM_MD)!;
+  assert.equal(p.title, "unknown routes answer 404");
+  assert.equal(p.kind, "repair");
+  assert.equal(p.size, "S");
+  assert.deepEqual(p.done.map((d) => d.id), ["D1", "D2"]);
+  assert.equal(p.done[0]!.command, "node --test test/notfound.test.js");
+  assert.equal(p.done[0]!.outer, true);
+  assert.equal(p.done[1]!.command, undefined);
+  assert.equal(p.done[1]!.now, "unmet");
+  assert.match(p.restated!, /catch-all/);
+  assert.equal(p.given.length, 1);
+  assert.deepEqual(p.lessons, [{ id: "L-2026-09-18-01", applied: false, how: "not applicable because nothing is pasted into a unit" }]);
+  assert.deepEqual(p.bar, { install: "npm ci", test: "npm test", start: "npm start" });
+});
+
+test("parseProblem: markdown fallback when the block is absent; bare block when the markdown has no done-checks", () => {
+  const md = "# Problem: x\nKind: build\n\n## Done-check\n- D1: it works — Check: `npm test` — Now: met\n";
+  assert.equal(parseProblem(md)!.done[0]!.now, "met");
+  const bare = "# Problem: y\n\n```json problem\n{ \"done\": [ { \"id\": \"D1\", \"text\": \"t\", \"check\": \"npm test\" } ], \"bar\": { \"test\": \"npm test\" } }\n```\n";
+  const p = parseProblem(bare)!;
+  assert.equal(p.done[0]!.command, "npm test");
+  assert.equal(p.bar.test, "npm test");
+  assert.equal(parseProblem("no title here"), undefined);
+});
+
+test("commandOf: backticked commands, bare commands, and prose", () => {
+  assert.equal(commandOf("`npm test` exits 0"), "npm test");
+  assert.equal(commandOf("npm run lint"), "npm run lint");
+  assert.equal(commandOf("a reader holding the rubric scores it ≥ 4"), undefined);
+  assert.equal(commandOf("npm start then curl and expect 200"), undefined);
+  assert.equal(commandOf(undefined), undefined);
+});
+
+test("problemGaps: the rules of section 2.1", () => {
+  const p = parseProblem(PROBLEM_MD)!;
+  assert.deepEqual(problemGaps(p, { software: true, offeredLessons: ["L-2026-09-18-01"] }), []);
+  assert.match(problemGaps(undefined).join("\n"), /missing/);
+  const noChecks = { ...p, done: p.done.map((d) => ({ ...d, check: "" })) };
+  assert.match(problemGaps(noChecks).join("\n"), /D1 has no Check/);
+  assert.match(problemGaps({ ...p, done: [] }).join("\n"), /no done-checks/);
+  assert.match(problemGaps({ ...p, done: Array.from({ length: 9 }, (_, i) => ({ ...p.done[0]!, id: `D${i + 1}` })) }).join("\n"), /at most 8/);
+  assert.match(problemGaps({ ...p, size: "L" }).join("\n"), /Split/);
+  assert.match(problemGaps({ ...p, size: "L", split: [{ name: "P1", done: ["D1"] }] }).join("\n"), /no row for D2/);
+  assert.match(problemGaps({ ...p, bar: {} }, { software: true }).join("\n"), /test/);
+  assert.match(problemGaps(p, { offeredLessons: ["L-0000-00-00-01"] }).join("\n"), /L-0000-00-00-01 was offered/);
+  assert.match(problemGaps({ ...p, restated: undefined }).join("\n"), /Restated/);
+});
+
+test("parsePlan: units with continued fields, commands, depends, levels, outer test, trace", () => {
+  const plan = parsePlan(PLAN_MD);
+  assert.deepEqual(plan.units.map((u) => u.id), ["U1", "U2"]);
+  const u1 = plan.units[0]!;
+  assert.equal(u1.title, "reorder the not-found handler");
+  assert.deepEqual(u1.serves, ["D1"]);
+  assert.equal(u1.level, "L1:routes");
+  assert.deepEqual(u1.touches, ["src/app.js"]);
+  assert.equal(u1.check, "`node --test test/notfound.test.js`");
+  assert.equal(u1.command, "node --test test/notfound.test.js");
+  assert.match(u1.do, /1\. Move.*2\. Run Check/);
+  assert.deepEqual(u1.depends, []);
+  assert.deepEqual(plan.units[1]!.depends, ["U1"]);
+  assert.match(u1.body, /^## U1:/);
+  assert.deepEqual(plan.levels, [{ id: "L2", check: "the outer test passes" }, { id: "L1:routes", check: "`npm test`" }]);
+  assert.deepEqual(plan.outer.map((o) => o.d), ["D1", "D2"]);
+  assert.match(plan.outerText, /curl \/nope/);
+  assert.deepEqual(plan.trace, { D1: ["U1"], D2: ["U2"] });
+});
+
+test("parsePlan: a bare block with no markdown units still yields units with a body", () => {
+  const md = "# Plan for: x\n\n```json plan\n{ \"units\": [ { \"id\": \"U1\", \"title\": \"t\", \"serves\": [\"D1\"], \"produces\": \"p\", \"given\": \"g\", \"do\": \"1. do\", \"touches\": [\"src/a.js\"], \"check\": \"npm test\", \"depends\": [] } ] }\n```\n";
+  const plan = parsePlan(md);
+  assert.equal(plan.units.length, 1);
+  assert.equal(plan.units[0]!.command, "npm test");
+  assert.match(plan.units[0]!.body, /Touches:\s+src\/a\.js/);
+});
+
+test("validateUnits: a lawful plan has no problems", () => {
+  const p = parseProblem(PROBLEM_MD)!;
+  const plan = parsePlan(PLAN_MD);
+  assert.deepEqual(validateUnits(plan.units, p, { requireCommand: true, exists: (f) => f === "test/notfound.test.js" }), []);
+});
+
+test("validateUnits: each mechanical row of the stranger test", () => {
+  const p = parseProblem(PROBLEM_MD)!;
+  const base = parsePlan(PLAN_MD).units[0]!;
+  const problems = (u: Partial<typeof base>, opts = {}) => validateUnits([{ ...base, ...u }], p, { requireCommand: true, ...opts }).map((x) => x.problem).join("\n");
+  assert.match(problems({ touches: [] }), /no Touches/);
+  assert.match(problems({ given: "" }), /no Given/);
+  assert.match(problems({ touches: ["test/notfound.test.js"] }), /test file/);
+  assert.match(problems({ touches: ["PLAN.md"] }), /plan artifact/);
+  assert.match(problems({ touches: ["a", "b", "c", "d", "e"] }), /more than 4/);
+  assert.match(problems({ check: "looks right to me", command: undefined }), /prose/);
+  assert.match(problems({ do: "1. Choose the best handler order." }), /"Choose"/i);
+  assert.match(problems({ do: "1. a 2. b 3. c 4. d 5. e 6. f 7. g 8. h" }), /8 steps/);
+  assert.match(problems({ serves: [] }), /names no D/);
+  assert.match(problems({ serves: ["D9"] }), /D9/);
+  assert.match(problems({ depends: ["U7"] }), /U7/);
+  assert.match(problems({ body: Array.from({ length: 70 }, () => "x").join("\n") }), /70 lines/);
+  assert.match(problems({}, { exists: () => false }), /not on disk/);
+  assert.equal(problems({ check: "a stranger reads it", command: undefined }, { requireCommand: false }), "D2 is served by no unit");
+});
+
+test("validateUnits: plan-level rules — every D served; side-by-side units keep disjoint Touches", () => {
+  const p = parseProblem(PROBLEM_MD)!;
+  const [u1, u2] = parsePlan(PLAN_MD).units as [ReturnType<typeof parsePlan>["units"][0], ReturnType<typeof parsePlan>["units"][0]];
+  assert.match(validateUnits([u1], p).map((x) => x.problem).join("\n"), /D2 is served by no unit/);
+  const shared = validateUnits([u1, { ...u2, touches: ["src/app.js"], depends: [] }], p);
+  assert.match(shared.map((x) => x.problem).join("\n"), /share Touches \(src\/app\.js\)/);
+  assert.deepEqual(validateUnits([u1, { ...u2, touches: ["src/app.js"] }], p), []);
+});
+
+test("contractOf: the bar minus start, with defaults", () => {
+  const c = contractOf(parseProblem(PROBLEM_MD))!;
+  assert.deepEqual(c.bar, { install: "npm ci", test: "npm test" });
+  assert.deepEqual(c.start, { command: "npm start" });
+  assert.ok(c.hygieneNeverTracked.includes("node_modules/"));
+  assert.equal(contractOf(undefined), undefined);
+  assert.equal(contractOf({ ...parseProblem(PROBLEM_MD)!, bar: {} }), undefined);
+});
+
+test("renderProblem / renderPlan round-trip through the parsers", () => {
+  const md = renderProblem({ title: "t", kind: "build", size: "M", restated: "r", done: [{ id: "D1", text: "works", check: "npm test" }], bar: { test: "npm test" }, lessons: [{ id: "L-1", applied: true, how: "x" }] })!;
+  const p = parseProblem(md)!;
+  assert.equal(p.title, "t");
+  assert.equal(p.done[0]!.command, "npm test");
+  assert.equal(p.bar.test, "npm test");
+  assert.equal(p.lessons[0]!.applied, true);
+  assert.equal(renderProblem({ title: "t" }), undefined);
+  const plan = parsePlan(renderPlan({ title: "t", units: [{ id: "U1", title: "u", serves: ["D1"], produces: "p", given: "g", do: "1. x", touches: ["src/a.js"], check: "npm test" }], outer: [{ text: "run it", d: "D1" }] })!);
+  assert.equal(plan.units[0]!.command, "npm test");
+  assert.deepEqual(plan.trace, { D1: ["U1"] });
+  assert.equal(plan.outer[0]!.d, "D1");
+  assert.equal(renderPlan({}), undefined);
+});

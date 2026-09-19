@@ -432,16 +432,19 @@ export async function createHybridHandle(args: HybridHandleArgs): Promise<AgentH
       },
     });
 
-  const architectKinds: TurnKind[] = ["plan", "spec", "triage", "requirements", "blueprint"];
+  const architectKinds: TurnKind[] = ["plan", "spec", "triage", "requirements", "blueprint", "understand", "devise"];
+  /** Fresh-session, read-only reviewers: ACG's review and polya-craft's look back. */
+  const reviewerKinds: TurnKind[] = ["review", "look-back"];
+  /** Turns that carry their whole context in the prompt; only the milestone loop replays the transcript. */
+  const selfContained: TurnKind[] = ["task", "qa", "review", "understand", "devise", "carry-out", "look-back"];
   const runTier = async (tier: Tier, kind: TurnKind, prompt: string, o: SendOpts | undefined): Promise<TurnResult> => {
     if (tier === "claude") {
-      if (kind === "review") return claudeReviewSend(prompt, { ...o, fresh: true });
-      const p = kind === "plan" || kind === "spec" || kind === "blueprint" ? `${prompt}${executorNote(cfg.model)}` : prompt;
+      if (reviewerKinds.includes(kind)) return claudeReviewSend(prompt, { ...o, fresh: true });
+      const p = kind === "plan" || kind === "spec" || kind === "blueprint" || kind === "devise" ? `${prompt}${executorNote(cfg.model)}` : prompt;
       return claudeSend(p, o);
     }
-    const model = architectKinds.includes(kind) || kind === "qa" || kind === "review" ? cfg.plannerModel : cfg.model;
-    // Blueprint-loop turns carry their context in the prompt (task block, design excerpt); only the milestone loop replays the transcript.
-    const replay = kind === "task" || kind === "qa" || kind === "review" ? "" : transcriptContext(rec.transcript);
+    const model = architectKinds.includes(kind) || kind === "qa" || reviewerKinds.includes(kind) ? cfg.plannerModel : cfg.model;
+    const replay = selfContained.includes(kind) ? "" : transcriptContext(rec.transcript);
     // A turn that asks for a browser (QA) gets Playwright MCP on qwen-code's command line for that turn only.
     return localSend(model, o?.cwd ?? rec.cwd)(`${replay}${prompt}`, o);
   };

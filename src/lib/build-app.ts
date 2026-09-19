@@ -25,11 +25,15 @@ import { centsForMeter, closeJobCost, formatRunningCost, meterForEngine, project
 import { initialBlueprintState, runBlueprintLoop, type BlueprintState, type BlueprintStopReason } from "../../architect-crew-gate/src/blueprint-loop.js";
 import { browserFromEnv } from "../../architect-crew-gate/src/browser.js";
 import { makeRepoIO } from "../../architect-crew-gate/src/io.js";
+import { makePolyaIO } from "../../polya-craft/src/io.js";
+import { fileLessonsStore } from "../../polya-craft/src/lessons.js";
+import { initialPolyaState, polyaResumePhase, runPolyaLoop, type PolyaState, type PolyaStopReason } from "../../polya-craft/src/polya-loop.js";
 
-export type BuildLoopKind = "milestone" | "blueprint";
+export type BuildLoopKind = "milestone" | "blueprint" | "polya";
 
 export function parseLoopKind(raw?: string): BuildLoopKind {
   const v = (raw ?? process.env.BUILD_LOOP ?? "milestone").trim().toLowerCase();
+  if (v === "polya" || v === "polya-craft") return "polya";
   return v === "blueprint" || v === "acg" || v === "architect-crew-gate" ? "blueprint" : "milestone";
 }
 
@@ -70,6 +74,7 @@ export interface BuildRecord {
   /** Which loop drove this build. Absent = milestone (pre-pattern records). */
   loop?: BuildLoopKind;
   blueprint?: BlueprintState;
+  polya?: PolyaState;
 }
 
 export interface RunBuildAppOpts {
@@ -79,11 +84,13 @@ export interface RunBuildAppOpts {
   createRepo?: string;
   ref?: string;
   engine?: string;
-  /** `milestone` (default) or `blueprint` (architect–crew–gate; hybrid/local engines only). */
+  /** `milestone` (default), `blueprint` (architect–crew–gate), or `polya` (polya-craft); the last two need hybrid/local engines. */
   loop?: string;
   resume?: string;
   maxIterations?: number;
   maxMilestones?: number;
+  /** polya loop: units per plan (default 8). */
+  maxUnits?: number;
   apiKey?: string;
   stateDir?: string;
   log?: (line: string) => void;
@@ -101,9 +108,10 @@ export interface BuildAppResult {
   ref?: string;
   engine: EngineName;
   prUrl?: string;
-  stopReason: StopReason | BlueprintStopReason | "startup-failed";
+  stopReason: StopReason | BlueprintStopReason | PolyaStopReason | "startup-failed";
   state?: LoopState;
   blueprint?: BlueprintState;
+  polya?: PolyaState;
   chargedCents?: number;
   costClose?: string;
   error?: string;
@@ -139,7 +147,7 @@ export function createGithubRepo(name: string): string {
   return url;
 }
 
-export function exitCodeForStopReason(reason: StopReason | BlueprintStopReason | "startup-failed"): number {
+export function exitCodeForStopReason(reason: StopReason | BlueprintStopReason | PolyaStopReason | "startup-failed"): number {
   if (reason === "complete") return 0;
   if (reason === "blocked") return 3;
   if (reason === "run-failed" || reason === "startup-failed") return 2;
@@ -153,6 +161,20 @@ export function banner(title: string, log: (line: string) => void = console.log)
 export function printBuildResult(result: BuildAppResult, log: (line: string) => void = console.log): void {
   banner(`RESULT: ${result.stopReason}`, log);
   if (result.error) log(result.error);
+  if (result.polya) {
+    const p = result.polya;
+    if (p.stopDetail) log(p.stopDetail);
+    log(`problem:     ${p.problem?.title ?? "?"} (${p.problem?.kind ?? "?"}, ${p.problem?.size ?? "?"})    done-checks: ${p.problem?.done.length ?? 0}    units: ${p.units.length}`);
+    for (const u of p.unitRecords) log(`  ${u.passed ? "[x]" : u.question ? "[?]" : "[ ]"} ${u.id}  ${u.question ? `asked: ${u.question}` : `gate ${u.passed ? "PASS" : `FAIL (${(u.failing ?? []).join(", ")})`} after ${u.attempts} attempt(s)`}`);
+    if (p.finish) log(`finish check: ${p.finish.passed ? "PASS" : `FAIL (${p.finish.failing.join(", ")})`}`);
+    if (p.checks) log(`done-checks:  ${p.checks.filter((c) => c.passed).length}/${p.checks.length} met (${p.verifyAttempts} run${p.verifyAttempts === 1 ? "" : "s"})`);
+    if (p.review) log(`review:       ${p.review.verdict}, ${p.review.findings.length} finding(s)`);
+    if (p.lookback) log(`look back:    LOOKBACK.md written; ${p.lookback.lessons} lesson(s) appended, ${p.lookback.confirmed} confirmed`);
+    if (result.prUrl) log(`PR: ${result.prUrl}`);
+    if (result.agentId && result.stopReason !== "complete") log(`\nResume with: npm run build-app -- --resume ${result.agentId}`);
+    log(`\n${result.costClose ?? "COST\n  this run:     unknown"}`);
+    return;
+  }
   if (result.blueprint) {
     const b = result.blueprint;
     if (b.stopDetail) log(b.stopDetail);
@@ -309,6 +331,9 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
             'usage: npm run build-app -- [--engine cursor|claude|hybrid|local] (--idea "..." | --idea-file path) (--repo url | --create-repo name) [--max-iterations N]',
         };
       }
+      if (loop !== "milestone" && !isLocalWorkspaceEngine(engine)) {
+        return { engine, repo: opts.repo, ref: opts.ref, stopReason: "startup-failed", error: `--loop ${loop} needs --engine hybrid|local|claude (a clone this process owns); Cursor VMs cannot be gated` };
+      }
       const created = Boolean(opts.createRepo);
       const repo = opts.repo ?? (opts.createRepo ? createRepoFn(opts.createRepo) : env("TARGET_REPO"));
       const ref = opts.ref ?? (created ? "main" : (process.env.TARGET_REF ?? "main"));
@@ -345,6 +370,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
           loop,
           state: { phase: "spec", iteration: 0, runIds: [], history: [] },
           blueprint: loop === "blueprint" ? initialBlueprintState() : undefined,
+          polya: loop === "polya" ? initialPolyaState() : undefined,
           updatedAt: new Date().toISOString(),
         };
         saveBuildRecord(record, stateDir);
@@ -382,9 +408,6 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
         meter = meterForEngine(record.engine ?? engine);
         send = wrapSend(cursorSend(agent, opts.stream, log));
         usage = () => usageCents(agent, meter);
-      }
-      if (loop === "blueprint" && !isLocalWorkspaceEngine(engine)) {
-        return { engine, repo, ref, stopReason: "startup-failed", error: "--loop blueprint needs --engine hybrid|local|claude (a clone this process owns); Cursor VMs cannot be gated" };
       }
       log(`agent:  ${record.agentId}`);
       log(`engine: ${record.engine ?? engine}`);
@@ -434,6 +457,49 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
         /* ledger is optional */
       }
       return { agentId: record.agentId, repo: record.repo, ref: record.ref, engine: record.engine ?? engine, prUrl: lastPr ?? record.prUrl, stopReason: bp.stopReason, blueprint: bp, chargedCents: cents, costClose };
+    }
+
+    if ((record.loop ?? loop) === "polya") {
+      if (!workspace) throw new Error("polya loop: the engine returned no workspace");
+      const io = makePolyaIO(workspace, { log: (line) => log(line) });
+      const initialState = record.polya ?? initialPolyaState();
+      if (opts.resume) {
+        initialState.phase = polyaResumePhase(initialState);
+        // A resumed look back starts its verify attempts over; the attempts that stopped the run are on record.
+        if (initialState.phase === "look-back") initialState.verifyAttempts = 0;
+      }
+      const ps = await runPolyaLoop(
+        send,
+        {
+          problem: record.idea,
+          repo: record.repo,
+          io,
+          lessons: fileLessonsStore(),
+          maxUnits: opts.maxUnits,
+          browser: Boolean(browserFromEnv()),
+          verifyFallbackTier: (process.env.HYBRID_QA_FALLBACK ?? "claude").trim().toLowerCase() === "claude" && engine !== "local" ? "claude" : undefined,
+          log: (line) => banner(line, log),
+          onState: (state) => {
+            record.polya = state;
+            if (lastPr) record.prUrl = lastPr;
+            saveBuildRecord(record, stateDir);
+          },
+        },
+        { ...initialState, stopReason: undefined, stopDetail: undefined },
+      );
+      const cents = await usage();
+      if (lastPr) record.prUrl = lastPr;
+      record.polya = ps;
+      if (cents != null) record.chargedCents = cents;
+      saveBuildRecord(record, stateDir);
+      await close();
+      let costClose: string | undefined;
+      try {
+        costClose = closeJobCost({ stateDir, project: projectFromRepo(record.repo), cents, meter, source: opts.costSource ?? "build-app", agentId: record.agentId, repo: record.repo }).close;
+      } catch {
+        /* ledger is optional */
+      }
+      return { agentId: record.agentId, repo: record.repo, ref: record.ref, engine: record.engine ?? engine, prUrl: lastPr ?? record.prUrl, stopReason: ps.stopReason, polya: ps, chargedCents: cents, costClose };
     }
 
     const final = await runBuildLoop(

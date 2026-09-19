@@ -26,9 +26,25 @@ npm run deploy                        # stamp the commit, then ship
   first. Four roles, two model tiers. Written for any problem: `WALKTHROUGH.md`
   runs it by hand on a grant proposal and a one-line bug; `examples/house.md`
   runs a house with a framing crew as the Hand. `THEORY.md`, `PATTERN.md`,
-  `ARTICLE.md`, `ROADMAP.md`, four templates, five render-tested prompts. The
-  loop (`src/`, `--loop polya`) is not built; it will borrow
-  `architect-crew-gate`'s gate and repo I/O and never edit them.
+  `ARTICLE.md`, `ROADMAP.md`, four templates, five render-tested prompts.
+- **`--loop polya`: the polya-craft loop in the kit.** `polya-craft/src/`:
+  parsers for the three artifacts, `validateUnits` (the mechanical half of the
+  stranger test: fields, no test or artifact under Touches, a Check that is a
+  command and is red before the unit runs, no decision words in Do, at most
+  four files and seven steps, disjoint Touches across side-by-side units, every
+  D served), the ledger store, `makePolyaIO` (architect-crew-gate's repo I/O
+  with the gate reading PROBLEM.md's quality bar, so a unit turn runs its own
+  Check and not the whole suite), and the loop. A Hand's question stops the run
+  as `unit-not-workable`, drafts a candidate lesson, and resumes at Devise with
+  the question; units that passed are kept. Done-checks that are commands run
+  mechanically in a fresh clone; the rest go to the Verifier, with a frontier
+  fallback on hybrid. LOOKBACK.md is written by the loop from evidence, always,
+  and the ledger is appended and confirmed. Routing knows the five prompt
+  headers; the hybrid engine treats Understand and Devise as architect turns
+  and Look back as a read-only reviewer. A unit or done-check that names a
+  page gets Playwright attached for that turn, through the engine's existing
+  path. 50 tests, including end to end on a real bare origin with the real
+  gate.
 - **`architect-crew-gate/`: the pattern in its own folder.** `THEORY.md` is the
   claim, five principles, and operating instructions an AI or a person can act
   on directly; `PATTERN.md` is

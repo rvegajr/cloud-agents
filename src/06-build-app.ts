@@ -18,6 +18,9 @@
  *
  * `--loop blueprint` (or BUILD_LOOP=blueprint) runs architect-crew-gate/PATTERN.md
  * instead of the milestone loop: requirements → blueprint → gated tasks → QA → review.
+ * `--loop polya` (or BUILD_LOOP=polya) runs polya-craft/PATTERN.md: understand → devise
+ * → gated units → look back (checks, verifier, review, LOOKBACK.md + LESSONS.md).
+ * `--max-units N` caps a polya plan (default 8).
  *
  * For many ideas in parallel, use `npm run build-farm` (Cursor only).
  */
@@ -42,6 +45,7 @@ try {
     resume: args.resume,
     maxIterations: args["max-iterations"] ? Number(args["max-iterations"]) : undefined,
     maxMilestones: args["max-milestones"] ? Number(args["max-milestones"]) : undefined,
+    maxUnits: args["max-units"] ? Number(args["max-units"]) : undefined,
   });
   if (result.stopReason === "startup-failed" && result.error?.startsWith("usage:")) {
     console.error(result.error);

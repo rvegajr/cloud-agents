@@ -21,6 +21,10 @@ imply.
 
 {{run_instructions}}
 
+## Browser
+
+{{browser_tools}}
+
 ## Procedure
 
 1. Start from a clean state as instructed. If it does not start, that is

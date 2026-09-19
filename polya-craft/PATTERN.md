@@ -384,7 +384,7 @@ If the four stages prove better, ACG's loop is the one to retire.
 
 ## 9. Running it with this kit
 
-Not built yet. `ROADMAP.md` lists the modules. The intended commands:
+The loop is `src/polya-loop.ts`; `ROADMAP.md` tracks what is and is not built.
 
 ```bash
 npm run build-app -- --loop polya --engine hybrid --idea "<problem>" --repo <url>      # Max: Solver; local: Hand, Verifier
