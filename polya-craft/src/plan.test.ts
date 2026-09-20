@@ -455,7 +455,7 @@ test("commandOf: a command that wraps across lines, or starts with rm or a subsh
 // The requester's REQUEST.md: J/W/M items, their dispositions, and immovable paths
 // ---------------------------------------------------------------------------
 
-import { immovableOf, parseRequest, requestNote } from "./plan.js";
+import { barPurposeOf, immovableOf, parseRequest, requestNote } from "./plan.js";
 
 export const REQUEST_MD = `# Request: count JSON values on stdin
 
@@ -542,4 +542,22 @@ test("validateUnits: a repair for the finish check need not name a done-check (l
   const problem = parseProblem(PROBLEM_MD);
   assert.match(validateUnits([u], problem, { doneIds: [] }).map((p) => p.problem).join("\n"), /Serves: names no D/);
   assert.ok(!validateUnits([u], problem, { doneIds: [], requireServes: false }).some((p) => /Serves/.test(p.problem)));
+});
+
+test("live jsoncount (2026-09-20): a bar table with the columns swapped and prose purposes, and a json bar as a list of rows, both read", () => {
+  const md = readFileSync(new URL("./fixtures-live-problem-jc.md", import.meta.url), "utf8");
+  const p = parseProblem(md)!;
+  assert.deepEqual(p.bar, { install: "npm ci", test: "npm test" });
+  assert.equal(p.done.length, 8);
+  assert.deepEqual(Object.keys(p.request), ["J1", "J2", "J3", "J4", "W1", "W2", "W3", "M1"]);
+  assert.match(p.request.M1!, /^immovable/);
+  assert.deepEqual(problemGaps(p, { software: true, request: parseRequest(readFileSync(new URL("../examples/request-json-count.md", import.meta.url), "utf8")) }).filter((g) => /Quality bar|[JWM]\d/.test(g)), []);
+  // The block alone, as a list of rows, when the markdown table is absent.
+  const blockOnly = parseProblem('# Problem: x\n\n## Done-check\n- D1: a — Check: `true` — Now: unmet\n\n```json problem\n{ "bar": [{ "command": "npm ci", "purpose": "install deps" }, { "command": "npm test", "purpose": "the suite" }, { "command": "npm run typecheck", "purpose": "types" }] }\n```\n')!;
+  assert.deepEqual(blockOnly.bar, { install: "npm ci", test: "npm test", typecheck: "npm run typecheck" });
+  // The canonical shape still reads, and a placeholder row is skipped.
+  const canon = parseProblem("# Problem: x\n\n## Quality bar\n| Purpose | Command |\n| --- | --- |\n| install | `npm ci` |\n| test | `npm test` (no deps) |\n| lint | `<none>` |\n")!;
+  assert.deepEqual(canon.bar, { install: "npm ci", test: "npm test" });
+  assert.equal(barPurposeOf("run the automated suite", "node --test test/"), "test");
+  assert.equal(barPurposeOf("a note", "make coffee"), undefined);
 });

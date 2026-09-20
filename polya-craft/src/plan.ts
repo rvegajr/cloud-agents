@@ -278,15 +278,68 @@ function parseDoneChecks(text: string | undefined): DoneCheck[] {
   return out;
 }
 
+const BAR_PURPOSES = ["install", "test", "lint", "typecheck", "start", "build", "dev"] as const;
+
+/** The bar purpose a label names, or the one a well-known command implies (live jsoncount, 2026-09-20: prose labels, columns swapped). */
+export function barPurposeOf(label: string, command: string): string | undefined {
+  const l = label.toLowerCase();
+  for (const p of BAR_PURPOSES) if (new RegExp(`(^|[^a-z])${p}([^a-z]|$)`).test(l)) return p;
+  const c = command.trim().toLowerCase();
+  if (/^(npm (ci|install|i)|pnpm (install|i)|yarn( install)?|pip install|poetry install|bundle install|go mod download)\b/.test(c)) return "install";
+  if (/^(npm (run )?test|pnpm test|yarn test|pytest|go test|cargo test|node --test|dotnet test)\b/.test(c)) return "test";
+  if (/^(npm (run )?lint|eslint|ruff|flake8)\b/.test(c)) return "lint";
+  if (/^(npm run typecheck|tsc|mypy)\b/.test(c)) return "typecheck";
+  if (/^(npm (run )?start|npm run dev)\b/.test(c)) return "start";
+  if (/^(npm run build|cargo build|go build)\b/.test(c)) return "build";
+  return undefined;
+}
+
+function cellCommand(cell: string): string | undefined {
+  const tick = cell.match(/`([^`]+)`/)?.[1]?.trim();
+  const raw = tick ?? cell.trim();
+  return raw && !/^<.*>$/.test(raw) && !/^-+$/.test(raw) ? raw : undefined;
+}
+
+/** `| Purpose | Command |` in either column order, the purpose a word or a sentence, the command in backticks or bare. */
 function parseBarTable(text: string | undefined): Record<string, string> {
   const bar: Record<string, string> = {};
   if (!text) return bar;
-  // The command is the first backticked thing in the second cell; a note after it ("(no dependencies)") is allowed.
-  for (const m of text.matchAll(/^\|\s*([a-z]+)\s*\|[^|`\n]*`([^`]+)`/gim)) {
-    const cmd = m[2]!.trim();
-    if (cmd && !/^<.*>$/.test(cmd)) bar[m[1]!.toLowerCase()] = cmd;
+  let commandCol: number | undefined;
+  for (const line of text.split("\n")) {
+    if (!/^\s*\|/.test(line)) continue;
+    const cells = line.replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|").map((c) => c.trim());
+    if (cells.length < 2 || cells.every((c) => /^:?-+:?$/.test(c))) continue;
+    if (commandCol === undefined && cells.some((c) => /^(command|shell|purpose|step)$/i.test(c))) {
+      const i = cells.findIndex((c) => /^(command|shell)$/i.test(c));
+      commandCol = i === -1 ? 1 : i;
+      continue;
+    }
+    const ci = commandCol ?? (cells[1]!.includes("`") || !cells[0]!.includes("`") ? 1 : 0);
+    const command = cellCommand(cells[ci] ?? "");
+    if (!command) continue;
+    const label = cells.filter((_, i) => i !== ci).join(" ");
+    const purpose = barPurposeOf(label, command);
+    if (purpose && !(purpose in bar)) bar[purpose] = command;
   }
   return bar;
+}
+
+/** The json block's `bar`: `{install: "npm ci"}`, or a list of `{purpose|step|name, command}` rows. */
+function barFromBlock(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (Array.isArray(raw)) {
+    for (const r of raw as Record<string, unknown>[]) {
+      if (!r || typeof r !== "object" || typeof r.command !== "string") continue;
+      const label = String(r.purpose ?? r.step ?? r.name ?? "");
+      const purpose = barPurposeOf(label, r.command);
+      if (purpose && r.command.trim() && !/^<.*>$/.test(r.command) && !(purpose in out)) out[purpose] = r.command.trim();
+    }
+    return out;
+  }
+  if (raw && typeof raw === "object") {
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) if (typeof v === "string" && v.trim() && !/^<.*>$/.test(v)) out[k.toLowerCase()] = v.trim();
+  }
+  return out;
 }
 
 export function parseProblem(md: string): Problem | undefined {
@@ -322,8 +375,8 @@ export function parseProblem(md: string): Problem | undefined {
   const request: Record<string, string> = {};
   for (const m of (section(md, "Request") ?? "").matchAll(/^\s*[-*]\s*\*{0,2}([JWM]\d+)\*{0,2}\s*[:—–-]\s*(.+)$/gm)) request[m[1]!] = m[2]!.trim();
   const barMd = parseBarTable(section(md, "Quality bar"));
-  const barBlock = block?.bar && typeof block.bar === "object" ? block.bar : block?.quality_bar && typeof block.quality_bar === "object" ? block.quality_bar : {};
-  const bar = Object.keys(barMd).length ? barMd : Object.fromEntries(Object.entries(barBlock).filter(([, v]) => typeof v === "string" && v.trim() && !/^<.*>$/.test(v)));
+  const barBlock = barFromBlock(block?.bar ?? block?.quality_bar);
+  const bar = Object.keys(barMd).length ? barMd : barBlock;
   return {
     title,
     kind: kindRaw === "repair" || kindRaw === "change" || kindRaw === "build" || kindRaw === "answer" ? kindRaw : undefined,
