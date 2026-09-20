@@ -80,8 +80,8 @@ they do not touch the Solver's judgment.
 | Run | Variable | Repo | Hypothesis | Est. Max |
 | --- | --- | --- | --- | --- |
 | **R0** | the curated ledger only | `polya-live-sv-r0` | ~~the ledger alone lifts Sonnet to ≥ 32~~ **done 2026-09-19: 22/35** (no docs unit, `.polya/` still penalised, unrefused input); see ROADMAP | $11.78 + $6.32 scoring |
-| **R1** | R0 + `POLYA_ORACLE=1` | `polya-live-sv-r1` | the oracle lifts Sonnet to ≥ 33 | $7 |
-| **R2** | only if R1 < 33: Understand on Opus max, Devise and review on Sonnet | `polya-live-sv-r2` | the checks come from Understand, so one strong turn is enough | $15 |
+| **R1** | R0 + `POLYA_ORACLE=1` | `polya-live-sv-r1a`, `-r1b` | ~~the oracle lifts Sonnet to ≥ 33~~ **done 2026-09-20: 32 and 32, verdict merge on both, beating Opus at 31**; see ROADMAP | $21 + $8.91 scoring |
+| ~~**R2**~~ | ~~split tier~~ | — | **not needed**: Sonnet with the oracle beat Opus at maximum effort, so there is nothing for a stronger Understand to buy on a problem this size | — |
 
 R2 needs a per-kind model: `CLAUDE_MODEL_UNDERSTAND`, `CLAUDE_EFFORT_UNDERSTAND`
 read in `runTier` (`src/lib/engine-local.ts`) and passed through `SendOpts`
