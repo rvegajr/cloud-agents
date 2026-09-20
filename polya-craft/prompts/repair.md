@@ -9,6 +9,8 @@ anything yourself; write the unit.
 
 ## What failed ({{stage}})
 
+{{revise_note}}
+
 {{evidence}}
 
 ## PROBLEM.md

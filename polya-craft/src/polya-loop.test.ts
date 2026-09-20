@@ -772,3 +772,29 @@ test("look back: a record a model forced into git is untracked before the finish
   assert.ok(calls.commits.some((c) => /^polya: untrack 2 ignored file\(s\) \(\.polya\/PROBLEM\.md, \.polya\/PLAN\.md\)/.test(c)), calls.commits.join(" | "));
 });
 
+
+test("a unit that cannot pass its own Check goes back to the Solver once, and the revised unit runs again", async () => {
+  // U1's Check is red and its gate fails every attempt; the Solver revises U1 in place, and the next attempt passes.
+  const failing = PLAN_MD.replace("Check:    `node --test test/notfound.test.js`", "Check:    `node --test test/impossible.test.js`");
+  const { io, files, calls } = makeIO({ files: { ".polya/PLAN.md": failing, "test/impossible.test.js": "test('red', ...)" }, gates: [fail("quality-bar"), fail("quality-bar"), fail("quality-bar")] });
+  const original = io.runCommand;
+  io.runCommand = async (command, cwd) => (command.includes("impossible") ? { code: 1, output: "1 failing: GET / serves the shell" } : original(command, cwd));
+  const { send, sent } = makeSend({
+    devise: (p) => {
+      if (!/^# Devise a repair/m.test(p)) return defaultDevise(p);
+      // The revision widens U1's Touches; its Check stays red until the Hand has done the work.
+      currentIO!.writeFile(".polya/PLAN.md", failing.replace("Touches:  src/app.js", "Touches:  src/app.js, public/index.html"));
+      return json({ units: ["U1"] });
+    },
+  });
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  const repairPrompt = sent.find((s) => /^# Devise a repair/m.test(s.prompt))!;
+  assert.match(repairPrompt.prompt, /Revise \*\*U1 in place\*\*/);
+  assert.match(repairPrompt.prompt, /U1 failed its own Check after 3 attempt\(s\)/);
+  assert.match(repairPrompt.prompt, /GET \/ serves the shell/);
+  assert.deepEqual(out.replanned, ["U1"]);
+  assert.equal(out.unitRecords.find((r) => r.id === "U1")!.passed, true);
+  assert.equal(sent.filter((s) => /# Carry out: unit U1/.test(s.prompt)).length, 4);
+  assert.deepEqual(calls.gate.find((g) => g.allowed?.includes("public/index.html"))!.allowed, ["src/app.js", "public/index.html"]);
+});

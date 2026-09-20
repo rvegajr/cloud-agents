@@ -116,6 +116,8 @@ export interface PolyaState {
   replanNote?: string;
   /** Files the Solver itself committed after the baseline (a repair's red test); the finish check allows them. */
   solverFiles?: string[];
+  /** Units the Solver has already been asked to re-plan once, so a bad unit cannot loop. */
+  replanned?: string[];
   finish?: { passed: boolean; failing: string[] };
   checks?: CheckResult[];
   verifyAttempts: number;
@@ -417,14 +419,17 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
    * A check failed at look back. The Solver writes the repair as ordinary units (plan-lint, a red Check, the Hand,
    * the gate); the loop never writes a unit itself. Returns undefined when every repair unit passed its gate.
    */
-  const repair = async (stage: "finish" | "verify" | "review", evidence: string): Promise<{ reason: PolyaStopReason; detail: string } | undefined> => {
-    const stopFor: PolyaStopReason = stage === "finish" ? "finish-check-failed" : stage === "verify" ? "verify-failed" : "review-unresolved";
+  const repair = async (stage: "finish" | "verify" | "review" | "unit", evidence: string, revise?: Unit): Promise<{ reason: PolyaStopReason; detail: string } | undefined> => {
+    const stopFor: PolyaStopReason = stage === "finish" ? "finish-check-failed" : stage === "verify" ? "verify-failed" : stage === "unit" ? "unit-gate-failed" : "review-unresolved";
     const problem = readProblem();
     const before = readPlan()?.units.map((u) => u.id) ?? [];
     const nextId = `U${before.reduce((n, id) => Math.max(n, Number(id.match(/\d+/)?.[0] ?? 0)), 0) + 1}`;
     const prompt = buildPrompt(`${PROMPTS}/repair`, "", {
-      stage: stage === "finish" ? "the finish check" : stage === "verify" ? "done-checks from a fresh clone" : "the review",
+      stage: stage === "finish" ? "the finish check" : stage === "verify" ? "done-checks from a fresh clone" : stage === "unit" ? `unit ${revise?.id}'s own Check` : "the review",
       evidence,
+      revise_note: revise
+        ? `The unit below could not pass its own Check after every attempt, and the Hand reproduced what its Do says. That is a defect in the unit, not in the work: its Check may depend on a deliverable of a later unit, its Do may be incomplete, or its Touches may be too narrow. Revise **${revise.id} in place** under \`## Units\` — its Check, Do, Touches or Depends — so that it can pass once ${revise.id} and the units it depends on are done. Write no new unit unless the work genuinely splits in two.`
+        : "",
       problem_md: artifact(ARTIFACTS.problem) ?? "",
       plan_md: artifact(ARTIFACTS.plan) ?? "",
       next_id: nextId,
@@ -437,7 +442,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     io.commit("repair: PLAN.md");
     const report = lenientJson<{ check_wrong?: boolean; notes?: string }>(t.result);
     if (report?.check_wrong) return { reason: stopFor, detail: `the Solver says the check is wrong, not the product: ${report.notes ?? ""}`.trim() };
-    const fresh = () => (readPlan()?.units ?? []).filter((u) => !before.includes(u.id));
+    const fresh = () => (readPlan()?.units ?? []).filter((u) => !before.includes(u.id) || (revise && u.id === revise.id));
     const gapsOf = (): string[] => {
       const units = fresh();
       if (!units.length) return ["- no new unit under `## Repairs`"];
@@ -457,6 +462,11 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     const units = fresh();
     for (const u of units) {
       if (u.command && (await io.runCommand(u.command)).code === 0) return { reason: stopFor, detail: `repair ${u.id}'s Check already passes; it measures nothing` };
+    }
+    if (revise) {
+      // A revised unit replaces the one that could not pass; it is carried out again below.
+      state.units = state.units.filter((u) => !units.some((n) => n.id === u.id));
+      state.unitRecords = state.unitRecords.filter((r) => !units.some((n) => n.id === r.id));
     }
     // The red test the Solver wrote for the repair is the Solver's file, not a Hand's: the finish check allows it.
     state.solverFiles = union(state.solverFiles, io.changedFiles?.(beforeSha) ?? []);
@@ -608,6 +618,16 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       if (r === "run-failed") return stop("run-failed", `unit ${unit.id} turn did not finish`);
       state.unitRecords.push(r.record);
       await persist();
+      if (!r.blocked && !r.record.passed && !(state.replanned ?? []).includes(unit.id)) {
+        // A unit the Hand cannot pass, having done what its Do says, is a defect in the unit: back to the Solver, once.
+        state.replanned = union(state.replanned, [unit.id]);
+        await persist();
+        const evidence = `- ${unit.id} failed its own Check after ${r.record.attempts} attempt(s) (${(r.record.failing ?? []).join(", ")}).\n  Check: ${unit.check}\n  Last output:\n${tail((await io.runCommand(unit.command ?? "true")).output, 25)}`;
+        const stopped = await repair("unit", evidence, unit);
+        if (stopped) return stop(stopped.reason, stopped.detail);
+        state.unitIndex -= 1; // the revised unit is carried out again
+        continue;
+      }
       if (r.blocked) {
         state.replanNote = `Unit ${unit.id} asked: "${r.blocked}"`;
         if (lessons) {
