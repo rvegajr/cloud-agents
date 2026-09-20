@@ -30,14 +30,14 @@ Tags:     kind:repair domain:software stage:understand routing http
 When:     the problem is about which paths an HTTP app answers, and the done-checks curl the paths the requester named
 Lesson:   add a done-check for malformed paths (`//`, `%2f`, a 2 KB path, a wrong method): the app must answer, never exit; a request that kills the process is the defect the requester did not name
 Evidence: polya-live-404, both loops' fixes passed every check and review; a blind reviewer sent GET // and the process died on `new URL(req.url, …)`, a line neither loop touched
-Status:   confirmed(7)
+Status:   confirmed(11)
 
 ## L-2026-09-19-02
 Tags:     kind:build stage:devise runtime:node
 When:     a build declares a minimum Node engine version and then uses a `node:` core module that stabilized (dropped its experimental CLI flag) partway through that major version's release line
 Lesson:   Pin `engines.node` to the exact version where the used core module works unflagged, not the version where the module first appeared behind a flag, and verify by actually installing that minimum version rather than trusting whatever Node happens to be on the build/CI machine.
 Evidence: package.json engines >=22.5.0 and README both cite 22.5 as sufficient for `node:sqlite`, but the flag requirement wasn't dropped until later in the 22.x/23.x line; every check in this build (including the orchestrator's own gate) ran on Node 26.7 and so never exercised the stated minimum.
-Status:   confirmed(3)
+Status:   confirmed(4)
 
 ## L-2026-09-19-03
 Tags:     kind:build stage:devise stage:carry-out check
@@ -72,7 +72,7 @@ Tags:     kind:build stage:understand done-check
 When:     the request's example names the command the requester will type (`npm run dev`, a CLI invocation)
 Lesson:   put that exact command in a done-check or an outer-test step; a sibling command that shares its code path (`npm start`) does not prove it
 Evidence: snippet-vault (Fable): the idea says "I run `npm run dev`"; every D and outer step used `npm start`; `npm run dev` was first run at the review.
-Status:   confirmed(3)
+Status:   confirmed(5)
 
 ## L-2026-09-19-09
 Tags:     kind:build stage:devise storage
@@ -107,11 +107,53 @@ Tags:     kind:build stage:verify
 When:     a done-check is marked outer:false (requires browser/UI observation, not just an HTTP check)
 Lesson:   Record verifier evidence that is specific to what that check actually requires observing in a browser; never let one check's evidence text double as another's, even when both happen to pass.
 Evidence: D1's walk text ('POST ... GET ... PUT ... DELETE ... 404') is D2's CRUD-API check verbatim, not a description of live-narrowing search or a Copy-button click, even though D8/D9 in the same walk do cite distinct browser-observed detail.
-Status:   candidate
+Status:   confirmed(1)
 
 ## L-2026-09-20-03
 Tags:     kind:build stage:verify
 When:     a done-check's Check names an exact version/config to pin and test (e.g. engines.node minimum via nvm)
 Lesson:   Actually execute under the pinned version and record that run's output as evidence; do not substitute a check that the build machine's version merely satisfies the declared range.
 Evidence: D5 was marked met using only Node 26.7.0 (the build machine); pinning to the declared minimum (24.0.0) via Docker had never been run until this review, though it did pass once actually tried.
+Status:   confirmed(1)
+
+## L-2026-09-20-04
+Tags:     kind:build stage:verify
+When:     a done-check's shell command changes directory (cd) away from the project root before invoking the built command
+Lesson:   Execute the check's cd verbatim from a genuinely clean state (no leftover npx/package caches) before recording it met — do not approximate by running the underlying command from the project root instead.
+Evidence: D3 was reported 'met' with the correct single-line stderr message; run with its own `cd "$d"` honored and npx cache cleared, it produces an 8-line npm E404 block instead.
+Status:   confirmed(1)
+
+## L-2026-09-20-05
+Tags:     kind:build stage:devise
+When:     a CLI's bin/script name must be invocable via `npx <name>` from any working directory, not just from inside its own repo
+Lesson:   Treat 'installable with npm ci' and 'resolvable by npx from an arbitrary cwd' as two different requirements — the latter needs an explicit global link/install step, since npm only self-recognizes a package's own bin when cwd is inside that package.
+Evidence: npx jsoncount succeeds from the project root (npm's cwd-scoped self-recognition) but 404s against the registry from any other directory, exactly the case D3's check and the problem's external-Makefile Given both depend on.
+Status:   confirmed(1)
+
+## L-2026-09-20-06
+Tags:     kind:build stage:verify domain:cli-packaging
+When:     a done-check invokes `npx <local-unpublished-bin>` from outside the package's own directory (testing a file argument located elsewhere)
+Lesson:   Before trusting a PASS on such a check, assert the global npm state is clean (`npm ls -g` has no entry for the package) — an unpublished local CLI's `npx <bin>` only resolves inside its own directory tree or after an explicit `npm link`/global install, and a leftover link from earlier manual testing will silently mask this gap.
+Evidence: D3 flipped from PASS to FAIL (npm E404 + network call + 8-line npm error instead of one jsoncount stderr line) purely by removing a pre-existing global `npm link` for this package; nothing in `npm ci` or the check text itself established that link.
+Status:   candidate
+
+## L-2026-09-20-07
+Tags:     kind:build stage:devise
+When:     a package's own README documents a required extra setup step (here, `npm link`) for a Done-check scenario to work
+Lesson:   Fold that step into the Done-check's fixture/harness (or into the package's own install story) rather than leaving it as documentation the check never runs — otherwise the check's outcome depends on whichever agent happened to run that step manually during a prior turn.
+Evidence: README.md correctly documents `npm link` as required for `npx jsoncount` to work outside the repo, but D3's check text and the build's `package.json` (no postinstall) never perform it, so its 'met' status only held because of out-of-band manual state.
+Status:   candidate
+
+## L-2026-09-20-08
+Tags:     kind:build stage:verify
+When:     a verify/look-back turn runs ad-hoc shell check commands (redirecting to o1.txt/e1.txt-style files) directly in the repo working directory
+Lesson:   Redirect check-command stdout/stderr scratch files to a dedicated scratch/tmp directory outside the repo, never to the repo root, so a forgotten `rm` cannot leave stray files for git to pick up.
+Evidence: commit d895288 added e1.txt, e2.txt, err.log, err.txt, o1.txt, o2.txt to the repo root during a look-back turn; commit 53e8dba (orchestrator) had to revert them as a Touches violation.
+Status:   candidate
+
+## L-2026-09-20-09
+Tags:     kind:build stage:devise domain:recursion
+When:     a Done-check that says 'recursive' or 'counted through nesting' also has a volume/performance check (like D5) on a large *flat* structure
+Lesson:   Add a nesting-depth stress check alongside a width stress check — a plain recursive tree-walker (no explicit stack) can pass a wide/flat volume test cleanly while still stack-overflowing on a deep-but-valid document, and no width-only check will ever catch it.
+Evidence: lib/count.js's countNode passed D5 (1.2M flat scalars, 55MB, <1s) but threw RangeError: Maximum call stack size exceeded on a valid JSON document nested ~5000 levels deep, dumping a raw stack trace to stderr in violation of the one-stderr-line contract.
 Status:   candidate
