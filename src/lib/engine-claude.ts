@@ -393,8 +393,12 @@ export function openClaudeWorkspace(args: { repo: string; ref: string; agentId?:
     if (!loaded) throw new Error(`No Claude workspace for ${args.agentId}. Start a new job rather than resume.`);
     if (!existsSync(loaded.cwd)) {
       loaded.cwd = cloneWorkspace(loaded.repo, loaded.ref);
+      // cloneWorkspace clones only `ref` (single-branch, shallow), so origin's fetch refspec doesn't cover
+      // `loaded.branch`. A bare `fetch origin <branch>` then lands in FETCH_HEAD only, never a ref checkout can
+      // find, and the job's prior commits are silently orphaned. Fetching straight into a same-named local ref
+      // sidesteps that, whatever the remote's configured refspec is.
       try {
-        execFileSync("git", ["fetch", "origin", loaded.branch], { cwd: loaded.cwd, stdio: "inherit" });
+        execFileSync("git", ["fetch", "origin", `${loaded.branch}:${loaded.branch}`], { cwd: loaded.cwd, stdio: "inherit" });
         execFileSync("git", ["checkout", loaded.branch], { cwd: loaded.cwd, stdio: "inherit" });
       } catch {
         execFileSync("git", ["checkout", "-b", loaded.branch], { cwd: loaded.cwd, stdio: "inherit" });

@@ -695,6 +695,11 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     }
 
     // (a) the finish check: ownership over the whole job, hygiene, the bar, clean start, vacuous suite.
+    // A workspace that reaches here without a carry-out turn in it (every unit already passed on a resume,
+    // e.g. after a reboot lost the old one) has no node_modules yet. The bar's lint/test/build commands would
+    // then fail on a bare "module not found", read as a product defect it isn't. (b) already installs into its
+    // fresh clone for the same reason; this is that same step for the workspace itself.
+    if (problem.bar.install) await io.runCommand(problem.bar.install);
     log("look back (a): checks from a clean state");
     let gate = await io.gate("finish", { allowedFiles: finishAllowed(), baseSha: state.baselineSha });
     if (!gate.passed) {
