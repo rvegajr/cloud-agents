@@ -72,6 +72,16 @@ outer-test step.
 - A unit whose `Do` runs an installer (`npm install`, `npm ci`, `pnpm i`,
   `bundle install`, …) owns the lock file that installer writes: name it
   under `Touches` beside the manifest.
+- **A done-check that happens on a page becomes a test wherever it can.**
+  For each D whose Check a stranger observes in a browser, ask whether an
+  automated test could observe the same thing: a Playwright spec when the
+  repo already has `@playwright/test`, otherwise a Node test driving the
+  page's own functions against a fake `window` whose `fetch` and
+  `navigator.clipboard` the test controls. If it can, write that test now,
+  red, and say so in the unit that serves the D; a human walk is weaker
+  evidence than a test, and it is the slowest part of the loop. Keep the
+  observation for what a test genuinely cannot see: layout, a real
+  clipboard, a real browser's refusal.
 - The loop commits the Hand's work before it runs the Check, and its
   ownership gate rejects any change outside `Touches`. A Check never
   inspects `git status`, `git diff`, or the commit; it checks the files and
