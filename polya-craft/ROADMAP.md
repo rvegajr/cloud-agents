@@ -179,6 +179,55 @@ roughly 5-6x Sonnet's default on the Solver turns alone (`$24-36` vs
 `.polya/`-scale structure fix is also in place and the remaining gap is
 genuinely judgment, not paperwork location.
 
+## R0: does the curated ledger alone lift the cheap Solver?
+
+2026-09-19. Sonnet at default effort, the ledger curated after five runs,
+the oracle off, `.polya/` artifacts, Verifier batches of two.
+`rvegajr/polya-live-sv-r0#1`. Seven units, every one gate-green first
+attempt (six built, one repair); 8/8 done-checks; review done with one
+medium finding; 2 lessons appended, 5 confirmed. Claude Max API-eq $11.78.
+Blind score with the three Solver anchors, one invocation, repeat 3,
+record `.runs/quality-2026-09-19T23-36-54-196Z.json`, $6.32:
+
+| engine | corre | secur | valid | tests | struc | ux | readm | median /35 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| fable, max effort | 5 | 5 | 5 | 5 | 4 | 5 | 5 | **34** |
+| opus, max effort | 5 | 5 | 5 | 5 | 3 | 4 | 5 | **32** |
+| sonnet, baseline | 5 | 4 | 4 | 3 | 3 | 4 | 5 | **28** |
+| **sonnet + ledger (R0)** | 4 | 4 | 3 | 4 | 2 | 3 | 1 | **22** |
+
+**The answer is no, and two of the three reasons are not the ledger's.**
+
+- **No documentation unit.** R0's plan has six units — tooling, data,
+  client, server, page, styles — and none for docs, so the repo ships the
+  one-line stub README that `gh repo create` made. All three reviewers
+  scored readme 1; that is four of the six points R0 sits below the
+  baseline, which did have a docs unit. Nothing in Understand, the ledger,
+  or plan-lint requires that a stranger can install and run the thing from
+  the repo's own documentation. The oracle needs that line.
+- **`.polya/` did not remove the structure penalty.** That was the point of
+  C1. Reviewers still docked it (structure 1, 2, 4 across repeats): "an
+  agent-tool planning-state directory present in the tree". Moving the
+  record does not help; either it stays out of the product branch (an
+  orphan ref, or only in `.runs/`), or the cost is accepted. Decide before
+  the next scored build.
+- **What remains is what the oracle covers.** Validation 3 in every repeat:
+  `POST {}` returns 201, a non-array `tags` is coerced instead of refused.
+  UX: no empty state. Those are oracle lines O1 and O2, off by design in
+  R0. R1 is the run that tests them.
+
+**What the ledger did do.** Sonnet wrote the malformed-input check (passed)
+and the failed-save check, which caught a real defect: a save that fails
+told the user nothing. The repair for it is U7, and one reviewer cited it
+as a strength.
+
+**The caveat that matters most.** Two Sonnet runs on the same idea scored
+28 and 22. That spread is wider than the effect being measured, so one run
+per configuration cannot answer this question. Either run each
+configuration twice, or treat these numbers as evidence about *what
+reviewers punish* (missing docs, process artifacts, unrefused input)
+rather than about the Solver's model or the ledger.
+
 ## Order of work
 
 **Phase 1: the pattern.** The documents, templates, prompts, ledger,
