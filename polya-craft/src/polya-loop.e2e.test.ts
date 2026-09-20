@@ -159,10 +159,12 @@ test("polya loop end to end: real clone, real gate, a faked model that writes fi
   assert.equal(out.finish?.passed, true);
   assert.deepEqual(out.checks?.map((c) => [c.id, c.passed, c.how]), [["D1", true, "mechanical"]]);
   const history = execFileSync("git", ["log", "--format=%s"], { cwd: clone, encoding: "utf8" });
-  assert.match(history, /look back: LOOKBACK\.md/);
+  // The record is ignored, so its commits carry only what the product keeps: the red test and the stub from devise.
+  assert.match(history, /polya: ignore \.polya\//);
   assert.match(history, /carry out: U1 attempt 2/);
   assert.match(history, /devise: PLAN\.md/);
-  assert.match(history, /understand: PROBLEM\.md/);
+  assert.doesNotMatch(history, /understand: PROBLEM\.md/);
+  assert.equal(execFileSync("git", ["ls-files", ".polya"], { cwd: clone, encoding: "utf8" }).trim(), "", ".polya is not tracked");
   const lookback = readFileSync(join(clone, ".polya", "LOOKBACK.md"), "utf8");
   assert.match(lookback, /\| D1 \| yes \|/);
   assert.match(lookback, /U1: 2 attempt\(s\)/);

@@ -1,6 +1,6 @@
 import { Agent, type SDKAgent } from "@cursor/sdk";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { env } from "./env.js";
@@ -493,6 +493,18 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
         },
         { ...initialState, stopReason: undefined, stopDetail: undefined },
       );
+      // The record is ignored in the target repo, so keep a copy beside the run's state.
+      try {
+        const from = resolve(workspace, ".polya");
+        if (existsSync(from)) {
+          const to = resolve(stateDir, `polya-${record.agentId}`);
+          mkdirSync(to, { recursive: true });
+          for (const f of readdirSync(from)) copyFileSync(resolve(from, f), resolve(to, f));
+          log(`record kept: ${to}`);
+        }
+      } catch {
+        /* the record is a convenience; never fail a run over it */
+      }
       const cents = await usage();
       if (lastPr) record.prUrl = lastPr;
       record.polya = ps;

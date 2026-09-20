@@ -62,6 +62,7 @@ export const ORACLE: { id: string; text: string }[] = [
   { id: "O5", text: "What is stored survives a restart of the process." },
   { id: "O6", text: "It installs and runs on the exact minimum runtime version it declares." },
   { id: "O7", text: "The exact command the requester says they will type works as they said." },
+  { id: "O8", text: "A stranger installs and runs it from the repo's own documentation, without being told the commands." },
 ];
 
 export function oracleNote(): string {

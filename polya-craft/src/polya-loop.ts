@@ -4,7 +4,7 @@ import { lenientJson, type BlueprintIO } from "../../architect-crew-gate/src/blu
 import { browserToolNote, scenarioNeedsBrowser } from "../../architect-crew-gate/src/browser.js";
 import { gateFeedbackNote, type GateResult } from "../../architect-crew-gate/src/quality-gate.js";
 import { fileLessonsStore, priorLessonsNote, tagsForProblem, type LessonsStore, type NewLesson } from "./lessons.js";
-import { ARTIFACTS, oracleNote, parsePlan, parseProblem, problemGaps, renderPlan, renderProblem, validateUnits, type DoneCheck, type Plan, type Problem, type Unit } from "./plan.js";
+import { ARTIFACTS, POLYA_DIR, oracleNote, parsePlan, parseProblem, problemGaps, renderPlan, renderProblem, validateUnits, type DoneCheck, type Plan, type Problem, type Unit } from "./plan.js";
 
 /**
  * The polya-craft loop (PATTERN.md section 4), engine-free so a fake `send`
@@ -479,6 +479,14 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
   // ---- 1. Understand --------------------------------------------------------
   if (state.phase === "understand") {
     log("understand");
+    // The loop's record is for the loop and for a person reading the run, not part of what the product ships:
+    // blind reviewers dock a tree that carries the build tool's planning state, wherever it sits.
+    const ignore = artifact(".gitignore") ?? "";
+    if (!/^\.polya\/?$/m.test(ignore)) {
+      io.writeFile(".gitignore", `${ignore.trim() ? `${ignore.trim()}\n` : ""}${POLYA_DIR}/\n`);
+      io.commit(`polya: ignore ${POLYA_DIR}/, the loop's own record`);
+      log(`${POLYA_DIR}/ is ignored in this repo; the record stays out of the product`);
+    }
     // A template AGENTS.md tells every Hand the wrong layout and commands, and ships as instructions for another
     // project (ledger L-2026-09-19-06). Only the unmodified seed is removed; a person's AGENTS.md stays.
     if (io.removeFile) {

@@ -331,7 +331,7 @@ test("oracle: parsed from ## Oracle; every line needs a disposition, and an adop
   assert.deepEqual(problemGaps(p, { oracle: true }), ["- O1 is adopted as D9, which is not a done-check"]);
   assert.deepEqual(problemGaps(parseProblem(withOracle.replace("adopted as D9", "adopted as D1"))!, { oracle: true }), []);
   assert.deepEqual(problemGaps(p), []);
-  assert.match(oracleNote(), /^## Oracle: cases a done-check list forgets[\s\S]*\*\*O7\*\*/);
+  assert.match(oracleNote(), /^## Oracle: cases a done-check list forgets[\s\S]*\*\*O8\*\* A stranger installs and runs it from the repo's own documentation/);
 });
 
 

@@ -751,3 +751,15 @@ test("look back (b): a batch that reports one check of two is asked again for th
   assert.ok(!sent2.some((x) => /^# Devise a repair/m.test(x.prompt)));
 });
 
+test("the loop's record is ignored in the target repo, once", async () => {
+  const { io, files, calls } = makeIO({ files: { ".gitignore": "node_modules/\n" } });
+  const out = await runPolyaLoop(makeSend({}).send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  assert.equal(files[".gitignore"], "node_modules/\n.polya/\n");
+  assert.equal(calls.commits.filter((c) => /ignore \.polya\//.test(c)).length, 1);
+  // A repo that already ignores it is left alone.
+  const { io: io2, calls: calls2 } = makeIO({ files: { ".gitignore": "node_modules/\n.polya/\n" } });
+  await runPolyaLoop(makeSend({}).send, { ...base, io: io2, lessons: null });
+  assert.equal(calls2.commits.filter((c) => /ignore \.polya\//.test(c)).length, 0);
+});
+
