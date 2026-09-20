@@ -21,6 +21,8 @@ You must list every entry below in `Lessons consulted` with a disposition:
 
 {{prior_lessons}}
 
+{{oracle}}
+
 ## Procedure
 
 1. Read what you were given. For a repo, read the README, the test runner,
@@ -52,14 +54,16 @@ You must list every entry below in `Lessons consulted` with a disposition:
 9. For software, write the **Quality bar** table: `install`, `test` at
    least; `lint`, `typecheck`, `start` when the repo has them. Discover
    these from the repo; never invent a command.
-10. Write `PROBLEM.md` from `templates/PROBLEM.md`, in exactly its shape:
+10. Write `.polya/PROBLEM.md` from `templates/PROBLEM.md`, in exactly its shape:
     the H1 is `# Problem: <title>`; each done-check is one bullet,
     `- D<n>: <statement> — Check: <command or observation> — Now: unmet|met`;
     the quality bar is a two-column table, the command alone in backticks.
     End with the fenced `json problem` block using these keys and no
     others: `kind`, `size`, `done` (`id`, `text`, `check`, `outer`, `now`),
     `lessons`, `split` (a list, empty if none), `bar`. Commit:
-    `understand: PROBLEM.md`.
+    The `.polya/` folder is the loop's record, ignored by git on purpose:
+    write the file and stop there. Do not run `git add`, `git commit`, or
+    `git add -f`; the orchestrator commits what belongs in the repo.
 11. A Check that needs the app running (a `curl` against localhost) is
     fine: the orchestrator starts the quality bar's `start` command in a
     fresh clone before running such checks and stops it after. Write the
@@ -77,7 +81,7 @@ You must list every entry below in `Lessons consulted` with a disposition:
 A short summary, then a single fenced `json` block, nothing after it:
 
 ```json
-{ "written": ["PROBLEM.md"], "kind": "build", "size": "M",
+{ "written": [".polya/PROBLEM.md"], "kind": "build", "size": "M",
   "done_ids": ["D1", "D2"], "split": false,
   "notes": "what is missing from the problem statement, if anything; else empty" }
 ```

@@ -8,7 +8,9 @@ import { extractTaggedJson, looksLikeProse, type QualityContract } from "../../a
  * Nothing here runs a model or a command.
  */
 
-export const ARTIFACTS = { problem: "PROBLEM.md", plan: "PLAN.md", lookback: "LOOKBACK.md" } as const;
+/** The loop's own record lives in `.polya/`, out of the product's tree (blind reviewers docked structure for it at the root). */
+export const POLYA_DIR = ".polya";
+export const ARTIFACTS = { problem: `${POLYA_DIR}/PROBLEM.md`, plan: `${POLYA_DIR}/PLAN.md`, lookback: `${POLYA_DIR}/LOOKBACK.md` } as const;
 
 export type ProblemKind = "repair" | "change" | "build" | "answer";
 export type ProblemSize = "S" | "M" | "L";
@@ -44,6 +46,32 @@ export interface Problem {
   split: { name: string; bound?: string; done: string[] }[];
   /** Purpose -> shell (install, test, lint, typecheck, start). Software only. */
   bar: Record<string, string>;
+  /** `## Oracle`: oracle line id -> the Solver's disposition (adopted as a D, or dismissed with a reason). */
+  oracle: Record<string, string>;
+}
+
+/**
+ * The cases a done-check list forgets when nobody asks for them. The strong Solvers wrote these unprompted
+ * (snippet-vault, 2026-09-19); Sonnet did not. Behind POLYA_ORACLE so the ledger alone can be measured first.
+ */
+export const ORACLE: { id: string; text: string }[] = [
+  { id: "O1", text: "Bad input is refused with a clear error and changes nothing (a missing field, a wrong type, an over-long value)." },
+  { id: "O2", text: "The empty state says so: nothing stored yet, and no matches, each shows a message rather than nothing." },
+  { id: "O3", text: "A failed action is visible: a failed save, copy, or request tells the user it failed; it never looks like success." },
+  { id: "O4", text: "Malformed requests or arguments get an answer and the process keeps running (//, %2f, a 2 KB path, a wrong method, an unknown flag, empty stdin)." },
+  { id: "O5", text: "What is stored survives a restart of the process." },
+  { id: "O6", text: "It installs and runs on the exact minimum runtime version it declares." },
+  { id: "O7", text: "The exact command the requester says they will type works as they said." },
+  { id: "O8", text: "A stranger installs and runs it from the repo's own documentation, without being told the commands." },
+];
+
+export function oracleNote(): string {
+  return (
+    `## Oracle: cases a done-check list forgets\n\n` +
+    `For each line, either adopt it as a done-check (and say which D) or dismiss it with the reason it does not apply to this problem. ` +
+    `With the oracle the done-check limit is ten, not eight. Write the dispositions under \`## Oracle\` in PROBLEM.md, one bullet per line: \`- O1: adopted as D4\` or \`- O2: dismissed — the tool stores nothing\`.\n\n` +
+    ORACLE.map((o) => `- **${o.id}** ${o.text}`).join("\n")
+  );
 }
 
 export interface Unit {
@@ -78,7 +106,7 @@ export interface Plan {
 // ---------------------------------------------------------------------------
 
 const TEST_FILE = /(^|\/)(test|tests|__tests__|spec)\/|\.(test|spec)\.[jt]sx?$|(^|\/)test_[^/]+\.py$|_test\.(py|go)$|Tests\.cs$/;
-const ARTIFACT_FILE = /^(PROBLEM|PLAN|LOOKBACK|ONE-PAGE|LESSONS)\.md$/;
+const ARTIFACT_FILE = /^(\.polya\/.*|(PROBLEM|PLAN|LOOKBACK|ONE-PAGE|LESSONS)\.md)$/;
 const COMMAND_HEAD = /^(npm|npx|pnpm|yarn|node|deno|bun|curl|wget|sh|bash|zsh|git|python3?|pytest|pip|go|cargo|make|mvn|gradle|dotnet|ruby|bundle|\[|ls|cat|grep|diff|cmp|wc|jq|docker|kubectl|railway|gh)\b|^test\s+\S/;
 /** A backticked path or glob (`test/*.test.js`, `src/app.js`) is a name, not a command. */
 const LOOKS_LIKE_PATH = /^[\w.@-]*[\/*][\w.*\/@-]*$/;
@@ -119,10 +147,21 @@ function idList(s: string | undefined, prefix: string): string[] {
  */
 export function commandOf(check: string | undefined): string | undefined {
   if (!check) return undefined;
+  // Why it is red today is not the check.
+  check = check.replace(/\s*(?:—|–|--|-)?\s*\b[Nn]ow:[\s\S]*$/, "");
   const isCommand = (c: string) => COMMAND_HEAD.test(c) && !LOOKS_LIKE_PATH.test(c) && /\s/.test(c) && !/<[a-z][\w-]*>/i.test(c);
   const segments = [...check.matchAll(/`([^`]+)`/g)].map((m) => m[1]!.trim());
   const ticked = segments.filter(isCommand);
-  if (ticked.length === 1) return ticked[0];
+  // One command with a note ("`npm test` exits 0 with 1 pass") is that command. One command inside a sentence about
+  // a person acting ("a stranger performs this after `npm ci && npm run dev`, opening …"; "create a snippet, stop the
+  // server, …") is an observation: the Verifier's.
+  const residue = check.replace(/`[^`]+`/g, " ");
+  const someoneActs = /\b(stranger|person|someone|reader|user|opens?|opening|clicks?|clicking|types?|typing|pastes?|performs?|follows?|walks?|confirms?|creates?|stops?|restarts?|sees?|observes?)\b/i.test(residue);
+  // What follows the command tells you which it is. "with a missing title …" says how to invoke it, so the quoted
+  // part is a fragment of a procedure (the Verifier's). "exits 0 with 1 pass" reports its result, so it is a command.
+  const firstWord = residue.trim().replace(/^[^A-Za-z]+/, "").split(/[^A-Za-z]/)[0]?.toLowerCase() ?? "";
+  const modifiesInvocation = ["with", "for", "on", "against", "using", "from", "to", "into", "plus", "where", "whose"].includes(firstWord);
+  if (ticked.length === 1) return someoneActs || modifiesInvocation ? undefined : ticked[0];
   if (ticked.length > 1) {
     // Several backticked commands are one check only when nothing but connectors sits between them
     // ("`a` and `b`"). Commands mentioned inside a sentence ("run `npm ci`, then `npm start` and open …")
@@ -222,6 +261,8 @@ export function parseProblem(md: string): Problem | undefined {
     .filter((m) => !/^-+$/.test(m[1]!.trim()) && !/sub-problem/i.test(m[1]!))
     .map((m) => ({ name: m[1]!.trim(), bound: m[2]!.trim() || undefined, done: idList(m[3], "D") }));
   const split = splitMd.length ? splitMd : arr<{ name?: string; bound?: string; done?: string[] }>(block?.split).filter((s) => s && s.name).map((s) => ({ name: String(s.name), bound: s.bound, done: arr<string>(s.done).map(String) }));
+  const oracle: Record<string, string> = {};
+  for (const m of (section(md, "Oracle") ?? "").matchAll(/^\s*[-*]\s*\*{0,2}(O\d+)\*{0,2}\s*[:—–-]\s*(.+)$/gm)) oracle[m[1]!] = m[2]!.trim();
   const barMd = parseBarTable(section(md, "Quality bar"));
   const barBlock = block?.bar && typeof block.bar === "object" ? block.bar : block?.quality_bar && typeof block.quality_bar === "object" ? block.quality_bar : {};
   const bar = Object.keys(barMd).length ? barMd : Object.fromEntries(Object.entries(barBlock).filter(([, v]) => typeof v === "string" && v.trim() && !/^<.*>$/.test(v)));
@@ -238,11 +279,12 @@ export function parseProblem(md: string): Problem | undefined {
     lessons,
     split,
     bar,
+    oracle,
   };
 }
 
 /** What Understand must get right before a plan is drawn (PATTERN.md section 2.1). */
-export function problemGaps(p: Problem | undefined, opts: { maxDone?: number; software?: boolean; offeredLessons?: string[] } = {}): string[] {
+export function problemGaps(p: Problem | undefined, opts: { maxDone?: number; software?: boolean; offeredLessons?: string[]; oracle?: boolean } = {}): string[] {
   const gaps: string[] = [];
   if (!p) return ["- PROBLEM.md is missing or has no `# Problem:` title"];
   const max = opts.maxDone ?? 8;
@@ -257,7 +299,25 @@ export function problemGaps(p: Problem | undefined, opts: { maxDone?: number; so
     if (lost.length) gaps.push(`- Split carries no row for ${lost.join(", ")}; every D belongs to at least one sub-problem`);
   }
   if (opts.software && !p.bar.test) gaps.push("- `## Quality bar` names no `test` command; discover it from the repo (package.json scripts, Makefile, pyproject)");
+  // A check that runs a server in the foreground never returns; the loop kills it at the timeout and calls it failed.
+  for (const d of p.done) {
+    if (!d.command) continue;
+    const serves = /\bnpm (?:run )?(?:dev|start)\b|\bnode\s+[\w./-]*server[\w./-]*\.js\b|\bvite\b|\bnext dev\b/.test(d.command);
+    // `a && b` is not backgrounding; `a & sleep 2; b` is.
+    const backgrounded = /(^|[^&])&(?!&)|\btimeout\s|\bnohup\b/.test(d.command);
+    if (serves && !backgrounded) gaps.push(`- ${d.id}'s Check runs a server in the foreground (\`${d.command.slice(0, 60)}…\`), which never exits; background it (\`… & sleep 2; curl …\`) or make it an observation a stranger walks`);
+  }
   for (const id of opts.offeredLessons ?? []) if (!p.lessons.some((l) => l.id === id)) gaps.push(`- ${id} was offered and has no disposition under \`## Lessons consulted\``);
+  if (opts.oracle) {
+    for (const o of ORACLE) {
+      const d = p.oracle[o.id];
+      if (!d) gaps.push(`- ${o.id} has no disposition under \`## Oracle\` (adopt it as a D, or dismiss it with a reason)`);
+      else {
+        const adoptedAs = d.match(/adopted[^D]*(D\d+)/i)?.[1];
+        if (adoptedAs && !p.done.some((x) => x.id === adoptedAs)) gaps.push(`- ${o.id} is adopted as ${adoptedAs}, which is not a done-check`);
+      }
+    }
+  }
   return gaps;
 }
 
@@ -338,7 +398,12 @@ export function parsePlan(md: string): Plan {
     const f = parseUnitFields(body);
     // "`node_modules/` (generated, gitignored)" is one entry with a note, not three.
     const list = (v: string | undefined) => (firstLine(v) ?? "").replace(/\([^)]*\)/g, "").split(",").map(strip).filter((s) => s && s !== "-" && !/^none$/i.test(s) && !/^<.*>$/.test(s));
-    const check = (f.Check ?? "").replace(/\s+(?:—|–|--|-)\s+[Nn]ow:\s*(?:unmet|met)[^\n]*$/i, "").trim();
+    // The `Now:` clause says why the Check is red today and may run over several lines quoting commands of its
+    // own ("`npm ci` fails with …"); none of that is the Check. Nor is "— exits 0 when met".
+    const check = (f.Check ?? "")
+      .replace(/\s*(?:—|–|--|-)?\s*\b[Nn]ow:[\s\S]*$/, "")
+      .replace(/\s*(?:—|–|--|-)\s*exits? 0 when met\.?\s*$/i, "")
+      .trim();
     units.push({
       id: header[1]!,
       title: header[2]!.trim(),
@@ -402,15 +467,17 @@ export interface UnitProblem {
 export function validateUnits(
   units: Unit[],
   problem: Problem | undefined,
-  opts: { maxTouches?: number; maxBodyLines?: number; maxDoSteps?: number; requireCommand?: boolean; exists?: (path: string) => boolean; doneIds?: string[] } = {},
+  opts: { maxTouches?: number; maxBodyLines?: number; maxDoSteps?: number; requireCommand?: boolean; exists?: (path: string) => boolean; doneIds?: string[]; knownUnitIds?: string[] } = {},
 ): UnitProblem[] {
   const out: UnitProblem[] = [];
   const maxTouches = opts.maxTouches ?? 6;
   // A unit that carries the exact content of the files it produces is long and still one sitting; ~400 lines is about a 12 KB packet.
-  const maxBody = opts.maxBodyLines ?? 400;
+  // A unit that carries a whole server file runs long; ~600 lines is about an 18 KB packet, which the Hand handles.
+  const maxBody = opts.maxBodyLines ?? 600;
   const maxDo = opts.maxDoSteps ?? 9;
   const doneIds = new Set(opts.doneIds ?? problem?.done.map((d) => d.id) ?? []);
-  const ids = new Set(units.map((u) => u.id));
+  // When only some units are checked (a revised unit), the rest of the plan's ids still exist.
+  const ids = new Set([...units.map((u) => u.id), ...(opts.knownUnitIds ?? [])]);
   for (const u of units) {
     const push = (problem: string) => out.push({ id: u.id, problem });
     if (!u.produces) push("no Produces:");
@@ -429,12 +496,40 @@ export function validateUnits(
     if (docs.length) push(`Touches: names plan artifact(s) (${docs.join(", ")})`);
     if (u.touches.length > maxTouches) push(`Touches: ${u.touches.length} entries; more than ${maxTouches} is more than one sitting (split the unit)`);
     if (u.check && opts.requireCommand && !u.command) push(`Check: is prose, not a command (${JSON.stringify(u.check.slice(0, 80))}); for software the Check is a command that exits 0 when met`);
+    // A hash pins bytes. That is right for a file this unit writes whole, and wrong for one that already exists:
+    // it demands the Hand reproduce the plan's imagined bytes instead of working behaviour (R0, U7).
+    if (u.command && /\b(?:sha(?:256|1|512)(?:sum)?|shasum|md5sum|createHash)\b/.test(u.command) && opts.exists) {
+      const hashed = (u.command.match(/readFileSync\(['"]([^'"]+)['"]|sha256sum\s+(\S+)|shasum[^|]*\s(\S+)/g) ?? [])
+        .map((m) => m.match(/['"]([^'"]+)['"]|\s(\S+)$/)?.[1] ?? m.match(/\s(\S+)$/)?.[1])
+        .filter((p): p is string => Boolean(p));
+      const existing = hashed.filter((p) => opts.exists!(p));
+      if (existing.length) push(`Check: hashes ${existing.join(", ")}, which already exists; a hash demands the exact bytes the plan imagined, so check the behaviour instead (a test) and keep hashes for files the unit writes whole`);
+      // Prose drifts: a word wraps, a list renumbers, a trailing space goes. Check what the document says.
+      const prose = hashed.filter((p) => /\.(md|markdown|txt|rst|adoc)$/i.test(p));
+      if (prose.length) push(`Check: hashes ${prose.join(", ")}, which is prose; a Hand reproduces meaning, not bytes, so assert what the document must say (grep -qF for each command or section) instead of its sha256`);
+    }
+    if (u.command && /\bgit\s+(status|diff|log|show|ls-files)\b/.test(u.command)) {
+      push("Check: inspects git; the loop commits the Hand's work before the Check runs and its ownership gate already enforces Touches, so check the files and the behaviour instead");
+    }
     if (u.command) {
       if (opts.exists) {
         const paths = u.command.match(/[\w./-]+\.(?:test|spec)\.[jt]sx?|(?:^|\s)(?:test|tests|spec)\/[\w./-]+/g) ?? [];
         const missing = paths.map((p) => p.trim()).filter((p) => !opts.exists!(p));
         if (missing.length) push(`Check: names test file(s) not on disk: ${missing.join(", ")}; the red test is written at Devise`);
       }
+    }
+    // An installer writes a lock file. A unit that runs one and does not own that file fails the ownership gate
+    // every attempt, and the orchestrator reverts what the installer wrote (R1a, U1).
+    // Only a step that runs one, not a command quoted inside a file the unit writes (a README's own instructions).
+    const doOutsideFences = u.do
+      .split("\n")
+      .filter((line, i, all) => all.slice(0, i).filter((l) => /^\s*```/.test(l)).length % 2 === 0 && !/^\s*```/.test(line))
+      .join("\n");
+    const installer = doOutsideFences.match(/\b(?:run|execute)\s+`?(npm (?:ci|install|i)|yarn(?: install)?|pnpm (?:install|i)|bundle install|pip install|cargo (?:build|fetch)|go mod (?:tidy|download))\b/i);
+    if (installer) {
+      const locks = [/package-lock\.json/, /yarn\.lock/, /pnpm-lock\.yaml/, /Gemfile\.lock/, /poetry\.lock|requirements\.txt/, /Cargo\.lock/, /go\.sum/];
+      const owns = u.touches.some((t) => locks.some((re) => re.test(t)));
+      if (!owns) push(`Do: runs \`${installer[1]}\`, which writes a lock file; Touches must name it (package-lock.json, yarn.lock, pnpm-lock.yaml, …) or the ownership gate reverts it every attempt`);
     }
     const forbidden = u.do.match(FORBIDDEN_IN_DO);
     if (forbidden) push(`Do: contains "${forbidden[0]}"; every choice is made in the plan, not by the Hand`);
@@ -475,12 +570,23 @@ export function validateUnits(
 // ---------------------------------------------------------------------------
 
 /** What the borrowed gate needs from PROBLEM.md: the bar. Without it the gate runs the whole suite per unit. */
+/** A command that serves, watches or previews never exits; it is the start probe, not a command that must exit 0. */
+export const LONG_RUNNING_BAR = /^(start|dev|serve|server|watch|preview)$/i;
+
 export function contractOf(p: Problem | undefined): QualityContract | undefined {
   if (!p || !Object.keys(p.bar).length) return undefined;
-  const bar = { ...p.bar };
-  const start = bar.start ? { command: bar.start } : undefined;
-  delete bar.start;
-  return { bar, start, hygieneNeverTracked: DEFAULT_HYGIENE, rubricTargets: {} };
+  const bar: Record<string, string> = {};
+  let start: string | undefined;
+  for (const [name, command] of Object.entries(p.bar)) {
+    // R1b: `dev` in the bar made the finish check run a dev server to its timeout and grade exit 124 as a failure.
+    if (LONG_RUNNING_BAR.test(name) || /\b(--watch|nodemon|vite|next dev|webpack serve)\b/.test(command)) {
+      start ??= command;
+      continue;
+    }
+    bar[name] = command;
+  }
+  if (!Object.keys(bar).length) return undefined;
+  return { bar, start: start ? { command: start } : undefined, hygieneNeverTracked: DEFAULT_HYGIENE, rubricTargets: {} };
 }
 
 const FENCE = "```";

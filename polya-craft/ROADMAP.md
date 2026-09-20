@@ -21,7 +21,7 @@ in `PATTERN.md`; this file only tracks state.
 - `src/polya-loop.ts`: the four stages over `send` and `io`. Stop reasons: `complete`, `understanding-incomplete`, `plan-not-workable`, `unit-not-workable`, `unit-gate-failed`, `finish-check-failed`, `verify-failed`, `review-unresolved`, `unparseable-report`, `run-failed`. `LOOKBACK.md` is written by the loop from evidence on every exit from look back, and the ledger is appended and confirmed.
 - Browser for the Hand and the Verifier: a unit or a done-check whose text names a page is sent with `browser: true`, and the engine attaches Playwright MCP to that turn only (`QA_BROWSER`, `PLAYWRIGHT_MCP_ARGS`, as ACG's QA). The prompt tells the model whether a browser is attached, absent, or unneeded. Imported from `../architect-crew-gate/src/browser.ts`, unchanged.
 - Kit wiring: `src/lib/routing.ts` (five H1 regexes; Solver turns to the plan tier, the Hand to implement, the Verifier to verify, Look back to review), `src/lib/engine-local.ts` (Understand and Devise are architect kinds; Look back runs read-only in a fresh session; Devise carries the executor note), `src/lib/build-app.ts` (`--loop polya`, `--max-units`, resume at the stage that stopped), `package.json` test glob, `tsconfig.json`.
-- Tests: 68 across `plan`, `lessons`, `prompts`, the loop with a faked Hand and Solver (every stop reason, retry, fallback, resume, and materialisation path), and end to end on a real bare origin with the real gate, a real fresh clone, and a real ledger file.
+- Tests: 307 across `plan`, `lessons`, `prompts`, the loop with a faked Hand and Solver (every stop reason, retry, fallback, resume, and materialisation path), and end to end on a real bare origin with the real gate, a real fresh clone, and a real ledger file.
 
 One live run on 2026-09-18 (the measurement table below). The pattern has
 also been used by hand in the worked examples, which are written walks and
@@ -178,6 +178,106 @@ roughly 5-6x Sonnet's default on the Solver turns alone (`$24-36` vs
 `$3.27` for understand+devise), before the review turn. Worth it when the
 `.polya/`-scale structure fix is also in place and the remaining gap is
 genuinely judgment, not paperwork location.
+
+## R0: does the curated ledger alone lift the cheap Solver?
+
+2026-09-19. Sonnet at default effort, the ledger curated after five runs,
+the oracle off, `.polya/` artifacts, Verifier batches of two.
+`rvegajr/polya-live-sv-r0#1`. Seven units, every one gate-green first
+attempt (six built, one repair); 8/8 done-checks; review done with one
+medium finding; 2 lessons appended, 5 confirmed. Claude Max API-eq $11.78.
+Blind score with the three Solver anchors, one invocation, repeat 3,
+record `.runs/quality-2026-09-19T23-36-54-196Z.json`, $6.32:
+
+| engine | corre | secur | valid | tests | struc | ux | readm | median /35 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| fable, max effort | 5 | 5 | 5 | 5 | 4 | 5 | 5 | **34** |
+| opus, max effort | 5 | 5 | 5 | 5 | 3 | 4 | 5 | **32** |
+| sonnet, baseline | 5 | 4 | 4 | 3 | 3 | 4 | 5 | **28** |
+| **sonnet + ledger (R0)** | 4 | 4 | 3 | 4 | 2 | 3 | 1 | **22** |
+
+**The answer is no, and two of the three reasons are not the ledger's.**
+
+- **No documentation unit.** R0's plan has six units — tooling, data,
+  client, server, page, styles — and none for docs, so the repo ships the
+  one-line stub README that `gh repo create` made. All three reviewers
+  scored readme 1; that is four of the six points R0 sits below the
+  baseline, which did have a docs unit. Nothing in Understand, the ledger,
+  or plan-lint requires that a stranger can install and run the thing from
+  the repo's own documentation. The oracle needs that line.
+- **`.polya/` did not remove the structure penalty.** That was the point of
+  C1. Reviewers still docked it (structure 1, 2, 4 across repeats): "an
+  agent-tool planning-state directory present in the tree". Moving the
+  record does not help; either it stays out of the product branch (an
+  orphan ref, or only in `.runs/`), or the cost is accepted. Decide before
+  the next scored build.
+- **What remains is what the oracle covers.** Validation 3 in every repeat:
+  `POST {}` returns 201, a non-array `tags` is coerced instead of refused.
+  UX: no empty state. Those are oracle lines O1 and O2, off by design in
+  R0. R1 is the run that tests them.
+
+**What the ledger did do.** Sonnet wrote the malformed-input check (passed)
+and the failed-save check, which caught a real defect: a save that fails
+told the user nothing. The repair for it is U7, and one reviewer cited it
+as a strength.
+
+**The caveat that matters most.** Two Sonnet runs on the same idea scored
+28 and 22. That spread is wider than the effect being measured, so one run
+per configuration cannot answer this question. Either run each
+configuration twice, or treat these numbers as evidence about *what
+reviewers punish* (missing docs, process artifacts, unrefused input)
+rather than about the Solver's model or the ledger.
+
+## R1: the oracle, twice
+
+2026-09-20. Same Solver as R0 (Sonnet, default effort), same curated
+ledger, plus `POLYA_ORACLE=1` and the record kept out of the product
+branch. Two runs, `polya-live-sv-r1a#1` and `polya-live-sv-r1b#1`. Scored
+with every earlier build in one invocation, repeat 3, record
+`.runs/quality-2026-09-20T07-50-36-452Z.json`, $8.91.
+
+| engine | corre | secur | valid | tests | struc | ux | readm | median /35 | verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| fable, max effort | 5 | 5 | 5 | 5 | 4 | 5 | 5 | **34** | merge |
+| **sonnet + oracle (R1a)** | 5 | 4 | 4 | 5 | 5 | 4 | 5 | **32** | merge |
+| **sonnet + oracle (R1b)** | 5 | 5 | 5 | 5 | 4 | 4 | 5 | **32** | merge |
+| opus, max effort | 5 | 5 | 5 | 5 | 2 | 4 | 5 | **31** | merge-with-followup |
+| sonnet, baseline | 5 | 5 | 4 | 4 | 3 | 3 | 5 | **29** | merge-with-followup |
+| sonnet + ledger (R0) | 4 | 4 | 2 | 4 | 2 | 3 | 1 | **20** | merge-with-followup |
+
+**The oracle earns its place twice over.** Both runs scored 32 with the
+verdict `merge`, the top verdict, and the per-repeat totals were 32, 34,
+31 and 34, 32, 33: a spread of 3 within a run and 0 between the two runs.
+The two Sonnet runs without it scored 29 and 20. So the oracle did not
+only lift the cheap Solver by 3 to 12 points, it removed the run-to-run
+variance that made R0 unreadable. That variance was the thing the
+measurement could not see past.
+
+**Against the expensive Solvers.** Sonnet with the oracle beat Opus at
+maximum effort (31) and sits 2 below Fable (34), at $9 to $12 a run
+against $31.51 and $35.78. On the earlier reading that 2-point gap is
+inside the noise. The decision rule in `NEXT-SESSION.md` asked for ≥ 33 to
+make Sonnet the default; 32 with `merge` on both runs, beating a
+five-times-dearer Solver, is close enough to adopt with the caveat written
+down: **Sonnet plus the oracle is the default Solver; a stronger Solver is
+for size L and for a problem whose Understand is genuinely hard.**
+
+**Where the two fixes show up, exactly as predicted.** Documentation went
+from 1 (R0, no docs unit) to 5 in both runs, because the oracle's O8 makes
+"a stranger installs and runs it from the repo's own documentation" a
+done-check, and both plans wrote the README in a unit. Structure went from
+2 to 5 and 4, because `.polya/` is ignored in the target and the product
+branch carries only the app; Opus, whose run still committed its record at
+the repo root, scored 2 on the same criterion. Validation went from 2 to 4
+and 5, and UX from 3 to 4, which are oracle lines O1, O2 and O3.
+
+**What it cost to get there.** Both runs needed operator corrections and
+exposed defects in the loop, not in the models: R1a needed the lock-file
+rule, the untracking fix, and a unit re-plan; R1b hit the prose-hash
+drift, the `dev`-in-the-bar timeout, and two checks the parser misread.
+Every one is now a rule with a test (303 → 307 tests). The models
+themselves: 12 units across both runs, 10 passing first attempt, and two
+Solver re-plans that fixed real plan defects.
 
 ## Order of work
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { commandOf, contractOf, parsePlan, parseProblem, problemGaps, renderPlan, renderProblem, validateUnits } from "./plan.js";
+import { ORACLE, commandOf, contractOf, oracleNote, parsePlan, parseProblem, problemGaps, renderPlan, renderProblem, validateUnits } from "./plan.js";
 
 export const PROBLEM_MD = `# Problem: unknown routes answer 404
 Kind: repair
@@ -189,7 +189,8 @@ test("validateUnits: each mechanical row of the stranger test", () => {
   assert.match(problems({ serves: [] }), /names no D/);
   assert.match(problems({ serves: ["D9"] }), /D9/);
   assert.match(problems({ depends: ["U7"] }), /U7/);
-  assert.match(problems({ body: Array.from({ length: 450 }, () => "x").join("\n") }), /450 lines/);
+  assert.match(problems({ body: Array.from({ length: 650 }, () => "x").join("\n") }), /650 lines/);
+  assert.ok(!problems({ body: Array.from({ length: 450 }, () => "x").join("\n") }).includes("lines"));
   assert.match(problems({}, { exists: () => false }), /not on disk/);
   assert.equal(problems({ check: "a stranger reads it", command: undefined }, { requireCommand: false }), "D2 is served by no unit");
 });
@@ -320,3 +321,125 @@ test("parsePlan: a parenthetical note inside Touches is not a file", () => {
   assert.deepEqual(plan.units[0]!.touches, ["src/app.js", "node_modules/"]);
 });
 
+test("oracle: parsed from ## Oracle; every line needs a disposition, and an adopted line must name a real D", () => {
+  const base = parseProblem(PROBLEM_MD)!;
+  assert.deepEqual(base.oracle, {});
+  const gaps = problemGaps(base, { oracle: true });
+  assert.equal(gaps.filter((g) => /has no disposition under `## Oracle`/.test(g)).length, ORACLE.length);
+  const withOracle = PROBLEM_MD.replace("## Not this", "## Oracle\n" + ORACLE.map((o) => (o.id === "O1" ? "- O1: adopted as D9" : `- ${o.id}: dismissed — not relevant here`)).join("\n") + "\n\n## Not this");
+  const p = parseProblem(withOracle)!;
+  assert.equal(Object.keys(p.oracle).length, ORACLE.length);
+  assert.deepEqual(problemGaps(p, { oracle: true }), ["- O1 is adopted as D9, which is not a done-check"]);
+  assert.deepEqual(problemGaps(parseProblem(withOracle.replace("adopted as D9", "adopted as D1"))!, { oracle: true }), []);
+  assert.deepEqual(problemGaps(p), []);
+  assert.match(oracleNote(), /^## Oracle: cases a done-check list forgets[\s\S]*\*\*O8\*\* A stranger installs and runs it from the repo's own documentation/);
+});
+
+
+// R0 (Sonnet, curated ledger, 2026-09-19): the Solver applied the sha256 lesson; each Check is one node -e command,
+// followed by a multi-line `Now:` clause that quotes other commands.
+const LIVE_R0_PLAN = readFileSync(new URL("./fixtures-live-plan-r0.md", import.meta.url), "utf8");
+const LIVE_R0_PROBLEM = readFileSync(new URL("./fixtures-live-problem-r0.md", import.meta.url), "utf8");
+
+test("parsePlan: a multi-line Now: clause is not part of the Check (live R0 plan)", () => {
+  const plan = parsePlan(LIVE_R0_PLAN);
+  assert.equal(plan.units.length, 6);
+  for (const u of plan.units) {
+    assert.ok(u.command, `${u.id} has no command: ${u.check.slice(0, 120)}`);
+    assert.match(u.command!, /^node -e "const c=require\('crypto'\)/);
+    assert.doesNotMatch(u.check, /Now:|Cannot find module/);
+  }
+  // Every unit parses to one command, and every one also inspects git status, which the git rule rejects.
+  const gaps = validateUnits(plan.units, parseProblem(LIVE_R0_PROBLEM), { requireCommand: true });
+  assert.deepEqual(gaps.map((p) => p.id), ["U1", "U2", "U3", "U4", "U5", "U6"]);
+  assert.ok(gaps.every((p) => /inspects git/.test(p.problem)));
+});
+
+test("validateUnits: a Check that inspects git is not workable under the loop (live R0, U1)", () => {
+  const u = parsePlan(PLAN_MD).units[0]!;
+  const withGit = { ...u, check: "`node --test test/notfound.test.js && test -z \"$(git status --porcelain)\"`", command: 'node --test test/notfound.test.js && test -z "$(git status --porcelain)"' };
+  assert.match(validateUnits([withGit], parseProblem(PROBLEM_MD)).map((p) => p.problem).join("\n"), /inspects git/);
+  const r0 = parsePlan(LIVE_R0_PLAN).units[0]!;
+  assert.match(validateUnits([r0], parseProblem(LIVE_R0_PROBLEM)).map((p) => p.problem).join("\n"), /inspects git/);
+});
+
+test("commandOf: one command inside a sentence about what a stranger does is the Verifier's (live R0, D1 and D5)", () => {
+  assert.equal(commandOf("a stranger performs this after `npm ci && npm run dev`, opening `http://localhost:3000/` (this build's own documented default port/URL)."), undefined);
+  assert.equal(commandOf("create a snippet, confirm a `*.db` file exists under the project directory, stop the server, start it again, `curl -sf localhost:3000/api/snippets/<id>` still returns it; `git status --porcelain` shows nothing for the db file"), undefined);
+  assert.equal(commandOf("`npm test` exits 0"), "npm test");
+  assert.equal(commandOf("`node --test test/db.test.js` passes"), "node --test test/db.test.js");
+});
+
+
+test("validateUnits: a Check may hash a file the unit writes whole, never one that already exists (live R0, U7)", () => {
+  const u = parsePlan(PLAN_MD).units[0]!;
+  const hashCmd = `node -e "const c=require('crypto'),f=require('fs');const h=c.createHash('sha256').update(f.readFileSync('src/app.js')).digest('hex');if(h!=='45c0'){process.exit(1)}" && node --test test/notfound.test.js`;
+  const unit = { ...u, check: `\`${hashCmd}\``, command: hashCmd };
+  const problem = parseProblem(PROBLEM_MD);
+  assert.match(validateUnits([unit], problem, { exists: (p) => p === "src/app.js" }).map((p) => p.problem).join("\n"), /hashes src\/app\.js, which already exists/);
+  // A file this unit writes whole (not on disk yet) may be hashed.
+  const creating = validateUnits([unit], problem, { exists: (p) => p === "test/notfound.test.js" }).map((p) => p.problem);
+  assert.ok(!creating.some((p) => /hashes/.test(p)), creating.join("\n"));
+});
+
+test("validateUnits: a unit that runs an installer must own the lock file it writes (live R1a, U1)", () => {
+  const u = parsePlan(PLAN_MD).units[0]!;
+  const problem = parseProblem(PROBLEM_MD);
+  const installs = { ...u, do: "1. Create `package.json`.\n2. Run `npm install` and confirm it exits 0.", touches: ["package.json"] };
+  assert.match(validateUnits([installs], problem).map((p) => p.problem).join("\n"), /runs `npm install`, which writes a lock file/);
+  // A command quoted inside a file the unit writes (a README's own instructions) is not a step that runs it.
+  const documents = { ...installs, do: "1. Create `README.md` with exactly this content:\n```md\nnpm install\nnpm start\n```\n2. Save it." };
+  assert.ok(!validateUnits([documents], problem).some((p) => /lock file/.test(p.problem)));
+  assert.ok(!validateUnits([{ ...installs, touches: ["package.json", "package-lock.json"] }], problem).some((p) => /lock file/.test(p.problem)));
+  // A unit that runs no installer is unaffected.
+  assert.ok(!validateUnits([u], problem).some((p) => /lock file/.test(p.problem)));
+});
+
+test("validateUnits: knownUnitIds lets a single revised unit depend on the rest of the plan (live R1a, U3)", () => {
+  const [u1, u2] = parsePlan(PLAN_MD).units as [ReturnType<typeof parsePlan>["units"][0], ReturnType<typeof parsePlan>["units"][0]];
+  const problem = parseProblem(PROBLEM_MD);
+  const alone = validateUnits([u2], problem, { doneIds: [] }).map((p) => p.problem).join("\n");
+  assert.match(alone, /Depends: names unit\(s\) that do not exist: U1/);
+  const withPlan = validateUnits([u2], problem, { doneIds: [], knownUnitIds: [u1.id, u2.id] }).map((p) => p.problem).join("\n");
+  assert.ok(!/do not exist/.test(withPlan), withPlan);
+});
+
+test("validateUnits: a prose file is checked by what it says, not by its bytes (live R1b, U7)", () => {
+  const u = parsePlan(PLAN_MD).units[0]!;
+  const problem = parseProblem(PROBLEM_MD);
+  const cmd = `test "$(sha256sum README.md | awk '{print $1}')" = "62f0" && grep -qF 'npm run dev' README.md`;
+  const hashesProse = { ...u, check: `\`${cmd}\``, command: cmd, touches: ["README.md"] };
+  assert.match(validateUnits([hashesProse], problem, { exists: () => false }).map((p) => p.problem).join("\n"), /hashes README\.md, which is prose/);
+  const greps = `grep -qF 'npm run dev' README.md && grep -qF 'npm install' README.md`;
+  assert.ok(!validateUnits([{ ...hashesProse, check: `\`${greps}\``, command: greps }], problem, { exists: () => false }).some((p) => /prose/.test(p.problem)));
+  // Code the unit writes whole may still be hashed.
+  const code = `test "$(sha256sum src/app.js | awk '{print $1}')" = "49c8"`;
+  assert.ok(!validateUnits([{ ...hashesProse, check: `\`${code}\``, command: code, touches: ["src/app.js"] }], problem, { exists: () => false }).some((p) => /prose/.test(p.problem)));
+});
+
+test("contractOf: a command that serves or watches is the start probe, never a graded command (live R1b)", () => {
+  const p = parseProblem(PROBLEM_MD)!;
+  const withDev = { ...p, bar: { install: "npm ci", test: "npm test", dev: "node --watch server.js", lint: "npm run lint" } };
+  const c = contractOf(withDev)!;
+  assert.deepEqual(Object.keys(c.bar).sort(), ["install", "lint", "test"]);
+  assert.deepEqual(c.start, { command: "node --watch server.js" });
+  // A graded name whose command watches is caught too.
+  const sneaky = contractOf({ ...p, bar: { test: "npm test", verify: "vite --watch" } })!;
+  assert.deepEqual(Object.keys(sneaky.bar), ["test"]);
+  assert.deepEqual(sneaky.start, { command: "vite --watch" });
+  // A bar of nothing but long-running commands yields no contract rather than an empty bar.
+  assert.equal(contractOf({ ...p, bar: { dev: "npm run dev" } }), undefined);
+});
+
+test("commandOf: a fragment inside a sentence is an observation (live R1b, D7)", () => {
+  assert.equal(commandOf("`curl -X POST` with a missing `title` returns a 4xx status with a JSON error body, and the snippet count from `GET /api/snippets` is unchanged before and after"), undefined);
+  assert.equal(commandOf("`npm test` exits 0 with 1 pass, 0 fail"), "npm test");
+});
+
+test("problemGaps: a done-check may not run a server in the foreground (live R1b, D5)", () => {
+  const p = parseProblem(PROBLEM_MD)!;
+  const serving = { ...p, done: [{ ...p.done[0]!, id: "D5", check: "`npm install && npm run dev`", command: "npm install && npm run dev" }] };
+  assert.match(problemGaps(serving).join("\n"), /D5's Check runs a server in the foreground/);
+  const backgrounded = { ...serving, done: [{ ...serving.done[0]!, command: "npm run dev & sleep 2; curl -sf localhost:3000/" }] };
+  assert.ok(!problemGaps(backgrounded).some((g) => /foreground/.test(g)));
+});

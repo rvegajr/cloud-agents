@@ -285,6 +285,7 @@ const HYGIENE_GITIGNORE = [
   ".qwen/",
   ".aider*",
   ".cursor/worktrees/",
+  ".playwright-mcp/",
 ].join("\n");
 
 const GATE_RULES_NOTE = `

@@ -1,4 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
+import { existsSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 import type { ExecFn } from "../../src/lib/engine-local.js";
 import { defaultExec } from "../../src/lib/engine-local.js";
 import { makeRepoIO } from "../../architect-crew-gate/src/io.js";
@@ -26,6 +28,67 @@ export function makePolyaIO(
   let warned = false;
   return {
     ...base,
+    runCheck: (command, dir) =>
+      new Promise((resolveCheck) => {
+        const child = spawn("sh", ["-c", command], { cwd: dir, env: subprocessEnv() as NodeJS.ProcessEnv, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+        let output = "";
+        const keep = (b: Buffer) => {
+          output = (output + b.toString()).slice(-20_000);
+        };
+        child.stdout?.on("data", keep);
+        child.stderr?.on("data", keep);
+        const killGroup = () => {
+          try {
+            if (child.pid) process.kill(-child.pid, "SIGTERM");
+          } catch {
+            /* already gone */
+          }
+        };
+        const timer = setTimeout(() => {
+          killGroup();
+          resolveCheck({ code: 124, output: `${output}\n(timed out after ${Math.round(gateCfg.commandTimeoutMs / 1000)}s)`.trim() });
+        }, gateCfg.commandTimeoutMs);
+        // The shell's own exit decides the check; a server it backgrounded must not keep it open, and is stopped with it.
+        child.on("exit", (code) => {
+          clearTimeout(timer);
+          setTimeout(() => {
+            killGroup();
+            child.stdout?.destroy();
+            child.stderr?.destroy();
+            resolveCheck({ code: code ?? 1, output: output.trim() });
+          }, 150);
+        });
+      }),
+    untrackIgnored: () => {
+      const tracked = (() => {
+        try {
+          return git(["ls-files", "-i", "-c", "--exclude-standard"]).split("\n").filter(Boolean);
+        } catch {
+          return [];
+        }
+      })();
+      for (const f of tracked) {
+        try {
+          execFileSync("git", ["rm", "-q", "--cached", "--", f], { cwd, stdio: "ignore" });
+        } catch {
+          /* already gone */
+        }
+      }
+      return tracked;
+    },
+    changedFiles: (sha) => {
+      try {
+        return git(["diff", "--name-only", `${sha}..HEAD`]).split("\n").filter(Boolean);
+      } catch {
+        return [];
+      }
+    },
+    removeFile: (rel) => {
+      const p = join(cwd, rel);
+      if (!existsSync(p)) return false;
+      unlinkSync(p);
+      return true;
+    },
     isAncestor: (sha) => {
       try {
         execFileSync("git", ["merge-base", "--is-ancestor", sha, "HEAD"], { cwd, stdio: "ignore", env: subprocessEnv() as NodeJS.ProcessEnv });

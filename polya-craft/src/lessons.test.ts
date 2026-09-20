@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { fileLessonsStore, formatLesson, parseLessons, priorLessonsNote, selectLessons, tagsForProblem, type Lesson } from "./lessons.js";
+import { MERGE_OVERLAP, fileLessonsStore, formatLesson, lessonOverlap, parseLessons, priorLessonsNote, selectLessons, tagsForProblem, type Lesson } from "./lessons.js";
 
 const LEDGER = `# Lessons
 
@@ -82,3 +82,25 @@ test("tagsForProblem and priorLessonsNote", () => {
   assert.match(note, /## L-2026-09-18-01/);
   assert.match(priorLessonsNote(parseLessons(LEDGER), undefined, 200), /truncated at 200/);
 });
+
+test("lessonOverlap and append: a lesson that says what an entry already says confirms it; an empty When is rejected", () => {
+  assert.ok(lessonOverlap("add a done-check for malformed paths: the app must answer, never exit", "Add a done-check for malformed paths (//, %2f); the app must answer and never exit") >= MERGE_OVERLAP);
+  assert.ok(lessonOverlap("pin engines.node to the version where node:sqlite works unflagged", "test the page's start() against a fake window") < MERGE_OVERLAP);
+  const dir = mkdtempSync(join(tmpdir(), "polya-lessons-merge-"));
+  const path = join(dir, "LESSONS.md");
+  writeFileSync(path, LEDGER);
+  const store = fileLessonsStore(path);
+  const out = store.append(
+    [
+      { tags: ["kind:build"], when: "a unit pastes content", lesson: "name the file as the owner of the content", evidence: "e" },
+      { tags: ["kind:build"], when: "", lesson: "a lesson with no when", evidence: "e" },
+      { tags: ["kind:build"], when: "w", lesson: "something entirely new about journals", evidence: "e" },
+    ],
+    new Date("2026-09-20T00:00:00Z"),
+  );
+  assert.deepEqual(out.map((l) => [l.id, Boolean(l.merged)]), [["L-2026-09-18-01", true], ["L-2026-09-20-01", false]]);
+  const after = store.list();
+  assert.equal(after.find((l) => l.id === "L-2026-09-18-01")!.confirmations, 1);
+  assert.equal(after.length, 4);
+});
+

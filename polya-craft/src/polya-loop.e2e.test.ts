@@ -123,12 +123,14 @@ test("polya loop end to end: real clone, real gate, a faked model that writes fi
     const cwd = opts?.cwd ?? clone;
     switch (kind) {
       case "understand":
-        writeFileSync(join(cwd, "PROBLEM.md"), PROBLEM);
+        mkdirSync(join(cwd, ".polya"), { recursive: true });
+        writeFileSync(join(cwd, ".polya", "PROBLEM.md"), PROBLEM);
         return { status: "finished", result: json({ written: ["PROBLEM.md"] }) };
       case "devise":
         mkdirSync(join(cwd, "test"), { recursive: true });
         mkdirSync(join(cwd, "src"), { recursive: true });
-        writeFileSync(join(cwd, "PLAN.md"), PLAN);
+        mkdirSync(join(cwd, ".polya"), { recursive: true });
+        writeFileSync(join(cwd, ".polya", "PLAN.md"), PLAN);
         writeFileSync(join(cwd, "test", "greet.test.js"), RED_TEST);
         writeFileSync(join(cwd, "src", "greet.js"), STUB);
         return { status: "finished", result: json({ written: ["PLAN.md"] }) };
@@ -157,11 +159,13 @@ test("polya loop end to end: real clone, real gate, a faked model that writes fi
   assert.equal(out.finish?.passed, true);
   assert.deepEqual(out.checks?.map((c) => [c.id, c.passed, c.how]), [["D1", true, "mechanical"]]);
   const history = execFileSync("git", ["log", "--format=%s"], { cwd: clone, encoding: "utf8" });
-  assert.match(history, /look back: LOOKBACK\.md/);
+  // The record is ignored, so its commits carry only what the product keeps: the red test and the stub from devise.
+  assert.match(history, /polya: ignore \.polya\//);
   assert.match(history, /carry out: U1 attempt 2/);
   assert.match(history, /devise: PLAN\.md/);
-  assert.match(history, /understand: PROBLEM\.md/);
-  const lookback = readFileSync(join(clone, "LOOKBACK.md"), "utf8");
+  assert.doesNotMatch(history, /understand: PROBLEM\.md/);
+  assert.equal(execFileSync("git", ["ls-files", ".polya"], { cwd: clone, encoding: "utf8" }).trim(), "", ".polya is not tracked");
+  const lookback = readFileSync(join(clone, ".polya", "LOOKBACK.md"), "utf8");
   assert.match(lookback, /\| D1 \| yes \|/);
   assert.match(lookback, /U1: 2 attempt\(s\)/);
   assert.match(lookback, /run the Check before reporting/);
@@ -169,3 +173,21 @@ test("polya loop end to end: real clone, real gate, a faked model that writes fi
   assert.match(readFileSync(ledger, "utf8"), /## L-\d{4}-\d{2}-\d{2}-01\nTags:     kind:build stage:carry-out/);
   assert.equal(out.lookback?.lessons, 1);
 });
+
+test("runCheck returns when the shell exits, even with a server left running in the background, and stops that server", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polya-runcheck-"));
+  const io = makePolyaIO(dir, { gateCfg: { enabled: true, retries: 0, startTimeoutMs: 5_000, commandTimeoutMs: 20_000, vacuous: "", startEvery: 0 } });
+  const marker = join(dir, "alive");
+  const started = Date.now();
+  const r = await io.runCheck!(`sh -c 'while true; do touch ${marker}; sleep 0.2; done' & sleep 0.5; test -f ${marker}`, dir);
+  assert.equal(r.code, 0);
+  assert.ok(Date.now() - started < 5_000, "returned promptly");
+  await new Promise((res) => setTimeout(res, 400));
+  const { rmSync, statSync } = await import("node:fs");
+  rmSync(marker, { force: true });
+  await new Promise((res) => setTimeout(res, 600));
+  assert.throws(() => statSync(marker), "the background loop was stopped with the check");
+  const failed = await io.runCheck!("exit 3", dir);
+  assert.equal(failed.code, 3);
+});
+

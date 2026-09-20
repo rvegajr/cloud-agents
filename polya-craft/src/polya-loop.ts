@@ -4,7 +4,7 @@ import { lenientJson, type BlueprintIO } from "../../architect-crew-gate/src/blu
 import { browserToolNote, scenarioNeedsBrowser } from "../../architect-crew-gate/src/browser.js";
 import { gateFeedbackNote, type GateResult } from "../../architect-crew-gate/src/quality-gate.js";
 import { fileLessonsStore, priorLessonsNote, tagsForProblem, type LessonsStore, type NewLesson } from "./lessons.js";
-import { ARTIFACTS, parsePlan, parseProblem, problemGaps, renderPlan, renderProblem, validateUnits, type DoneCheck, type Plan, type Problem, type Unit } from "./plan.js";
+import { ARTIFACTS, POLYA_DIR, oracleNote, parsePlan, parseProblem, problemGaps, renderPlan, renderProblem, validateUnits, type DoneCheck, type Plan, type Problem, type Unit } from "./plan.js";
 
 /**
  * The polya-craft loop (PATTERN.md section 4), engine-free so a fake `send`
@@ -29,7 +29,26 @@ export type PolyaIO = BlueprintIO & {
   isAncestor?(sha: string): boolean;
   /** Discard everything after `sha`: the answer to a turn that rewrote history. */
   resetTo?(sha: string): void;
+  /** Delete a file from the working tree (the next commit records it). */
+  removeFile?(rel: string): boolean;
+  /** Paths changed between `sha` and HEAD. */
+  changedFiles?(sha: string): string[];
+  /** Stop tracking files the repo's own .gitignore covers (a model may have forced them in). Returns what it untracked. */
+  untrackIgnored?(): string[];
+  /**
+   * Run a done-check: finished when its shell exits, whatever it left running in the background, and everything it
+   * started is killed with it. `runCommand` waits for every holder of the output pipe, so a check that starts a
+   * watch-mode server never returns.
+   */
+  runCheck?(command: string, cwd: string): Promise<{ code: number; output: string }>;
 };
+
+/** A check that backgrounds its own server (`npm run dev &`, `node server.js &`) needs the port free. */
+const SELF_SERVES = /(?:npm\s+(?:start|run\s+\S+)|node\s+\S+)[^;&|\n]*&(?!&)/;
+
+/** The kit seeds a template AGENTS.md and a QWEN.md of ACG gate rules; on a polya run both are false for the repo and the prompts carry the rules. */
+const SEEDED_AGENTS = /Copy this file to the root of any repository you want cloud agents to work on/;
+const SEEDED_QWEN = /^## Orchestrator quality gate/m;
 
 /** A done-check that curls a server needs the server running. */
 const NEEDS_SERVER = /\b(localhost|127\.0\.0\.1|0\.0\.0\.0)\b|:\d{4,5}\//;
@@ -95,6 +114,10 @@ export interface PolyaState {
   baselineSha?: string;
   /** A Hand's question, carried into the next Devise turn on resume. */
   replanNote?: string;
+  /** Files the Solver itself committed after the baseline (a repair's red test); the finish check allows them. */
+  solverFiles?: string[];
+  /** Units the Solver has already been asked to re-plan once, so a bad unit cannot loop. */
+  replanned?: string[];
   finish?: { passed: boolean; failing: string[] };
   checks?: CheckResult[];
   verifyAttempts: number;
@@ -117,6 +140,12 @@ export interface PolyaOptions {
   unitRetries?: number;
   /** After the cheap Verifier fails to report twice, run it on this tier. */
   verifyFallbackTier?: "claude";
+  /** Prose done-checks per Verifier turn (default 2): a local model walking five pages in one turn hits its tool-call cap. */
+  verifyBatch?: number;
+  /** New lessons the ledger takes per run (default 2); the rest stay in LOOKBACK.md. */
+  lessonsPerRun?: number;
+  /** Put the oracle checklist in the Understand prompt and require a disposition for every line (POLYA_ORACLE=1). */
+  oracle?: boolean;
   /** Software problems: unit Checks must be commands and the quality bar must name `test`. Default true. */
   software?: boolean;
   /** The engine can give a turn a real browser (Playwright MCP); a unit or a done-check that names a page is sent with `browser: true`. */
@@ -183,12 +212,10 @@ function doneLines(problem: Problem | undefined, unit: Unit): string {
   return lines.join("\n") || "(no done-check named)";
 }
 
-function unitBlockForFix(id: string, what: string, touches: string[], check: string): string {
-  return `## ${id}: fix what the look back found\nServes:   (the findings below)\nProduces: the fix\nGiven:    the findings, verbatim:\n${what.split("\n").map((l) => `          ${l}`).join("\n")}\nDo:       1. Fix the cause of each finding, not the check. 2. Run Check.\nTouches:  ${touches.join(", ")}\nCheck:    ${check} — Now: unmet\nDepends:  none\nNot:      any file not under Touches; any test or check.`;
-}
 
 /** LOOKBACK.md, rendered by the loop from evidence (PATTERN.md section 2.3). */
-export function renderLookback(state: PolyaState, problem: Problem | undefined, added: { id: string }[] = []): string {
+/** `labels[i]` names what became of the reviewer's i-th lesson in the ledger. */
+export function renderLookback(state: PolyaState, problem: Problem | undefined, labels: string[] = []): string {
   const title = problem?.title ?? "(untitled)";
   const results = (problem?.done ?? []).map((d) => {
     const c = state.checks?.find((x) => x.id === d.id);
@@ -201,7 +228,7 @@ export function renderLookback(state: PolyaState, problem: Problem | undefined, 
     ...(r?.did_not ?? []),
     ...state.unitRecords.filter((u) => u.attempts > 1 || !u.passed || u.question).map((u) => `${u.id}: ${u.question ? `asked "${u.question}"` : `${u.attempts} attempt(s)${u.failing?.length ? `, ${u.failing.join(", ")}` : ""}${u.passed ? "" : ", not passed"}`}`),
   ];
-  const lessons = (r?.lessons ?? []).map((l, i) => `## ${added[i]?.id ?? "(not appended)"}\nTags:     ${l.tags.join(" ")}\nWhen:     ${l.when}\nLesson:   ${l.lesson}\nEvidence: ${l.evidence}\nStatus:   candidate`);
+  const lessons = (r?.lessons ?? []).map((l, i) => `## ${labels[i] ?? "(not appended)"}\nTags:     ${(l.tags ?? []).join(" ")}\nWhen:     ${l.when ?? ""}\nLesson:   ${l.lesson}\nEvidence: ${l.evidence ?? ""}\nStatus:   candidate`);
   return (
     `# Look back: ${title}\n\n` +
     `Outcome: ${state.stopReason ?? "in progress"}${state.stopDetail ? ` — ${state.stopDetail}` : ""}\n\n` +
@@ -212,7 +239,7 @@ export function renderLookback(state: PolyaState, problem: Problem | undefined, 
     `## Lessons\n${lessons.join("\n\n") || "No lesson: the plan held."}\n\n` +
     (r?.confirmed?.length ? `Confirmed: ${r.confirmed.join(", ")}\n\n` : "") +
     `## Units\n${gateSummary(state.unitRecords, state.finish)}\n\n` +
-    `${FENCE}json lookback\n${JSON.stringify({ verdict: r?.verdict ?? (state.stopReason === "complete" ? "done" : "stop"), results: (problem?.done ?? []).map((d) => ({ id: d.id, met: state.checks?.find((x) => x.id === d.id)?.passed ?? null })), findings: r?.findings ?? [], lessons: added.map((a) => a.id), confirmed: r?.confirmed ?? [] }, null, 2)}\n${FENCE}\n`
+    `${FENCE}json lookback\n${JSON.stringify({ verdict: r?.verdict ?? (state.stopReason === "complete" ? "done" : "stop"), results: (problem?.done ?? []).map((d) => ({ id: d.id, met: state.checks?.find((x) => x.id === d.id)?.passed ?? null })), findings: r?.findings ?? [], lessons: labels.filter((x) => /^L-/.test(x)).map((x) => x.split(" ")[0]), confirmed: r?.confirmed ?? [] }, null, 2)}\n${FENCE}\n`
   );
 }
 
@@ -240,6 +267,16 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     return md ? parsePlan(md) : undefined;
   };
 
+  // Whatever phase this run starts in: a record a model forced into git makes every later Hand turn look like an
+  // ownership violation, because edits to a tracked file are visible to the gate.
+  {
+    const forced = io.untrackIgnored?.() ?? [];
+    if (forced.length) {
+      io.commit(`polya: untrack ${forced.length} ignored file(s) (${forced.slice(0, 3).join(", ")}${forced.length > 3 ? ", …" : ""})`);
+      log(`untracked ${forced.join(", ")}`);
+    }
+  }
+
   /** (d): always, even after a stop inside look back. Written from evidence; the reviewer never writes it. */
   let lookbackWritten = false;
   const writeLookback = async (): Promise<void> => {
@@ -247,13 +284,22 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     lookbackWritten = true;
     const problem = state.problem ?? readProblem();
     const report = state.review;
-    let added: { id: string }[] = [];
+    const cap = opts.lessonsPerRun ?? 2;
+    const all = report?.lessons ?? [];
+    // Every lesson stays in LOOKBACK.md; what the ledger takes is labelled there.
+    const labels: string[] = all.map((l) =>
+      !l?.lesson || /^\s*no lesson\b/i.test(l.lesson) ? "(no lesson)" : !l.when?.trim() ? "(not appended: no When)" : "(not appended: over the per-run cap)",
+    );
+    let added = 0;
     let confirmed = 0;
     if (lessons) {
       try {
-        // "No lesson: the plan held" is an entry in LOOKBACK.md, never in the ledger.
-        const real = (report?.lessons ?? []).filter((l) => l && l.lesson && !/^\s*no lesson\b/i.test(l.lesson));
-        if (real.length) added = lessons.append(real.map((l) => ({ tags: l.tags ?? [], when: l.when ?? problem?.title ?? "", lesson: l.lesson, evidence: l.evidence ?? problem?.title ?? "" })));
+        const eligible = all.map((l, i) => ({ l, i })).filter(({ i }) => labels[i] === "(not appended: over the per-run cap)").slice(0, cap);
+        const results = eligible.length ? lessons.append(eligible.map(({ l }) => ({ tags: l.tags ?? [], when: l.when!, lesson: l.lesson, evidence: l.evidence ?? problem?.title ?? "" }))) : [];
+        results.forEach((res, k) => {
+          labels[eligible[k]!.i] = res.merged ? `${res.id} (confirmed: says what this entry already said)` : res.id;
+          if (!res.merged) added++;
+        });
         if (report?.confirmed?.length) {
           lessons.confirm(report.confirmed);
           confirmed = report.confirmed.length;
@@ -262,10 +308,10 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
         log(`ledger: could not write (${(err as Error).message})`);
       }
     }
-    io.writeFile(ARTIFACTS.lookback, renderLookback(state, problem, added));
+    io.writeFile(ARTIFACTS.lookback, renderLookback(state, problem, labels));
     io.commit("look back: LOOKBACK.md");
-    state.lookback = { written: true, lessons: added.length, confirmed };
-    log(`look back written: ${added.length} lesson(s) appended, ${confirmed} confirmed`);
+    state.lookback = { written: true, lessons: added, confirmed };
+    log(`look back written: ${added} lesson(s) appended, ${confirmed} confirmed`);
   };
 
   const stop = async (reason: PolyaStopReason, detail?: string, phase: PolyaPhase = "stopped") => {
@@ -365,16 +411,124 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     return { record, gate };
   };
 
+  /**
+   * The commands a unit's gate runs: its own Check, plus the Checks of the units already passed — except a Check
+   * that pins the hash of a file this unit may change. A repair that edits a file an earlier unit wrote whole can
+   * never match that unit's hash again, and the earlier unit's behaviour is still covered by the finish check.
+   */
+  const taskCommandsFor = (unit: { touches: string[]; command?: string }): string[] => {
+    const passed = state.unitRecords
+      .filter((r) => r.passed)
+      .map((r) => state.units.find((x) => x.id === r.id)?.command)
+      .filter((c): c is string => Boolean(c))
+      .filter((c) => !(/\b(?:sha(?:256|1|512)(?:sum)?|shasum|md5sum|createHash)\b/.test(c) && unit.touches.some((t) => c.includes(t))));
+    return union(passed, unit.command ? [unit.command] : []);
+  };
+
+  /**
+   * A check failed at look back. The Solver writes the repair as ordinary units (plan-lint, a red Check, the Hand,
+   * the gate); the loop never writes a unit itself. Returns undefined when every repair unit passed its gate.
+   */
+  const repair = async (stage: "finish" | "verify" | "review" | "unit", evidence: string, revise?: Unit): Promise<{ reason: PolyaStopReason; detail: string } | undefined> => {
+    const stopFor: PolyaStopReason = stage === "finish" ? "finish-check-failed" : stage === "verify" ? "verify-failed" : stage === "unit" ? "unit-gate-failed" : "review-unresolved";
+    const problem = readProblem();
+    const before = readPlan()?.units.map((u) => u.id) ?? [];
+    const nextId = `U${before.reduce((n, id) => Math.max(n, Number(id.match(/\d+/)?.[0] ?? 0)), 0) + 1}`;
+    const prompt = buildPrompt(`${PROMPTS}/repair`, "", {
+      stage: stage === "finish" ? "the finish check" : stage === "verify" ? "done-checks from a fresh clone" : stage === "unit" ? `unit ${revise?.id}'s own Check` : "the review",
+      evidence,
+      revise_note: revise
+        ? `The unit below could not pass its own Check after every attempt, and the Hand reproduced what its Do says. That is a defect in the unit, not in the work: its Check may depend on a deliverable of a later unit, its Do may be incomplete, or its Touches may be too narrow. Revise **${revise.id} in place** under \`## Units\` — its Check, Do, Touches or Depends — so that it can pass once ${revise.id} and the units it depends on are done. Write no new unit unless the work genuinely splits in two.`
+        : "",
+      problem_md: artifact(ARTIFACTS.problem) ?? "",
+      plan_md: artifact(ARTIFACTS.plan) ?? "",
+      next_id: nextId,
+    });
+    log(`repair (${stage}): asking the Solver for units from ${nextId}`);
+    const beforeSha = io.headSha();
+    let t = await send(prompt, { mode: "agent" });
+    track(t);
+    if (t.status !== "finished") return { reason: "run-failed", detail: "repair turn did not finish" };
+    io.commit("repair: PLAN.md");
+    const report = lenientJson<{ check_wrong?: boolean; notes?: string }>(t.result);
+    if (report?.check_wrong) return { reason: stopFor, detail: `the Solver says the check is wrong, not the product: ${report.notes ?? ""}`.trim() };
+    const fresh = () => (readPlan()?.units ?? []).filter((u) => !before.includes(u.id) || (revise && u.id === revise.id));
+    const gapsOf = (): string[] => {
+      const units = fresh();
+      if (!units.length) return ["- no new unit under `## Repairs`"];
+      const lines = validateUnits(units, problem, { requireCommand: software, exists: (p) => artifact(p) !== undefined, doneIds: [], knownUnitIds: (readPlan()?.units ?? []).map((u) => u.id) }).map((p) => `- ${p.id}: ${p.problem}`);
+      return lines;
+    };
+    let gaps = gapsOf();
+    if (gaps.length) {
+      log(`repair not workable; asking the Solver once more:\n${gaps.join("\n")}`);
+      t = await send(`## Repair not workable\n\nFix only these in the repair units, commit, then reply with the same JSON block.\n\n${gaps.join("\n")}\n\n---\n\n${prompt}`, { mode: "agent" });
+      track(t);
+      if (t.status !== "finished") return { reason: "run-failed", detail: "repair retry did not finish" };
+      io.commit("repair: gap fixes");
+      gaps = gapsOf();
+      if (gaps.length) return { reason: stopFor, detail: `repair not workable: ${gaps.join("; ")}` };
+    }
+    const units = fresh();
+    for (const u of units) {
+      if (u.command && (await io.runCommand(u.command)).code === 0) return { reason: stopFor, detail: `repair ${u.id}'s Check already passes; it measures nothing` };
+    }
+    if (revise) {
+      // A revised unit replaces the one that could not pass; it is carried out again below.
+      state.units = state.units.filter((u) => !units.some((n) => n.id === u.id));
+      state.unitRecords = state.unitRecords.filter((r) => !units.some((n) => n.id === r.id));
+    }
+    // The red test the Solver wrote for the repair is the Solver's file, not a Hand's: the finish check allows it.
+    state.solverFiles = union(state.solverFiles, io.changedFiles?.(beforeSha) ?? []);
+    state.units = [...state.units, ...units];
+    await persist();
+    for (const u of units) {
+      log(`carry out ${u.id} (repair): ${u.title}`);
+      const r = await handTurn({ id: u.id, block: u.body, touches: u.touches, command: u.command }, `${problem?.restated ?? ""}\n\nDone-checks this unit serves:\n${problem ? doneLines(problem, u) : ""}`, taskCommandsFor(u));
+      if (r === "run-failed") return { reason: "run-failed", detail: `repair ${u.id} did not finish` };
+      state.unitRecords = state.unitRecords.filter((x) => x.id !== u.id);
+      state.unitRecords.push(r.record);
+      await persist();
+      if (r.blocked) {
+        state.replanNote = `Repair ${u.id} asked: "${r.blocked}"`;
+        return { reason: "unit-not-workable", detail: `${u.id} asked: ${r.blocked}` };
+      }
+      if (!r.record.passed) return { reason: stopFor, detail: `repair ${u.id} failed the gate after ${r.record.attempts} attempt(s): ${(r.record.failing ?? []).join(", ")}` };
+    }
+    return undefined;
+  };
+
   // ---- 1. Understand --------------------------------------------------------
   if (state.phase === "understand") {
     log("understand");
+    // The loop's record is for the loop and for a person reading the run, not part of what the product ships:
+    // blind reviewers dock a tree that carries the build tool's planning state, wherever it sits.
+    const ignore = artifact(".gitignore") ?? "";
+    if (!/^\.polya\/?$/m.test(ignore)) {
+      io.writeFile(".gitignore", `${ignore.trim() ? `${ignore.trim()}\n` : ""}${POLYA_DIR}/\n`);
+      io.commit(`polya: ignore ${POLYA_DIR}/, the loop's own record`);
+      log(`${POLYA_DIR}/ is ignored in this repo; the record stays out of the product`);
+    }
+    // A template AGENTS.md tells every Hand the wrong layout and commands, and ships as instructions for another
+    // project (ledger L-2026-09-19-06). Only the unmodified seed is removed; a person's AGENTS.md stays.
+    if (io.removeFile) {
+      const removed = [
+        SEEDED_AGENTS.test(artifact("AGENTS.md") ?? "") && io.removeFile("AGENTS.md") ? "AGENTS.md" : "",
+        SEEDED_QWEN.test(artifact("QWEN.md") ?? "") && io.removeFile("QWEN.md") ? "QWEN.md" : "",
+      ].filter(Boolean);
+      if (removed.length) {
+        io.commit(`polya: remove the kit's seeded ${removed.join(" and ")}; the prompts carry the rules`);
+        log(`removed the kit's seeded ${removed.join(", ")}`);
+      }
+    }
     const offered = lessons ? lessons.select(tagsForProblem(opts.problem, opts.repo)) : [];
     const prompt = buildPrompt(`${PROMPTS}/understand`, "", {
       problem: opts.problem,
       repo: opts.repo,
       prior_lessons: priorLessonsNote(offered, artifact(ARTIFACTS.lookback)),
+      oracle: opts.oracle ? oracleNote() : "",
     });
-    const gapsOf = () => problemGaps(readProblem(), { maxDone: 8, software, offeredLessons: offered.map((l) => l.id) });
+    const gapsOf = () => problemGaps(readProblem(), { maxDone: opts.oracle ? 10 : 8, software, offeredLessons: offered.map((l) => l.id), oracle: opts.oracle });
     // Already on disk (a resume, or a person wrote it): do not pay for the full turn again. Gaps get the one targeted retry below.
     if (artifact(ARTIFACTS.problem)) {
       log(`${ARTIFACTS.problem} is on disk; ${gapsOf().length ? "it has gaps, asking the Solver to fix only those" : "skipping the Solver turn"}`);
@@ -468,13 +622,22 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       log(`carry out ${unit.id} (${state.unitIndex + 1}/${state.units.length}): ${unit.title}`);
       state.unitRecords = state.unitRecords.filter((r) => r.id !== unit.id);
       const excerpt = `${problem?.restated ?? ""}\n\nDone-checks this unit serves:\n${doneLines(problem, unit)}`;
-      const passedCommands = state.unitRecords.filter((r) => r.passed).map((r) => state.units.find((u) => u.id === r.id)?.command).filter((c): c is string => Boolean(c));
-      const taskCommands = union(passedCommands, unit.command ? [unit.command] : []);
+      const taskCommands = taskCommandsFor(unit);
       const strong = /^\s*strong\s*$/i.test(unit.body.match(/^Owner:\s*(.*)$/im)?.[1] ?? "");
       const r = await handTurn({ id: unit.id, block: unit.body, touches: unit.touches, command: unit.command }, excerpt, taskCommands, strong ? "claude" : undefined);
       if (r === "run-failed") return stop("run-failed", `unit ${unit.id} turn did not finish`);
       state.unitRecords.push(r.record);
       await persist();
+      if (!r.blocked && !r.record.passed && !(state.replanned ?? []).includes(unit.id)) {
+        // A unit the Hand cannot pass, having done what its Do says, is a defect in the unit: back to the Solver, once.
+        state.replanned = union(state.replanned, [unit.id]);
+        await persist();
+        const evidence = `- ${unit.id} failed its own Check after ${r.record.attempts} attempt(s) (${(r.record.failing ?? []).join(", ")}).\n  Check: ${unit.check}\n  Last output:\n${tail((await io.runCommand(unit.command ?? "true")).output, 25)}`;
+        const stopped = await repair("unit", evidence, unit);
+        if (stopped) return stop(stopped.reason, stopped.detail);
+        state.unitIndex -= 1; // the revised unit is carried out again
+        continue;
+      }
       if (r.blocked) {
         state.replanNote = `Unit ${unit.id} asked: "${r.blocked}"`;
         if (lessons) {
@@ -494,7 +657,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
 
   const allTouches = union(...state.units.map((u) => u.touches));
   // The finish check spans the whole job; the loop's own artifacts (written on an earlier pass, or corrected by hand) are not the Hand's doing.
-  const finishAllowed = union(allTouches, [ARTIFACTS.problem, ARTIFACTS.plan, ARTIFACTS.lookback]);
+  const finishAllowed = () => union(allTouches, ...state.units.map((u) => u.touches), state.solverFiles, [ARTIFACTS.problem, ARTIFACTS.plan, ARTIFACTS.lookback]);
 
   // ---- 4. Look back ---------------------------------------------------------
   if (state.phase === "look-back") {
@@ -509,20 +672,33 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       log("cleared the previous pass's LOOKBACK.md");
     }
 
+    // A unit that has not passed its gate (a repair from an earlier pass, or a resume mid-stage) runs first.
+    for (const u of state.units.filter((x) => !state.unitRecords.find((r) => r.id === x.id)?.passed)) {
+      log(`carry out ${u.id} (unfinished): ${u.title}`);
+      const r = await handTurn({ id: u.id, block: u.body, touches: u.touches, command: u.command }, `${problem.restated ?? ""}\n\nDone-checks this unit serves:\n${doneLines(problem, u)}`, taskCommandsFor(u));
+      if (r === "run-failed") return stop("run-failed", `${u.id} turn did not finish`);
+      state.unitRecords = state.unitRecords.filter((x) => x.id !== u.id);
+      state.unitRecords.push(r.record);
+      await persist();
+      if (r.blocked) {
+        state.replanNote = `Unit ${u.id} asked: "${r.blocked}"`;
+        return stop("unit-not-workable", `${u.id} asked: ${r.blocked}`);
+      }
+      if (!r.record.passed) return stop("unit-gate-failed", `${u.id} failed the gate after ${r.record.attempts} attempt(s): ${(r.record.failing ?? []).join(", ")}`);
+    }
+
     // (a) the finish check: ownership over the whole job, hygiene, the bar, clean start, vacuous suite.
     log("look back (a): checks from a clean state");
-    let gate = await io.gate("finish", { allowedFiles: finishAllowed, baseSha: state.baselineSha });
+    let gate = await io.gate("finish", { allowedFiles: finishAllowed(), baseSha: state.baselineSha });
     if (!gate.passed) {
       const what = gate.findings.filter((f) => !f.ok).map((f) => `- [${f.rule}] ${f.detail}${f.command ? ` (\`${f.command}\`)` : ""}${f.output ? `\n  ${tail(f.output, 30).replace(/\n/g, "\n  ")}` : ""}`).join("\n");
-      log(`finish check failed: ${failingRules(gate).join(", ")}; one fix turn`);
-      const fix = await handTurn({ id: "U-FIX", block: unitBlockForFix("U-FIX", what, allTouches, problem.bar.test ?? "the finish check"), touches: allTouches }, problem.restated ?? "", []);
-      if (fix === "run-failed") return stop("run-failed", "finish fix turn did not finish");
-      state.unitRecords.push(fix.record);
-      if (!fix.record.passed) {
-        state.finish = { passed: false, failing: fix.record.failing ?? failingRules(gate) };
-        return stop("finish-check-failed", `fix turn failed the gate: ${state.finish.failing.join(", ")}`);
+      log(`finish check failed: ${failingRules(gate).join(", ")}; the Solver devises a repair`);
+      const stopped = await repair("finish", what);
+      if (stopped) {
+        state.finish = { passed: false, failing: failingRules(gate) };
+        return stop(stopped.reason, stopped.detail);
       }
-      gate = await io.gate("finish", { allowedFiles: finishAllowed, baseSha: state.baselineSha });
+      gate = await io.gate("finish", { allowedFiles: finishAllowed(), baseSha: state.baselineSha });
     }
     state.finish = { passed: gate.passed, failing: failingRules(gate) };
     await persist();
@@ -536,67 +712,93 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       if (problem.bar.install) await io.runCommand(problem.bar.install, clone);
       const checks: CheckResult[] = [];
       const mechanical = problem.done.filter((d) => d.command);
-      // A check that curls the app needs the app up: start the bar's `start` in the clone for the duration of the checks.
+      const run = (command: string) => (io.runCheck ? io.runCheck(command, clone) : io.runCommand(command, clone));
+      const record = (d: DoneCheck, r: { code: number; output: string }) =>
+        checks.push({ id: d.id, passed: r.code === 0, how: "mechanical", evidence: `\`${d.command}\` exited ${r.code}${r.code ? `: ${tail(r.output, 5)}` : ""}` });
+      // Checks that start their own server go first, while the port is free; then the loop starts the app for the
+      // checks that only curl it, and stops it after.
+      const selfServing = mechanical.filter((d) => SELF_SERVES.test(d.command!));
+      const rest = mechanical.filter((d) => !selfServing.includes(d));
+      for (const d of selfServing) record(d, await run(d.command!));
       let running: { stop(): void } | undefined;
-      if (problem.bar.start && io.start && mechanical.some((d) => NEEDS_SERVER.test(d.command!))) {
-        log(`starting \`${problem.bar.start}\` in the clone for the done-checks`);
-        running = await io.start(problem.bar.start, clone);
+      // A build's Understand runs before the app exists, so its bar may name no `start`; the repo's own start script is the fallback.
+      const startCmd = problem.bar.start ?? problem.bar.dev ?? problem.bar.serve ?? (/"start"\s*:/.test(artifact("package.json") ?? "") ? "npm start" : undefined);
+      if (startCmd && io.start && rest.some((d) => NEEDS_SERVER.test(d.command!))) {
+        log(`starting \`${startCmd}\` in the clone for the done-checks`);
+        running = await io.start(startCmd, clone);
       }
       try {
-        for (const d of mechanical) {
-          const r = await io.runCommand(d.command!, clone);
-          checks.push({ id: d.id, passed: r.code === 0, how: "mechanical", evidence: `\`${d.command}\` exited ${r.code}${r.code ? `: ${tail(r.output, 5)}` : ""}` });
-        }
+        for (const d of rest) record(d, await run(d.command!));
       } finally {
         running?.stop();
       }
+
       const prose: DoneCheck[] = problem.done.filter((d) => !d.command);
       if (prose.length) {
         const mechanical = checks.map((c) => `- ${c.id}: ${c.passed ? "PASS" : "FAIL"} — ${c.evidence}`).join("\n") || "(none)";
-        const outer = plan?.outerText || prose.map((d) => `- ${d.id}: ${d.text} — Check: ${d.check}`).join("\n");
         const readme = (artifact("README.md") ?? "(no README)").slice(0, 4000);
-        const outerFull = `${outer}\n\nDone-checks a stranger observes:\n${prose.map((d) => `- ${d.id}: ${d.text} — Check: ${d.check}`).join("\n")}`;
-        const needsBrowser = scenarioNeedsBrowser(outerFull);
-        const browser = needsBrowser && opts.browser === true;
-        const prompt = buildPrompt(`${PROMPTS}/verify`, "", {
-          outer_test: outerFull,
-          mechanical_results: mechanical,
-          run_instructions: readme,
-          browser_tools: browserToolNote(!needsBrowser ? "unneeded" : browser ? "available" : "absent"),
-        });
-        const attempts: { note: string; tier?: "claude" }[] = [{ note: "" }, { note: "## Your previous reply had no results block\n\nWalk the steps and end with the single fenced json block the Output section specifies. Nothing after it.\n\n---\n\n" }];
-        if (opts.verifyFallbackTier === "claude") attempts.push({ note: "", tier: "claude" });
-        let report: { results?: { step?: number; d?: string; passed?: boolean; evidence?: string; where?: string }[] } | undefined;
-        for (const [ai, a] of attempts.entries()) {
-          log(`verifier${ai ? ` (attempt ${ai + 1}${a.tier ? `, ${a.tier}` : ""})` : ""}: ${prose.map((d) => d.id).join(", ")}`);
-          const t = await send(`${a.note}${prompt}`, { mode: "agent", fresh: true, cwd: clone, ...(browser ? { browser: true } : {}), ...(a.tier ? { tier: a.tier } : {}) });
-          track(t);
-          if (t.status !== "finished") continue;
-          const r = lenientJson<typeof report>(t.result);
-          if (r?.results && Array.isArray(r.results)) {
-            report = r;
-            break;
+        const size = Math.max(1, opts.verifyBatch ?? 2);
+        const batches: DoneCheck[][] = [];
+        for (let i = 0; i < prose.length; i += size) batches.push(prose.slice(i, i + size));
+        for (const [bi, batch] of batches.entries()) {
+          const ids = new Set(batch.map((d) => d.id));
+          // Only the outer-test steps this batch exercises; the whole walk is what overflowed one turn.
+          const steps = (plan?.outer ?? []).filter((o) => o.d && ids.has(o.d)).map((o) => `${o.step}. ${o.text}`);
+          const lines = batch.map((d) => `- ${d.id}: ${d.text} — Check: ${d.check}`).join("\n");
+          const outerFull = `${steps.length ? `${steps.join("\n")}\n\n` : ""}Done-checks a stranger observes (walk only these):\n${lines}`;
+          const needsBrowser = scenarioNeedsBrowser(outerFull);
+          const browser = needsBrowser && opts.browser === true;
+          const prompt = buildPrompt(`${PROMPTS}/verify`, "", {
+            outer_test: outerFull,
+            mechanical_results: mechanical,
+            run_instructions: readme,
+            browser_tools: browserToolNote(!needsBrowser ? "unneeded" : browser ? "available" : "absent"),
+          });
+          type Walked = { step?: number; d?: string; passed?: boolean; evidence?: string; where?: string };
+          const seen = new Map<string, Walked[]>();
+          const missing = () => batch.map((d) => d.id).filter((id) => !seen.has(id));
+          const tiers: ("local" | "claude")[] = ["local", "local", ...(opts.verifyFallbackTier === "claude" ? (["claude"] as const) : [])];
+          for (const [ai, tier] of tiers.entries()) {
+            const left = missing();
+            if (!left.length) break;
+            // A silent reply and a reply that walks one check of two are the same failure: ask again for what is missing.
+            const note = ai === 0 ? "" : `## Your previous reply did not report ${left.join(" and ")}\n\nWalk ${left.length > 1 ? "each of them" : "it"} now and end with the single fenced json block the Output section specifies, one result per id, nothing after it.\n\n---\n\n`;
+            log(`verifier batch ${bi + 1}/${batches.length}${ai ? ` (attempt ${ai + 1}${tier === "claude" ? ", claude" : ""})` : ""}: ${left.join(", ")}`);
+            const t = await send(`${note}${prompt}`, { mode: "agent", fresh: true, cwd: clone, ...(browser ? { browser: true } : {}), ...(tier === "claude" ? { tier } : {}) });
+            track(t);
+            if (t.status !== "finished") continue;
+            const r = lenientJson<{ results?: Walked[] }>(t.result);
+            if (!r?.results || !Array.isArray(r.results)) continue;
+            for (const id of batch.map((d) => d.id)) {
+              const mine = r.results.filter((x) => x.d === id);
+              if (mine.length) seen.set(id, mine);
+            }
+          }
+          // A check nobody walked is not a failed check: the run stops and says so, rather than repairing a defect no one saw.
+          const unwalked = missing();
+          if (unwalked.length) return stop("unparseable-report", `the Verifier did not report ${unwalked.join(", ")} after ${tiers.length} attempt(s)`);
+          for (const d of batch) {
+            const mine = seen.get(d.id)!;
+            checks.push({ id: d.id, passed: mine.every((r) => r.passed), how: "verifier", evidence: mine.map((r) => r.evidence).filter(Boolean).join("; "), where: mine.find((r) => !r.passed)?.where });
           }
         }
-        if (!report) return stop("unparseable-report", "the Verifier returned no results block");
-        for (const d of prose) {
-          const mine = report.results!.filter((r) => r.d === d.id);
-          const passed = mine.length > 0 && mine.every((r) => r.passed);
-          checks.push({ id: d.id, passed, how: "verifier", evidence: mine.map((r) => r.evidence).filter(Boolean).join("; ") || (mine.length ? "" : "not walked"), where: mine.find((r) => !r.passed)?.where });
-        }
       }
+      // Report in the order PROBLEM.md lists them.
+      checks.sort((a, b) => problem.done.findIndex((d) => d.id === a.id) - problem.done.findIndex((d) => d.id === b.id));
       state.checks = checks;
       await persist();
       const failed = checks.filter((c) => !c.passed);
       log(`done-checks: ${checks.length - failed.length}/${checks.length} met`);
       if (!failed.length) break;
       if (state.verifyAttempts >= 2) return stop("verify-failed", `still unmet: ${failed.map((f) => f.id).join(", ")}`);
-      const what = failed.map((f) => `- ${f.id}: ${f.evidence ?? ""}${f.where ? ` (where: ${f.where})` : ""}`).join("\n");
-      const where = failed.map((f) => f.where).filter((w): w is string => Boolean(w && /[/.]/.test(w) && !/\s/.test(w)));
-      const allowed = union(allTouches, where);
-      const fix = await handTurn({ id: "U-FIX", block: unitBlockForFix("U-FIX", what, allowed, failed.map((f) => problem.done.find((d) => d.id === f.id)?.command).filter(Boolean).join(" && ") || "the done-checks above"), touches: allowed }, problem.restated ?? "", []);
-      if (fix === "run-failed") return stop("run-failed", "verify fix turn did not finish");
-      if (!fix.record.passed) return stop("verify-failed", `fix turn failed the gate: ${(fix.record.failing ?? []).join(", ")}`);
+      const what = failed
+        .map((f) => {
+          const d = problem.done.find((x) => x.id === f.id);
+          return `- ${f.id}: ${d?.text ?? ""}\n  Check: ${d?.check ?? ""}\n  Observed (${f.how}): ${f.evidence ?? ""}${f.where ? `\n  Where: ${f.where}` : ""}`;
+        })
+        .join("\n");
+      const stopped = await repair("verify", what);
+      if (stopped) return stop(stopped.reason, stopped.detail);
     }
 
     // (c) the review: fresh session, read-only, Pólya's questions, lessons.
@@ -628,11 +830,9 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     log(`review: ${review.verdict}, ${review.findings.length} finding(s), ${high.length} high${process.length ? ` (+${process.length} about the record, kept in LOOKBACK.md)` : ""}, ${review.lessons?.length ?? 0} lesson(s)`);
     if (high.length || review.answers_problem === false) {
       if (review.answers_problem === false && !high.length) return stop("review-unresolved", "the review says the result does not answer the restated problem; the done-checks were wrong (a stage:understand lesson)");
-      const allowed = union(allTouches, high.map((f) => f.where).filter((w): w is string => Boolean(w && /[/.]/.test(w) && !/\s/.test(w))));
-      const what = high.map((f) => `- ${f.where ?? ""}: ${f.what}${f.fix ? ` — fix: ${f.fix}` : ""}`).join("\n");
-      const fix = await handTurn({ id: "U-FIX", block: unitBlockForFix("U-FIX", what, allowed, high.map((f) => f.check?.command).filter(Boolean).join(" && ") || "the findings' checks"), touches: allowed }, problem.restated ?? "", []);
-      if (fix === "run-failed") return stop("run-failed", "review fix turn did not finish");
-      if (!fix.record.passed) return stop("review-unresolved", `fix turn failed the gate: ${(fix.record.failing ?? []).join(", ")}`);
+      const what = high.map((f) => `- [high] ${f.where ?? ""}: ${f.what}${f.fix ? `\n  Suggested fix: ${f.fix}` : ""}${f.check?.command ? `\n  Its check: \`${f.check.command}\` should exit ${f.check.expect_exit ?? 0}` : ""}`).join("\n");
+      const stopped = await repair("review", what);
+      if (stopped) return stop(stopped.reason, stopped.detail);
       state.reviewChecks = [];
       for (const f of high) {
         if (!f.check?.command) continue;

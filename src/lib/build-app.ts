@@ -1,6 +1,7 @@
 import { Agent, type SDKAgent } from "@cursor/sdk";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { env } from "./env.js";
 import { selectModel } from "./model.js";
@@ -461,6 +462,9 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
 
     if ((record.loop ?? loop) === "polya") {
       if (!workspace) throw new Error("polya loop: the engine returned no workspace");
+      // Playwright MCP writes console logs and page snapshots into its working directory; a Hand turn with a
+      // browser would commit them. Every browser turn in this run writes to a temp folder instead.
+      process.env.PLAYWRIGHT_MCP_OUTPUT_DIR ??= resolve(tmpdir(), "polya-playwright-mcp");
       const io = makePolyaIO(workspace, { log: (line) => log(line) });
       const initialState = record.polya ?? initialPolyaState();
       if (opts.resume) {
@@ -478,6 +482,8 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
           maxUnits: opts.maxUnits,
           browser: Boolean(browserFromEnv()),
           verifyFallbackTier: (process.env.HYBRID_QA_FALLBACK ?? "claude").trim().toLowerCase() === "claude" && engine !== "local" ? "claude" : undefined,
+          verifyBatch: Number(process.env.POLYA_VERIFY_BATCH) > 0 ? Number(process.env.POLYA_VERIFY_BATCH) : undefined,
+          oracle: (process.env.POLYA_ORACLE ?? "").trim() === "1",
           log: (line) => banner(line, log),
           onState: (state) => {
             record.polya = state;
@@ -487,6 +493,18 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
         },
         { ...initialState, stopReason: undefined, stopDetail: undefined },
       );
+      // The record is ignored in the target repo, so keep a copy beside the run's state.
+      try {
+        const from = resolve(workspace, ".polya");
+        if (existsSync(from)) {
+          const to = resolve(stateDir, `polya-${record.agentId}`);
+          mkdirSync(to, { recursive: true });
+          for (const f of readdirSync(from)) copyFileSync(resolve(from, f), resolve(to, f));
+          log(`record kept: ${to}`);
+        }
+      } catch {
+        /* the record is a convenience; never fail a run over it */
+      }
       const cents = await usage();
       if (lastPr) record.prUrl = lastPr;
       record.polya = ps;
