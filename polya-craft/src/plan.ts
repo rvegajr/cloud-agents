@@ -550,7 +550,7 @@ export interface UnitProblem {
 export function validateUnits(
   units: Unit[],
   problem: Problem | undefined,
-  opts: { maxTouches?: number; maxBodyLines?: number; maxDoSteps?: number; requireCommand?: boolean; exists?: (path: string) => boolean; doneIds?: string[]; knownUnitIds?: string[]; immovable?: string[] } = {},
+  opts: { maxTouches?: number; maxBodyLines?: number; maxDoSteps?: number; requireCommand?: boolean; exists?: (path: string) => boolean; doneIds?: string[]; knownUnitIds?: string[]; requireServes?: boolean; immovable?: string[] } = {},
 ): UnitProblem[] {
   const out: UnitProblem[] = [];
   const maxTouches = opts.maxTouches ?? 6;
@@ -568,7 +568,8 @@ export function validateUnits(
     if (!u.do) push("no Do:");
     if (!u.touches.length) push("no Touches:");
     if (!u.check) push("no Check:");
-    if (!u.serves.length) push("Serves: names no D");
+    // A repair for the finish check or a review finding serves the whole job, not one done-check.
+    if (!u.serves.length && opts.requireServes !== false) push("Serves: names no D");
     const unknownD = u.serves.filter((d) => !doneIds.has(d));
     if (unknownD.length && doneIds.size) push(`Serves: names D(s) that do not exist: ${unknownD.join(", ")}`);
     const unknownU = u.depends.filter((d) => !ids.has(d));

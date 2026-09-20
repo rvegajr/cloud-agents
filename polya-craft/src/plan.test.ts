@@ -536,3 +536,10 @@ test("templates: REQUEST.md and ACCEPT.md exist with the sections the loop and t
   const idea = readFileSync(new URL("../../ideas/TEMPLATE.md", import.meta.url), "utf8");
   for (const h of ["## I will judge it by", "## Wrong looks like", "## Must not change", "## Must have (v1)"]) assert.ok(idea.includes(h), h);
 });
+
+test("validateUnits: a repair for the finish check need not name a done-check (live R2, U8)", () => {
+  const u = { ...parsePlan(PLAN_MD).units[0]!, serves: [] };
+  const problem = parseProblem(PROBLEM_MD);
+  assert.match(validateUnits([u], problem, { doneIds: [] }).map((p) => p.problem).join("\n"), /Serves: names no D/);
+  assert.ok(!validateUnits([u], problem, { doneIds: [], requireServes: false }).some((p) => /Serves/.test(p.problem)));
+});
