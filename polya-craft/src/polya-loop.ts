@@ -4,7 +4,7 @@ import { lenientJson, type BlueprintIO } from "../../architect-crew-gate/src/blu
 import { browserToolNote, scenarioNeedsBrowser } from "../../architect-crew-gate/src/browser.js";
 import { gateFeedbackNote, type GateResult } from "../../architect-crew-gate/src/quality-gate.js";
 import { fileLessonsStore, priorLessonsNote, tagsForProblem, type LessonsStore, type NewLesson } from "./lessons.js";
-import { ARTIFACTS, POLYA_DIR, oracleNote, parsePlan, parseProblem, problemGaps, renderPlan, renderProblem, validateUnits, type DoneCheck, type Plan, type Problem, type Unit } from "./plan.js";
+import { ARTIFACTS, POLYA_DIR, immovableOf, oracleNote, parsePlan, parseProblem, parseRequest, problemGaps, renderPlan, renderProblem, requestNote, validateUnits, type DoneCheck, type Plan, type Problem, type Unit } from "./plan.js";
 
 /**
  * The polya-craft loop (PATTERN.md section 4), engine-free so a fake `send`
@@ -252,6 +252,9 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
   const lessons: LessonsStore | undefined = opts.lessons === null ? undefined : (opts.lessons ?? fileLessonsStore());
   const state: PolyaState = { ...initialPolyaState(), ...initial };
   const persist = async () => opts.onState?.(state);
+  // The requester's J/W/M lines, if the problem came from REQUEST.md; the same text on a resume, so nothing to persist.
+  const request = parseRequest(opts.problem);
+  const immovable = immovableOf(request);
   const artifact = (name: string) => io.readFile(name);
   const track = (t: TurnResult) => {
     if (t.runId) state.runIds.push(t.runId);
@@ -456,7 +459,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     const gapsOf = (): string[] => {
       const units = fresh();
       if (!units.length) return ["- no new unit under `## Repairs`"];
-      const lines = validateUnits(units, problem, { requireCommand: software, exists: (p) => artifact(p) !== undefined, doneIds: [], knownUnitIds: (readPlan()?.units ?? []).map((u) => u.id) }).map((p) => `- ${p.id}: ${p.problem}`);
+      const lines = validateUnits(units, problem, { requireCommand: software, exists: (p) => artifact(p) !== undefined, doneIds: [], knownUnitIds: (readPlan()?.units ?? []).map((u) => u.id), immovable }).map((p) => `- ${p.id}: ${p.problem}`);
       return lines;
     };
     let gaps = gapsOf();
@@ -527,8 +530,9 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       repo: opts.repo,
       prior_lessons: priorLessonsNote(offered, artifact(ARTIFACTS.lookback)),
       oracle: opts.oracle ? oracleNote() : "",
+      request: requestNote(request),
     });
-    const gapsOf = () => problemGaps(readProblem(), { maxDone: opts.oracle ? 10 : 8, software, offeredLessons: offered.map((l) => l.id), oracle: opts.oracle });
+    const gapsOf = () => problemGaps(readProblem(), { maxDone: opts.oracle ? 10 : 8, software, offeredLessons: offered.map((l) => l.id), oracle: opts.oracle, request });
     // Already on disk (a resume, or a person wrote it): do not pay for the full turn again. Gaps get the one targeted retry below.
     if (artifact(ARTIFACTS.problem)) {
       log(`${ARTIFACTS.problem} is on disk; ${gapsOf().length ? "it has gaps, asking the Solver to fix only those" : "skipping the Solver turn"}`);
@@ -569,7 +573,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       const plan = readPlan();
       if (!plan) return [`- ${ARTIFACTS.plan} missing`];
       state.units = plan.units;
-      const lines = validateUnits(plan.units, problem, { requireCommand: software, exists, doneIds: carried }).map((p) => `- ${p.id}: ${p.problem}`);
+      const lines = validateUnits(plan.units, problem, { requireCommand: software, exists, doneIds: carried, immovable }).map((p) => `- ${p.id}: ${p.problem}`);
       if (!plan.units.length) lines.push("- no units under `## Units`");
       if (plan.units.length > maxUnits) lines.push(`- ${plan.units.length} units; at most ${maxUnits}. Split the problem into sub-problems`);
       if (!plan.outer.length) lines.push("- no `## Outer test` steps");

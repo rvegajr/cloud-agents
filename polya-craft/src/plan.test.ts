@@ -450,3 +450,89 @@ test("commandOf: a command that wraps across lines, or starts with rm or a subsh
   assert.equal(commandOf("`PORT=4000 npm start & sleep 1; curl -sf localhost:4000/`"), "PORT=4000 npm start & sleep 1; curl -sf localhost:4000/");
   assert.equal(commandOf("`for f in a b; do echo $f; done`"), "for f in a b; do echo $f; done");
 });
+
+// ---------------------------------------------------------------------------
+// The requester's REQUEST.md: J/W/M items, their dispositions, and immovable paths
+// ---------------------------------------------------------------------------
+
+import { immovableOf, parseRequest, requestNote } from "./plan.js";
+
+export const REQUEST_MD = `# Request: count JSON values on stdin
+
+## Why
+wc -l lies about pretty-printed JSON.
+
+## I will judge it by
+- I pipe a 200 MB file and it finishes without loading it all into memory.
+- \`jsoncount < broken.json\` exits non-zero and prints one line on stderr.
+
+## Wrong looks like
+- An invalid line is skipped silently and the count still prints.
+
+## Must not change
+- \`test/cli.test.js\` (the CLI contract; the exit codes are fixed there)
+- \`src/schema.sql\`
+
+## Not this
+- No NDJSON.
+`;
+
+test("parseRequest: the template's placeholders are not items; a filled request yields J/W/M ids in order", () => {
+  assert.deepEqual(parseRequest(readFileSync(new URL("../templates/REQUEST.md", import.meta.url), "utf8")), []);
+  assert.deepEqual(parseRequest(readFileSync(new URL("../../ideas/TEMPLATE.md", import.meta.url), "utf8")), []);
+  const items = parseRequest(REQUEST_MD);
+  assert.deepEqual(
+    items.map((i) => [i.id, i.kind]),
+    [["J1", "judge"], ["J2", "judge"], ["W1", "wrong"], ["M1", "immovable"], ["M2", "immovable"]],
+  );
+  assert.match(items[0]!.text, /200 MB/);
+  assert.deepEqual(immovableOf(items), ["`test/cli.test.js` (the CLI contract; the exit codes are fixed there)", "`src/schema.sql`"]);
+  assert.deepEqual(parseRequest("# Idea\n\n## Must have (v1)\n- a thing\n"), []);
+  assert.equal(requestNote([]), "");
+  assert.match(requestNote(items), /## The requester's own criteria[\s\S]*\*\*J1\*\* \(will judge it by\) I pipe[\s\S]*\*\*M2\*\* \(says must not change\)/);
+});
+
+test("problemGaps: every request item needs a disposition; adopted-as must name a D; an M line must be disposed immovable", () => {
+  const items = parseRequest(REQUEST_MD);
+  const p = parseProblem(PROBLEM_MD)!;
+  const gaps = problemGaps(p, { request: items });
+  assert.equal(gaps.filter((g) => /has no disposition under `## Request`/.test(g)).length, 5, gaps.join("\n"));
+  const withRequest = parseProblem(
+    `${PROBLEM_MD}\n\n## Request\n- J1: adopted as D1\n- J2: adopted as D9\n- W1: adopted as D2\n- M1: it lives in test/\n- M2: immovable — src/schema.sql, in Given\n`,
+  )!;
+  assert.deepEqual(withRequest.request.J1, "adopted as D1");
+  const g2 = problemGaps(withRequest, { request: items });
+  assert.ok(g2.some((g) => /J2 is adopted as D9, which is not a done-check/.test(g)), g2.join("\n"));
+  assert.ok(g2.some((g) => /M1 must be disposed `immovable/.test(g)), g2.join("\n"));
+  assert.ok(!g2.some((g) => /M2/.test(g)), g2.join("\n"));
+  const clean = parseProblem(
+    `${PROBLEM_MD}\n\n## Request\n- J1: adopted as D1\n- J2: dismissed — the CLI reads whole files by design; noted in Restated\n- W1: adopted as D2\n- M1: immovable — test/cli.test.js\n- M2: immovable — src/schema.sql\n`,
+  )!;
+  assert.deepEqual(problemGaps(clean, { request: items }).filter((g) => /[JWM]\d/.test(g)), []);
+  // A disposition that is neither adopted nor dismissed is a gap.
+  const vague = parseProblem(`${PROBLEM_MD}\n\n## Request\n- J1: noted\n`)!;
+  assert.ok(problemGaps(vague, { request: items.slice(0, 1) }).some((g) => /J1's disposition is neither/.test(g)));
+});
+
+test("validateUnits: a unit whose Touches names a path the request says must not change is not workable", () => {
+  const plan = parsePlan(PLAN_MD);
+  const immovable = immovableOf(parseRequest(REQUEST_MD));
+  assert.deepEqual(validateUnits(plan.units, parseProblem(PROBLEM_MD), { immovable }), []);
+  const touching = parsePlan(PLAN_MD.replace("Touches:  src/app.js", "Touches:  src/app.js, src/schema.sql"));
+  const problems = validateUnits(touching.units, parseProblem(PROBLEM_MD), { immovable });
+  assert.equal(problems.length, 1, JSON.stringify(problems));
+  assert.match(problems[0]!.problem, /Touches: names src\/schema\.sql, which the request says must not change/);
+  // A directory named immovable covers everything under it; a sibling path is untouched.
+  const dir = validateUnits(parsePlan(PLAN_MD.replace("Touches:  src/app.js", "Touches:  config/app.json")).units, parseProblem(PROBLEM_MD), { immovable: ["the `config/` folder (ops owns it)"] });
+  assert.equal(dir.length, 1, JSON.stringify(dir));
+  assert.deepEqual(validateUnits(parsePlan(PLAN_MD.replace("Touches:  src/app.js", "Touches:  src/configure.js")).units, parseProblem(PROBLEM_MD), { immovable: ["`src/config.js`"] }), []);
+});
+
+test("templates: REQUEST.md and ACCEPT.md exist with the sections the loop and the requester rely on", () => {
+  const req = readFileSync(new URL("../templates/REQUEST.md", import.meta.url), "utf8");
+  for (const h of ["## I will judge it by", "## Wrong looks like", "## Must not change", "## The one walk-through"]) assert.ok(req.includes(h), h);
+  const acc = readFileSync(new URL("../templates/ACCEPT.md", import.meta.url), "utf8");
+  for (const h of ["## Before any unit runs", "## After look back", "## Lesson"]) assert.ok(acc.includes(h), h);
+  const idea = readFileSync(new URL("../../ideas/TEMPLATE.md", import.meta.url), "utf8");
+  for (const h of ["## I will judge it by", "## Wrong looks like", "## Must not change", "## Must have (v1)"]) assert.ok(idea.includes(h), h);
+});

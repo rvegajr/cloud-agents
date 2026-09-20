@@ -23,6 +23,8 @@ You must list every entry below in `Lessons consulted` with a disposition:
 
 {{oracle}}
 
+{{request}}
+
 ## Procedure
 
 1. Read what you were given. For a repo, read the README, the test runner,

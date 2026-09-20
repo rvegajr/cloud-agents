@@ -798,3 +798,31 @@ test("a unit that cannot pass its own Check goes back to the Solver once, and th
   assert.equal(sent.filter((s) => /# Carry out: unit U1/.test(s.prompt)).length, 4);
   assert.deepEqual(calls.gate.find((g) => g.allowed?.includes("public/index.html"))!.allowed, ["src/app.js", "public/index.html"]);
 });
+
+test("request: the understand prompt carries the requester's J/W/M lines, and a PROBLEM.md without dispositions gets the targeted retry", async () => {
+  const request = "# Request: 404\n\n## I will judge it by\n- I curl /nope and see 404.\n\n## Must not change\n- `src/config.js`\n";
+  const { io } = makeIO();
+  const { send, sent } = makeSend({});
+  const out = await runPolyaLoop(send, { ...base, problem: request, io, lessons: null });
+  assert.match(sent[0]!.prompt, /## The requester's own criteria[\s\S]*\*\*J1\*\* \(will judge it by\) I curl \/nope[\s\S]*\*\*M1\*\* \(says must not change\) `src\/config\.js`/);
+  assert.match(sent[1]!.prompt, /^## Understanding incomplete[\s\S]*J1 \(the requester's: I curl \/nope and see 404\.\) has no disposition[\s\S]*M1 \(must not change: `src\/config\.js`\) has no disposition/);
+  assert.equal(out.stopReason, "understanding-incomplete");
+  // A plain problem statement carries no such section and needs no disposition.
+  const { send: s2, sent: sent2 } = makeSend({});
+  const out2 = await runPolyaLoop(s2, { ...base, io: makeIO().io, lessons: null });
+  assert.doesNotMatch(sent2[0]!.prompt, /requester's own criteria/);
+  assert.equal(out2.stopReason, "complete");
+});
+
+test("request: with dispositions in PROBLEM.md the run proceeds, and a unit touching an immovable path is sent back at devise", async () => {
+  const request = "# Request: 404\n\n## I will judge it by\n- I curl /nope and see 404.\n\n## Must not change\n- `src/config.js` (ops owns it)\n";
+  const problem = `${PROBLEM_MD}\n\n## Request\n- J1: adopted as D1\n- M1: immovable — src/config.js, in Given\n`;
+  const { io } = makeIO({ files: { ".polya/PROBLEM.md": problem } });
+  const out = await runPolyaLoop(makeSend({}).send, { ...base, problem: request, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  const { io: io2 } = makeIO({ files: { ".polya/PROBLEM.md": problem, ".polya/PLAN.md": PLAN_MD.replace("Touches:  src/app.js", "Touches:  src/app.js, src/config.js") } });
+  const { send, sent } = makeSend({});
+  const out2 = await runPolyaLoop(send, { ...base, problem: request, io: io2, lessons: null });
+  assert.equal(out2.stopReason, "plan-not-workable");
+  assert.match(sent[2]!.prompt, /^## Plan not workable[\s\S]*U1: Touches: names src\/config\.js, which the request says must not change/);
+});

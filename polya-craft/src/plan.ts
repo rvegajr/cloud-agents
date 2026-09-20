@@ -48,6 +48,60 @@ export interface Problem {
   bar: Record<string, string>;
   /** `## Oracle`: oracle line id -> the Solver's disposition (adopted as a D, or dismissed with a reason). */
   oracle: Record<string, string>;
+  /** `## Request`: J/W/M item id from the requester's REQUEST.md -> the Solver's disposition. */
+  request: Record<string, string>;
+}
+
+/**
+ * What the requester wrote that the Solver cannot derive from features: what they will judge by (J), what
+ * failure they would notice first (W), and what may not move (M). From `templates/REQUEST.md` or the same
+ * sections in `ideas/TEMPLATE.md`. Every miss in the measured runs was a line nobody wrote here.
+ */
+export interface RequestItem {
+  id: string;
+  kind: "judge" | "wrong" | "immovable";
+  text: string;
+}
+
+const REQUEST_SECTIONS: { kind: RequestItem["kind"]; prefix: string; heading: RegExp }[] = [
+  { kind: "judge", prefix: "J", heading: /I will judge it by/i },
+  { kind: "wrong", prefix: "W", heading: /Wrong looks like/i },
+  { kind: "immovable", prefix: "M", heading: /Must not change/i },
+];
+
+/** The request's J/W/M items, in order; a `<placeholder>` bullet left from the template is not an item. */
+export function parseRequest(md: string): RequestItem[] {
+  const out: RequestItem[] = [];
+  for (const s of REQUEST_SECTIONS) {
+    const m = md.match(new RegExp(`^#{2,3}\\s*${s.heading.source}[^\\n]*\\n([\\s\\S]*?)(?=^#{1,3}\\s|(?![\\s\\S]))`, "im"));
+    if (!m) continue;
+    let n = 0;
+    for (const line of m[1]!.split("\n")) {
+      const b = line.match(/^\s*[-*]\s+(.+?)\s*$/);
+      if (!b) continue;
+      const text = b[1]!.replace(/^\*{2}(.+?)\*{2}$/, "$1").trim();
+      if (!text || /^<.*>$/.test(text)) continue;
+      out.push({ id: `${s.prefix}${++n}`, kind: s.kind, text });
+    }
+  }
+  return out;
+}
+
+export function requestNote(items: RequestItem[]): string {
+  if (!items.length) return "";
+  const label = { judge: "will judge it by", wrong: "says wrong looks like", immovable: "says must not change" } as const;
+  return (
+    `## The requester's own criteria\n\n` +
+    `These lines are the requester's, not a checklist. Each J and W line is a done-check (say which D under \`## Request\` in PROBLEM.md: \`- J1: adopted as D3\`), ` +
+    `or is dismissed with the reason (\`- W2: dismissed — …\`). Each M line goes in Given marked *(immovable)* and is disposed as \`- M1: immovable — <where it lives>\`; ` +
+    `no done-check may need it moved, and a unit that touches it is not workable. If a J or W line cannot be met without moving an M line, say so in \`notes\` and stop: that is a defect in the request, cheapest found now.\n\n` +
+    items.map((i) => `- **${i.id}** (${label[i.kind]}) ${i.text}`).join("\n")
+  );
+}
+
+/** The paths or names the request says must not change, for the plan lint. */
+export function immovableOf(items: RequestItem[]): string[] {
+  return items.filter((i) => i.kind === "immovable").map((i) => i.text);
 }
 
 /**
@@ -265,6 +319,8 @@ export function parseProblem(md: string): Problem | undefined {
   const split = splitMd.length ? splitMd : arr<{ name?: string; bound?: string; done?: string[] }>(block?.split).filter((s) => s && s.name).map((s) => ({ name: String(s.name), bound: s.bound, done: arr<string>(s.done).map(String) }));
   const oracle: Record<string, string> = {};
   for (const m of (section(md, "Oracle") ?? "").matchAll(/^\s*[-*]\s*\*{0,2}(O\d+)\*{0,2}\s*[:—–-]\s*(.+)$/gm)) oracle[m[1]!] = m[2]!.trim();
+  const request: Record<string, string> = {};
+  for (const m of (section(md, "Request") ?? "").matchAll(/^\s*[-*]\s*\*{0,2}([JWM]\d+)\*{0,2}\s*[:—–-]\s*(.+)$/gm)) request[m[1]!] = m[2]!.trim();
   const barMd = parseBarTable(section(md, "Quality bar"));
   const barBlock = block?.bar && typeof block.bar === "object" ? block.bar : block?.quality_bar && typeof block.quality_bar === "object" ? block.quality_bar : {};
   const bar = Object.keys(barMd).length ? barMd : Object.fromEntries(Object.entries(barBlock).filter(([, v]) => typeof v === "string" && v.trim() && !/^<.*>$/.test(v)));
@@ -282,11 +338,12 @@ export function parseProblem(md: string): Problem | undefined {
     split,
     bar,
     oracle,
+    request,
   };
 }
 
 /** What Understand must get right before a plan is drawn (PATTERN.md section 2.1). */
-export function problemGaps(p: Problem | undefined, opts: { maxDone?: number; software?: boolean; offeredLessons?: string[]; oracle?: boolean } = {}): string[] {
+export function problemGaps(p: Problem | undefined, opts: { maxDone?: number; software?: boolean; offeredLessons?: string[]; oracle?: boolean; request?: RequestItem[] } = {}): string[] {
   const gaps: string[] = [];
   if (!p) return ["- PROBLEM.md is missing or has no `# Problem:` title"];
   const max = opts.maxDone ?? 8;
@@ -319,6 +376,20 @@ export function problemGaps(p: Problem | undefined, opts: { maxDone?: number; so
         if (adoptedAs && !p.done.some((x) => x.id === adoptedAs)) gaps.push(`- ${o.id} is adopted as ${adoptedAs}, which is not a done-check`);
       }
     }
+  }
+  for (const r of opts.request ?? []) {
+    const d = p.request[r.id];
+    if (!d) {
+      gaps.push(r.kind === "immovable" ? `- ${r.id} (must not change: ${r.text.slice(0, 60)}) has no disposition under \`## Request\` (\`- ${r.id}: immovable — <where it lives>\`)` : `- ${r.id} (the requester's: ${r.text.slice(0, 60)}) has no disposition under \`## Request\` (adopt it as a D, or dismiss it with a reason)`);
+      continue;
+    }
+    if (r.kind === "immovable") {
+      if (!/\bimmovable\b/i.test(d)) gaps.push(`- ${r.id} must be disposed \`immovable — <where it lives>\`; the requester said it may not change`);
+      continue;
+    }
+    const adoptedAs = d.match(/adopted[^D]*(D\d+)/i)?.[1];
+    if (adoptedAs && !p.done.some((x) => x.id === adoptedAs)) gaps.push(`- ${r.id} is adopted as ${adoptedAs}, which is not a done-check`);
+    if (!adoptedAs && !/\bdismissed\b/i.test(d)) gaps.push(`- ${r.id}'s disposition is neither \`adopted as D<n>\` nor \`dismissed — <reason>\``);
   }
   return gaps;
 }
@@ -456,6 +527,16 @@ export function parsePlan(md: string): Plan {
   };
 }
 
+/** A touched path is immovable when the request's line names it: the path itself, or a directory it sits under. */
+function touchesImmovable(path: string, immovable: string): boolean {
+  const p = path.trim().replace(/^\.\//, "").replace(/\/+$/, "");
+  const names = [...immovable.matchAll(/`([^`]+)`/g)].map((m) => m[1]!).concat(immovable.match(/[\w.-]+(?:\/[\w.*-]+)+|[\w-]+\.[\w]{1,5}\b/g) ?? []);
+  return names.some((n) => {
+    const m = n.trim().replace(/^\.\//, "").replace(/\/+$/, "");
+    return m === p || p.startsWith(`${m}/`);
+  });
+}
+
 export interface UnitProblem {
   id: string;
   problem: string;
@@ -469,7 +550,7 @@ export interface UnitProblem {
 export function validateUnits(
   units: Unit[],
   problem: Problem | undefined,
-  opts: { maxTouches?: number; maxBodyLines?: number; maxDoSteps?: number; requireCommand?: boolean; exists?: (path: string) => boolean; doneIds?: string[]; knownUnitIds?: string[] } = {},
+  opts: { maxTouches?: number; maxBodyLines?: number; maxDoSteps?: number; requireCommand?: boolean; exists?: (path: string) => boolean; doneIds?: string[]; knownUnitIds?: string[]; immovable?: string[] } = {},
 ): UnitProblem[] {
   const out: UnitProblem[] = [];
   const maxTouches = opts.maxTouches ?? 6;
@@ -496,6 +577,10 @@ export function validateUnits(
     if (tests.length) push(`Touches: names test file(s) (${tests.join(", ")}); a Check lives outside Touches`);
     const docs = u.touches.filter((f) => ARTIFACT_FILE.test(f));
     if (docs.length) push(`Touches: names plan artifact(s) (${docs.join(", ")})`);
+    for (const f of u.touches) {
+      const hit = (opts.immovable ?? []).find((m) => touchesImmovable(f, m));
+      if (hit) push(`Touches: names ${f}, which the request says must not change (${hit.slice(0, 60)})`);
+    }
     if (u.touches.length > maxTouches) push(`Touches: ${u.touches.length} entries; more than ${maxTouches} is more than one sitting (split the unit)`);
     if (u.check && opts.requireCommand && !u.command) push(`Check: is prose, not a command (${JSON.stringify(u.check.slice(0, 80))}); for software the Check is a command that exits 0 when met`);
     // A hash pins bytes. That is right for a file this unit writes whole, and wrong for one that already exists:

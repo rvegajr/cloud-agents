@@ -11,14 +11,17 @@ Two or three sentences. What is annoying today; what "solved" feels like.
 - Keep to five or fewer. Everything else goes below.
 
 ## I will judge it by
-- The two to five things you will actually check when it comes back. Judgments, not features.
-- Each becomes a done-check; leave one out and the architect has to guess it.
+<!-- The two to five things you will actually check when it comes back. Judgments, not features.
+     Each becomes a done-check; leave one out and the architect has to guess it. -->
+- <judgment>
 
 ## Wrong looks like
-- The failures you would notice first. What nobody names here is what the runs have missed.
+<!-- The failures you would notice first. What nobody names here is what the runs have missed. -->
+- <a failure you would not accept>
 
 ## Must not change
-- A test, a schema, a public interface, a deadline. Everything not listed is assumed movable.
+<!-- A test, a schema, a public interface, a deadline. Everything not listed is assumed movable. -->
+- <an immovable thing, by its location>
 
 ## Nice to have (later)
 - Things the spec phase should list under Non-goals for v1.
