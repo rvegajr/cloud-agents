@@ -380,3 +380,16 @@ test("validateUnits: a Check may hash a file the unit writes whole, never one th
   const creating = validateUnits([unit], problem, { exists: (p) => p === "test/notfound.test.js" }).map((p) => p.problem);
   assert.ok(!creating.some((p) => /hashes/.test(p)), creating.join("\n"));
 });
+
+test("validateUnits: a unit that runs an installer must own the lock file it writes (live R1a, U1)", () => {
+  const u = parsePlan(PLAN_MD).units[0]!;
+  const problem = parseProblem(PROBLEM_MD);
+  const installs = { ...u, do: "1. Create `package.json`.\n2. Run `npm install` and confirm it exits 0.", touches: ["package.json"] };
+  assert.match(validateUnits([installs], problem).map((p) => p.problem).join("\n"), /runs `npm install`, which writes a lock file/);
+  // A command quoted inside a file the unit writes (a README's own instructions) is not a step that runs it.
+  const documents = { ...installs, do: "1. Create `README.md` with exactly this content:\n```md\nnpm install\nnpm start\n```\n2. Save it." };
+  assert.ok(!validateUnits([documents], problem).some((p) => /lock file/.test(p.problem)));
+  assert.ok(!validateUnits([{ ...installs, touches: ["package.json", "package-lock.json"] }], problem).some((p) => /lock file/.test(p.problem)));
+  // A unit that runs no installer is unaffected.
+  assert.ok(!validateUnits([u], problem).some((p) => /lock file/.test(p.problem)));
+});

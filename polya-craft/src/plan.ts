@@ -501,6 +501,19 @@ export function validateUnits(
         if (missing.length) push(`Check: names test file(s) not on disk: ${missing.join(", ")}; the red test is written at Devise`);
       }
     }
+    // An installer writes a lock file. A unit that runs one and does not own that file fails the ownership gate
+    // every attempt, and the orchestrator reverts what the installer wrote (R1a, U1).
+    // Only a step that runs one, not a command quoted inside a file the unit writes (a README's own instructions).
+    const doOutsideFences = u.do
+      .split("\n")
+      .filter((line, i, all) => all.slice(0, i).filter((l) => /^\s*```/.test(l)).length % 2 === 0 && !/^\s*```/.test(line))
+      .join("\n");
+    const installer = doOutsideFences.match(/\b(?:run|execute)\s+`?(npm (?:ci|install|i)|yarn(?: install)?|pnpm (?:install|i)|bundle install|pip install|cargo (?:build|fetch)|go mod (?:tidy|download))\b/i);
+    if (installer) {
+      const locks = [/package-lock\.json/, /yarn\.lock/, /pnpm-lock\.yaml/, /Gemfile\.lock/, /poetry\.lock|requirements\.txt/, /Cargo\.lock/, /go\.sum/];
+      const owns = u.touches.some((t) => locks.some((re) => re.test(t)));
+      if (!owns) push(`Do: runs \`${installer[1]}\`, which writes a lock file; Touches must name it (package-lock.json, yarn.lock, pnpm-lock.yaml, …) or the ownership gate reverts it every attempt`);
+    }
     const forbidden = u.do.match(FORBIDDEN_IN_DO);
     if (forbidden) push(`Do: contains "${forbidden[0]}"; every choice is made in the plan, not by the Hand`);
     const steps = countSteps(u.do);

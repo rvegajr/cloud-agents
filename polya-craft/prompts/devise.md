@@ -67,6 +67,9 @@ outer-test step.
   measures nothing.
 - One owner per fact. If `Given` would paste content that also lives in a
   file, name the file instead.
+- A unit whose `Do` runs an installer (`npm install`, `npm ci`, `pnpm i`,
+  `bundle install`, …) owns the lock file that installer writes: name it
+  under `Touches` beside the manifest.
 - The loop commits the Hand's work before it runs the Check, and its
   ownership gate rejects any change outside `Touches`. A Check never
   inspects `git status`, `git diff`, or the commit; it checks the files and
