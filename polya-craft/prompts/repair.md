@@ -49,7 +49,9 @@ anything yourself; write the unit.
    reason in the evidence.
 4. Do not edit existing units, `PROBLEM.md`, or any test that already
    exists. Do not touch `package.json` scripts, lint, or type config.
-5. Commit: `repair: <ids>`.
+5. Write the files and stop there: do not run `git add`, `git commit`, or
+   `git add -f`. `.polya/` is ignored by git on purpose, and the
+   orchestrator commits what belongs in the repo.
 
 ## Rules
 

@@ -59,6 +59,23 @@ export function makePolyaIO(
           }, 150);
         });
       }),
+    untrackIgnored: () => {
+      const tracked = (() => {
+        try {
+          return git(["ls-files", "-i", "-c", "--exclude-standard"]).split("\n").filter(Boolean);
+        } catch {
+          return [];
+        }
+      })();
+      for (const f of tracked) {
+        try {
+          execFileSync("git", ["rm", "-q", "--cached", "--", f], { cwd, stdio: "ignore" });
+        } catch {
+          /* already gone */
+        }
+      }
+      return tracked;
+    },
     changedFiles: (sha) => {
       try {
         return git(["diff", "--name-only", `${sha}..HEAD`]).split("\n").filter(Boolean);

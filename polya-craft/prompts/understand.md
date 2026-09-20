@@ -61,7 +61,9 @@ You must list every entry below in `Lessons consulted` with a disposition:
     End with the fenced `json problem` block using these keys and no
     others: `kind`, `size`, `done` (`id`, `text`, `check`, `outer`, `now`),
     `lessons`, `split` (a list, empty if none), `bar`. Commit:
-    `understand: PROBLEM.md`. The `.polya/` folder is the loop's record; nothing else goes in it.
+    The `.polya/` folder is the loop's record, ignored by git on purpose:
+    write the file and stop there. Do not run `git add`, `git commit`, or
+    `git add -f`; the orchestrator commits what belongs in the repo.
 11. A Check that needs the app running (a `curl` against localhost) is
     fine: the orchestrator starts the quality bar's `start` command in a
     fresh clone before running such checks and stops it after. Write the

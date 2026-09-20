@@ -57,7 +57,9 @@ outer-test step.
    the limit above appears in Trace.
 7. Write `.polya/PLAN.md` from `templates/PLAN.md`, end it with the fenced
    `json plan` block. For software, run the test command from the quality
-   bar and confirm it is red. One commit: `devise: PLAN.md`.
+   bar and confirm it is red. Write the files and stop there: do not run
+   `git add`, `git commit`, or `git add -f`. `.polya/` is ignored by git on
+   purpose, and the orchestrator commits what belongs in the repo.
 
 ## Rules
 

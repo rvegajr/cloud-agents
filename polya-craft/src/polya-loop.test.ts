@@ -71,6 +71,7 @@ function makeIO(overrides: Partial<PolyaIO> & { files?: Record<string, string>; 
     },
     diffStat: () => " 2 files changed",
     changedFiles: () => ["test/repair.red-until-fixed.test.js"],
+    untrackIgnored: () => [],
     removeFile: (rel) => {
       if (!(rel in files)) return false;
       delete files[rel];
@@ -761,5 +762,13 @@ test("the loop's record is ignored in the target repo, once", async () => {
   const { io: io2, calls: calls2 } = makeIO({ files: { ".gitignore": "node_modules/\n.polya/\n" } });
   await runPolyaLoop(makeSend({}).send, { ...base, io: io2, lessons: null });
   assert.equal(calls2.commits.filter((c) => /ignore \.polya\//.test(c)).length, 0);
+});
+
+test("look back: a record a model forced into git is untracked before the finish check", async () => {
+  const { io, calls } = makeIO();
+  io.untrackIgnored = () => [".polya/PROBLEM.md", ".polya/PLAN.md"];
+  const out = await runPolyaLoop(makeSend({}).send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  assert.ok(calls.commits.some((c) => /^polya: untrack 2 ignored file\(s\) \(\.polya\/PROBLEM\.md, \.polya\/PLAN\.md\)/.test(c)), calls.commits.join(" | "));
 });
 

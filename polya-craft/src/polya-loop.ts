@@ -33,6 +33,8 @@ export type PolyaIO = BlueprintIO & {
   removeFile?(rel: string): boolean;
   /** Paths changed between `sha` and HEAD. */
   changedFiles?(sha: string): string[];
+  /** Stop tracking files the repo's own .gitignore covers (a model may have forced them in). Returns what it untracked. */
+  untrackIgnored?(): string[];
   /**
    * Run a done-check: finished when its shell exits, whatever it left running in the background, and everything it
    * started is killed with it. `runCommand` waits for every holder of the output pipe, so a check that starts a
@@ -638,6 +640,13 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       io.writeFile(ARTIFACTS.lookback, `# Look back: ${problem.title}\n\n(in progress: an earlier pass stopped; this file is rewritten when the pass ends)\n`);
       io.commit("look back: clear the previous pass's LOOKBACK.md");
       log("cleared the previous pass's LOOKBACK.md");
+    }
+
+    // A model may have committed the record with `git add -f`; the product branch carries none of it.
+    const untracked = io.untrackIgnored?.() ?? [];
+    if (untracked.length) {
+      io.commit(`polya: untrack ${untracked.length} ignored file(s) (${untracked.slice(0, 3).join(", ")}${untracked.length > 3 ? ", …" : ""})`);
+      log(`untracked ${untracked.join(", ")}`);
     }
 
     // A unit that has not passed its gate (a repair from an earlier pass, or a resume mid-stage) runs first.
