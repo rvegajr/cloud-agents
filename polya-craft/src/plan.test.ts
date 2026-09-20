@@ -403,3 +403,16 @@ test("validateUnits: knownUnitIds lets a single revised unit depend on the rest 
   const withPlan = validateUnits([u2], problem, { doneIds: [], knownUnitIds: [u1.id, u2.id] }).map((p) => p.problem).join("\n");
   assert.ok(!/do not exist/.test(withPlan), withPlan);
 });
+
+test("validateUnits: a prose file is checked by what it says, not by its bytes (live R1b, U7)", () => {
+  const u = parsePlan(PLAN_MD).units[0]!;
+  const problem = parseProblem(PROBLEM_MD);
+  const cmd = `test "$(sha256sum README.md | awk '{print $1}')" = "62f0" && grep -qF 'npm run dev' README.md`;
+  const hashesProse = { ...u, check: `\`${cmd}\``, command: cmd, touches: ["README.md"] };
+  assert.match(validateUnits([hashesProse], problem, { exists: () => false }).map((p) => p.problem).join("\n"), /hashes README\.md, which is prose/);
+  const greps = `grep -qF 'npm run dev' README.md && grep -qF 'npm install' README.md`;
+  assert.ok(!validateUnits([{ ...hashesProse, check: `\`${greps}\``, command: greps }], problem, { exists: () => false }).some((p) => /prose/.test(p.problem)));
+  // Code the unit writes whole may still be hashed.
+  const code = `test "$(sha256sum src/app.js | awk '{print $1}')" = "49c8"`;
+  assert.ok(!validateUnits([{ ...hashesProse, check: `\`${code}\``, command: code, touches: ["src/app.js"] }], problem, { exists: () => false }).some((p) => /prose/.test(p.problem)));
+});

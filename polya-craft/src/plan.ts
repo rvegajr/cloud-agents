@@ -486,12 +486,15 @@ export function validateUnits(
     if (u.check && opts.requireCommand && !u.command) push(`Check: is prose, not a command (${JSON.stringify(u.check.slice(0, 80))}); for software the Check is a command that exits 0 when met`);
     // A hash pins bytes. That is right for a file this unit writes whole, and wrong for one that already exists:
     // it demands the Hand reproduce the plan's imagined bytes instead of working behaviour (R0, U7).
-    if (u.command && /\bsha(?:256|1|512)\b|createHash/.test(u.command) && opts.exists) {
+    if (u.command && /\b(?:sha(?:256|1|512)(?:sum)?|shasum|md5sum|createHash)\b/.test(u.command) && opts.exists) {
       const hashed = (u.command.match(/readFileSync\(['"]([^'"]+)['"]|sha256sum\s+(\S+)|shasum[^|]*\s(\S+)/g) ?? [])
         .map((m) => m.match(/['"]([^'"]+)['"]|\s(\S+)$/)?.[1] ?? m.match(/\s(\S+)$/)?.[1])
         .filter((p): p is string => Boolean(p));
       const existing = hashed.filter((p) => opts.exists!(p));
       if (existing.length) push(`Check: hashes ${existing.join(", ")}, which already exists; a hash demands the exact bytes the plan imagined, so check the behaviour instead (a test) and keep hashes for files the unit writes whole`);
+      // Prose drifts: a word wraps, a list renumbers, a trailing space goes. Check what the document says.
+      const prose = hashed.filter((p) => /\.(md|markdown|txt|rst|adoc)$/i.test(p));
+      if (prose.length) push(`Check: hashes ${prose.join(", ")}, which is prose; a Hand reproduces meaning, not bytes, so assert what the document must say (grep -qF for each command or section) instead of its sha256`);
     }
     if (u.command && /\bgit\s+(status|diff|log|show|ls-files)\b/.test(u.command)) {
       push("Check: inspects git; the loop commits the Hand's work before the Check runs and its ownership gate already enforces Touches, so check the files and the behaviour instead");

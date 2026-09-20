@@ -30,14 +30,14 @@ Tags:     kind:repair domain:software stage:understand routing http
 When:     the problem is about which paths an HTTP app answers, and the done-checks curl the paths the requester named
 Lesson:   add a done-check for malformed paths (`//`, `%2f`, a 2 KB path, a wrong method): the app must answer, never exit; a request that kills the process is the defect the requester did not name
 Evidence: polya-live-404, both loops' fixes passed every check and review; a blind reviewer sent GET // and the process died on `new URL(req.url, …)`, a line neither loop touched
-Status:   confirmed(5)
+Status:   confirmed(6)
 
 ## L-2026-09-19-02
 Tags:     kind:build stage:devise runtime:node
 When:     a build declares a minimum Node engine version and then uses a `node:` core module that stabilized (dropped its experimental CLI flag) partway through that major version's release line
 Lesson:   Pin `engines.node` to the exact version where the used core module works unflagged, not the version where the module first appeared behind a flag, and verify by actually installing that minimum version rather than trusting whatever Node happens to be on the build/CI machine.
 Evidence: package.json engines >=22.5.0 and README both cite 22.5 as sufficient for `node:sqlite`, but the flag requirement wasn't dropped until later in the 22.x/23.x line; every check in this build (including the orchestrator's own gate) ran on Node 26.7 and so never exercised the stated minimum.
-Status:   confirmed(2)
+Status:   confirmed(3)
 
 ## L-2026-09-19-03
 Tags:     kind:build stage:devise stage:carry-out check
@@ -51,14 +51,14 @@ Tags:     kind:build stage:devise
 When:     The page edits a value by formatting it into a text field and parsing it back on save, and the API accepts values that format cannot express.
 Lesson:   Give the server's validator the page's syntax rule and test that every accepted value survives the page's format-and-parse round trip, because otherwise an unchanged save rewrites the data.
 Evidence: The API stored tags ["two words","c,d","Go"]. In Chrome at look back, Edit then Save changes with no field touched stored ["two","words","c","d","Go"]. No unit test or D sent an API-made value through the edit form.
-Status:   confirmed(2)
+Status:   confirmed(3)
 
 ## L-2026-09-19-05
 Tags:     kind:build stage:devise
 When:     A Condition names page failure states (a stale response, a failed save) and the page wires them in one start() function.
 Lesson:   Test start() in Node against a fake window whose fetch the test controls, and prove the test by mutating the guard, because tests of exported helpers stay green when the wiring breaks.
 Evidence: Deleting `if (!latest.isLatest(ticket)) return;` from public/app.js, or replacing the save-error display with resetForm(), left npm test at 60 of 60 passing. Only the Verifier's walk and a CDP run at look back exercised those paths.
-Status:   confirmed(2)
+Status:   confirmed(3)
 
 ## L-2026-09-19-06
 Tags:     kind:build stage:understand
@@ -72,25 +72,39 @@ Tags:     kind:build stage:understand done-check
 When:     the request's example names the command the requester will type (`npm run dev`, a CLI invocation)
 Lesson:   put that exact command in a done-check or an outer-test step; a sibling command that shares its code path (`npm start`) does not prove it
 Evidence: snippet-vault (Fable): the idea says "I run `npm run dev`"; every D and outer step used `npm start`; `npm run dev` was first run at the review.
-Status:   confirmed(1)
+Status:   confirmed(2)
 
 ## L-2026-09-19-09
 Tags:     kind:build stage:devise storage
 When:     a plan rejects an option because its side files would not be ignored by git
 Lesson:   check the option it keeps the same way: SQLite's default journal writes `<db>-journal` beside the file, which a `*.db` ignore rule does not match
 Evidence: snippet-vault (Fable): PLAN.md rejected WAL for its -wal and -shm files; the default journal mode left snippets.db-journal unignored.
-Status:   confirmed(1)
+Status:   confirmed(2)
 
 ## L-2026-09-19-09
 Tags:     kind:build stage:carry-out
 When:     a repair unit's Check needs a new test file to reproduce a bug that has no existing test
 Lesson:   Widen a repair unit's Touches to allow one new test file when no existing test reproduces the defect; do not let an ownership/scope gate's 'out of scope' flag on that new file trigger deleting the regression test in favor of an inline, unpersisted script.
 Evidence: commit 9cb4510 dropped a devised U8 that would have deleted test/app-save-network-failure.test.js (added by U7) solely because the finish check's ownership gate did not have that path pre-listed; the file survived only because an operator intervened.
-Status:   confirmed(1)
+Status:   confirmed(2)
 
 ## L-2026-09-19-10
 Tags:     kind:build stage:devise
 When:     a Done-check names a browser-only capability (clipboard, drag-drop, etc.) that a headless verifier cannot fully exercise
 Lesson:   When a D targets a browser API the automated verifier can't observe directly (e.g. clipboard read-back under headless permissions policy), require a unit test that stubs the API on the same fake-window harness already used elsewhere, not just a manual/browser walk plus a source-code read.
 Evidence: D6 was reported 'met (verifier)' by reading public/app.js lines 71-78 and observing the rendered DOM, not by confirming navigator.clipboard.writeText was actually invoked with the right argument in an automated test — despite that exact harness pattern existing in test/app-save-network-failure.test.js.
+Status:   candidate
+
+## L-2026-09-20-01
+Tags:     kind:build stage:carry-out
+When:     a Hand writes files outside its unit's declared Touches and gets reverted
+Lesson:   If the same file set gets reverted for Touches violations twice in a row, stop retrying the same turn and instead fix the plan's file ownership (widen Touches or reassign the owning unit) before the next attempt.
+Evidence: commits 935691f and 68e1c5c both revert the identical file set (public/app.js, public/index.html, public/style.css) before U3/U5 settled; .polya/PLAN.md was similarly reverted twice (a308ddb, 9b7a1ca) before de8237b explicitly assigned package-lock.json ownership to U1.
+Status:   candidate
+
+## L-2026-09-20-02
+Tags:     kind:build stage:verify
+When:     a done-check is marked outer:false (requires browser/UI observation, not just an HTTP check)
+Lesson:   Record verifier evidence that is specific to what that check actually requires observing in a browser; never let one check's evidence text double as another's, even when both happen to pass.
+Evidence: D1's walk text ('POST ... GET ... PUT ... DELETE ... 404') is D2's CRUD-API check verbatim, not a description of live-narrowing search or a Copy-button click, even though D8/D9 in the same walk do cite distinct browser-observed detail.
 Status:   candidate

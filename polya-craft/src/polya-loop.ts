@@ -421,7 +421,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       .filter((r) => r.passed)
       .map((r) => state.units.find((x) => x.id === r.id)?.command)
       .filter((c): c is string => Boolean(c))
-      .filter((c) => !(/sha(?:256|1|512)|createHash/.test(c) && unit.touches.some((t) => c.includes(t))));
+      .filter((c) => !(/\b(?:sha(?:256|1|512)(?:sum)?|shasum|md5sum|createHash)\b/.test(c) && unit.touches.some((t) => c.includes(t))));
     return union(passed, unit.command ? [unit.command] : []);
   };
 
