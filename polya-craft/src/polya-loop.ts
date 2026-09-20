@@ -267,6 +267,16 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     return md ? parsePlan(md) : undefined;
   };
 
+  // Whatever phase this run starts in: a record a model forced into git makes every later Hand turn look like an
+  // ownership violation, because edits to a tracked file are visible to the gate.
+  {
+    const forced = io.untrackIgnored?.() ?? [];
+    if (forced.length) {
+      io.commit(`polya: untrack ${forced.length} ignored file(s) (${forced.slice(0, 3).join(", ")}${forced.length > 3 ? ", …" : ""})`);
+      log(`untracked ${forced.join(", ")}`);
+    }
+  }
+
   /** (d): always, even after a stop inside look back. Written from evidence; the reviewer never writes it. */
   let lookbackWritten = false;
   const writeLookback = async (): Promise<void> => {
@@ -660,13 +670,6 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       io.writeFile(ARTIFACTS.lookback, `# Look back: ${problem.title}\n\n(in progress: an earlier pass stopped; this file is rewritten when the pass ends)\n`);
       io.commit("look back: clear the previous pass's LOOKBACK.md");
       log("cleared the previous pass's LOOKBACK.md");
-    }
-
-    // A model may have committed the record with `git add -f`; the product branch carries none of it.
-    const untracked = io.untrackIgnored?.() ?? [];
-    if (untracked.length) {
-      io.commit(`polya: untrack ${untracked.length} ignored file(s) (${untracked.slice(0, 3).join(", ")}${untracked.length > 3 ? ", …" : ""})`);
-      log(`untracked ${untracked.join(", ")}`);
     }
 
     // A unit that has not passed its gate (a repair from an earlier pass, or a resume mid-stage) runs first.

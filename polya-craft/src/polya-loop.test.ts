@@ -764,7 +764,7 @@ test("the loop's record is ignored in the target repo, once", async () => {
   assert.equal(calls2.commits.filter((c) => /ignore \.polya\//.test(c)).length, 0);
 });
 
-test("look back: a record a model forced into git is untracked before the finish check", async () => {
+test("a record a model forced into git is untracked when the run starts", async () => {
   const { io, calls } = makeIO();
   io.untrackIgnored = () => [".polya/PROBLEM.md", ".polya/PLAN.md"];
   const out = await runPolyaLoop(makeSend({}).send, { ...base, io, lessons: null });
