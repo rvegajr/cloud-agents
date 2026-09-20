@@ -61,8 +61,8 @@ function makeIO(overrides: Partial<PolyaIO> & { files?: Record<string, string>; 
     runCommand: async (command, cwd) => {
       calls.commands.push({ command, cwd });
       if (overrides.commands && command in overrides.commands) return { code: overrides.commands[command]!, output: "scripted" };
-      // The suite is red before any unit ran; everything else exits 0.
-      if (command === "npm test" && calls.gate.length === 0) return { code: 1, output: "1 failing" };
+      // Before any unit ran, every check is red (the suite and each unit's own Check); after that everything else exits 0.
+      if (calls.gate.length === 0 && !command.startsWith("ok:")) return { code: 1, output: "1 failing" };
       if (command.startsWith("fail:")) return { code: 1, output: "" };
       if (command.includes("red-until-fixed")) return { code: 1, output: "1 failing" };
       return { code: 0, output: "ok" };
@@ -205,12 +205,20 @@ test("plan-not-workable: a unit naming a test file under Touches is sent back on
   assert.match(sent[2]!.prompt, /^## Plan not workable[\s\S]*U1: Touches: names test file/);
 });
 
-test("plan-not-workable: a suite that is already green means no Check is unmet", async () => {
-  const { io } = makeIO({ commands: { "npm test": 0 } });
-  const { send } = makeSend({});
-  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+test("plan-not-workable: a unit whose Check already passes measures nothing; a green suite is fine when every unit has its own red command", async () => {
+  const { io } = makeIO({ commands: { "node --test test/notfound.test.js": 0 } });
+  const out = await runPolyaLoop(makeSend({}).send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "plan-not-workable");
-  assert.match(out.stopDetail!, /already green/);
+  assert.match(out.stopDetail ?? "", /U1's Check already passes before the unit ran/);
+  // The suite green, both unit Checks red: the plan stands (a repair whose Checks live outside the suite).
+  const { io: io2 } = makeIO({ commands: { "npm test": 0 } });
+  const ok = await runPolyaLoop(makeSend({}).send, { ...base, io: io2, lessons: null });
+  assert.equal(ok.stopReason, "complete", ok.stopDetail);
+  // No unit has a command (prose Checks, software off): the suite must be red.
+  const prose = PLAN_MD.replace("Check:    `node --test test/notfound.test.js` — Now: unmet", "Check:    a stranger curls /nope and sees 404 — Now: unmet").replace("Check:    `grep -q \"npm start\" README.md` — Now: unmet", "Check:    a stranger reads the README — Now: unmet");
+  const { io: io3 } = makeIO({ files: { ".polya/PLAN.md": prose }, commands: { "npm test": 0 } });
+  const out3 = await runPolyaLoop(makeSend({}).send, { ...base, io: io3, lessons: null, software: true });
+  assert.equal(out3.stopReason, "plan-not-workable");
 });
 
 test("unit gate: a failing gate feeds its findings back and the second attempt passes", async () => {

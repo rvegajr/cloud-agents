@@ -205,6 +205,14 @@ export function commandOf(check: string | undefined): string | undefined {
   // Why it is red today is not the check.
   check = check.replace(/\s*(?:—|–|--|-)?\s*\b[Nn]ow:[\s\S]*$/, "");
   const isCommand = (c: string) => COMMAND_HEAD.test(c) && !LOOKS_LIKE_PATH.test(c) && /\s/.test(c) && !/<[a-z][\w-]*>/i.test(c);
+  // A fenced block is a script: its body runs as one command under `sh -c`, the language tag is not a line of it
+  // (live jsoncount-depth, 2026-09-20: "```bash\nset -e\n…" ran `bash` first, which waits on stdin).
+  const fence = check.match(/```[ \t]*(?:bash|sh|shell|zsh|console)?[ \t]*\n([\s\S]*?)```/);
+  if (fence) {
+    const body = fence[1]!.replace(/^\$ /gm, "").trim();
+    const first = body.split("\n").find((l) => l.trim() && !l.trim().startsWith("#"))?.trim() ?? "";
+    if (body && (isCommand(first) || /^set\s+-/.test(first))) return body;
+  }
   // A command in the plan wraps across lines with the block's indentation; that is layout, not part of the command.
   const segments = [...check.matchAll(/`([^`]+)`/g)].map((m) => m[1]!.replace(/\s*\n\s+/g, " ").trim().replace(/^\(\s*/, ""));
   const ticked = segments.filter(isCommand);

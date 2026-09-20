@@ -575,3 +575,13 @@ test("commandOf: a check that opens with a lower-case assignment or cd is a comm
   assert.equal(commandOf("`export N=22 && nvm exec $N npm test`"), "export N=22 && nvm exec $N npm test");
   assert.equal(commandOf("`src/app.js`"), undefined);
 });
+
+test("commandOf: a fenced script is one command, without its language tag (live jsoncount-depth, 2026-09-20)", () => {
+  const plan = parsePlan(readFileSync(new URL("./fixtures-live-plan-jc-depth.md", import.meta.url), "utf8"));
+  const u1 = plan.units[0]!;
+  assert.ok(u1.command, "U1 has a command");
+  assert.match(u1.command!, /^set -e\n/);
+  assert.doesNotMatch(u1.command!, /^bash\n/);
+  assert.equal(commandOf("```sh\n$ npm test\n```"), "npm test");
+  assert.equal(commandOf("```\nsome prose about running things\n```"), undefined);
+});
