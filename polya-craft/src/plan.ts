@@ -455,15 +455,17 @@ export interface UnitProblem {
 export function validateUnits(
   units: Unit[],
   problem: Problem | undefined,
-  opts: { maxTouches?: number; maxBodyLines?: number; maxDoSteps?: number; requireCommand?: boolean; exists?: (path: string) => boolean; doneIds?: string[] } = {},
+  opts: { maxTouches?: number; maxBodyLines?: number; maxDoSteps?: number; requireCommand?: boolean; exists?: (path: string) => boolean; doneIds?: string[]; knownUnitIds?: string[] } = {},
 ): UnitProblem[] {
   const out: UnitProblem[] = [];
   const maxTouches = opts.maxTouches ?? 6;
   // A unit that carries the exact content of the files it produces is long and still one sitting; ~400 lines is about a 12 KB packet.
-  const maxBody = opts.maxBodyLines ?? 400;
+  // A unit that carries a whole server file runs long; ~600 lines is about an 18 KB packet, which the Hand handles.
+  const maxBody = opts.maxBodyLines ?? 600;
   const maxDo = opts.maxDoSteps ?? 9;
   const doneIds = new Set(opts.doneIds ?? problem?.done.map((d) => d.id) ?? []);
-  const ids = new Set(units.map((u) => u.id));
+  // When only some units are checked (a revised unit), the rest of the plan's ids still exist.
+  const ids = new Set([...units.map((u) => u.id), ...(opts.knownUnitIds ?? [])]);
   for (const u of units) {
     const push = (problem: string) => out.push({ id: u.id, problem });
     if (!u.produces) push("no Produces:");

@@ -189,7 +189,8 @@ test("validateUnits: each mechanical row of the stranger test", () => {
   assert.match(problems({ serves: [] }), /names no D/);
   assert.match(problems({ serves: ["D9"] }), /D9/);
   assert.match(problems({ depends: ["U7"] }), /U7/);
-  assert.match(problems({ body: Array.from({ length: 450 }, () => "x").join("\n") }), /450 lines/);
+  assert.match(problems({ body: Array.from({ length: 650 }, () => "x").join("\n") }), /650 lines/);
+  assert.ok(!problems({ body: Array.from({ length: 450 }, () => "x").join("\n") }).includes("lines"));
   assert.match(problems({}, { exists: () => false }), /not on disk/);
   assert.equal(problems({ check: "a stranger reads it", command: undefined }, { requireCommand: false }), "D2 is served by no unit");
 });
@@ -392,4 +393,13 @@ test("validateUnits: a unit that runs an installer must own the lock file it wri
   assert.ok(!validateUnits([{ ...installs, touches: ["package.json", "package-lock.json"] }], problem).some((p) => /lock file/.test(p.problem)));
   // A unit that runs no installer is unaffected.
   assert.ok(!validateUnits([u], problem).some((p) => /lock file/.test(p.problem)));
+});
+
+test("validateUnits: knownUnitIds lets a single revised unit depend on the rest of the plan (live R1a, U3)", () => {
+  const [u1, u2] = parsePlan(PLAN_MD).units as [ReturnType<typeof parsePlan>["units"][0], ReturnType<typeof parsePlan>["units"][0]];
+  const problem = parseProblem(PROBLEM_MD);
+  const alone = validateUnits([u2], problem, { doneIds: [] }).map((p) => p.problem).join("\n");
+  assert.match(alone, /Depends: names unit\(s\) that do not exist: U1/);
+  const withPlan = validateUnits([u2], problem, { doneIds: [], knownUnitIds: [u1.id, u2.id] }).map((p) => p.problem).join("\n");
+  assert.ok(!/do not exist/.test(withPlan), withPlan);
 });
