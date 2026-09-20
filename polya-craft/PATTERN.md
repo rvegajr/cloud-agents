@@ -99,6 +99,14 @@ section 3).
 Three per problem, one persistent. Each has a human part and, at the end, a
 fenced `json` block a script can read. The templates are in `templates/`.
 
+Two more belong to the requester, not the Solver, and are the only two
+places a person is needed: `REQUEST.md` before Understand (what you want,
+what you will judge it by, what may not change) and `ACCEPT.md` twice, five
+minutes on the done-checks before any unit runs and once on the result
+after look back. The Solver can derive checks from features; it cannot
+derive the requester's private criterion, so that is what `REQUEST.md`
+asks for. The measured runs missed exactly what nobody wrote there.
+
 ### 2.1 `PROBLEM.md` — Understand
 
 ```markdown
