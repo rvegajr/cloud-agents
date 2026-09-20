@@ -585,8 +585,13 @@ function touchesImmovable(path: string, immovable: string): boolean {
   const p = path.trim().replace(/^\.\//, "").replace(/\/+$/, "");
   const names = [...immovable.matchAll(/`([^`]+)`/g)].map((m) => m[1]!).concat(immovable.match(/[\w.-]+(?:\/[\w.*-]+)+|[\w-]+\.[\w]{1,5}\b/g) ?? []);
   return names.some((n) => {
-    const m = n.trim().replace(/^\.\//, "").replace(/\/+$/, "");
-    return m === p || p.startsWith(`${m}/`);
+    const raw = n.trim();
+    const m = raw.replace(/^\.\//, "").replace(/\/+$/, "");
+    if (!m || /\s/.test(m)) return false;
+    if (m === p) return true;
+    // Only something written as a path (a slash, or a trailing one) covers what sits under it. A bare word in
+    // backticks (`bin`, `jsoncount`, a command or a field name) is not a directory (live jsoncount, 2026-09-20).
+    return /\//.test(raw) && p.startsWith(`${m}/`);
   });
 }
 

@@ -526,6 +526,12 @@ test("validateUnits: a unit whose Touches names a path the request says must not
   const dir = validateUnits(parsePlan(PLAN_MD.replace("Touches:  src/app.js", "Touches:  config/app.json")).units, parseProblem(PROBLEM_MD), { immovable: ["the `config/` folder (ops owns it)"] });
   assert.equal(dir.length, 1, JSON.stringify(dir));
   assert.deepEqual(validateUnits(parsePlan(PLAN_MD.replace("Touches:  src/app.js", "Touches:  src/configure.js")).units, parseProblem(PROBLEM_MD), { immovable: ["`src/config.js`"] }), []);
+  // A bare word in backticks is a name, not a directory (live jsoncount: "as the package `bin`" must not cover bin/cli.js);
+  // written as a path, `bin/` does.
+  const binUnit = parsePlan(PLAN_MD.replace("Touches:  src/app.js", "Touches:  bin/jsoncount.js, package.json")).units;
+  assert.deepEqual(validateUnits(binUnit, parseProblem(PROBLEM_MD), { immovable: ["The command is `jsoncount`, as the package `bin` and the `npm run` script name"] }), []);
+  assert.equal(validateUnits(binUnit, parseProblem(PROBLEM_MD), { immovable: ["`bin/` is generated"] }).length, 1);
+  assert.equal(validateUnits(binUnit, parseProblem(PROBLEM_MD), { immovable: ["`package.json`"] }).length, 1);
 });
 
 test("templates: REQUEST.md and ACCEPT.md exist with the sections the loop and the requester rely on", () => {
