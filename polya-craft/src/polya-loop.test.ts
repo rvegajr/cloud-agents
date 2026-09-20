@@ -837,3 +837,21 @@ test("request: a J line dismissed as conflicting with an M line stops at underst
   assert.match(out.stopDetail ?? "", /the request conflicts with itself: J1 \(The suite pins[^)]*\) — dismissed — conflicts with M1/);
   assert.deepEqual(sent.map((s) => s.kind), ["understand"]);
 });
+
+test("repair: a unit an earlier pass rejected and left in PLAN.md does not make the Solver's rewrite of it 'no new unit'", async () => {
+  const repairU3 = (title: string) => `${PLAN_MD}\n\n## Repairs\n\n## U3: ${title}\nServes:   D1\nProduces: x\nGiven:    y\nDo:       1. Fix src/app.js.\nTouches:  src/app.js\nCheck:    \`node --test test/repair.red-until-fixed.test.js\`\nDepends:  none\nNot:      z\n`;
+  const { io, calls } = makeIO({ preload: true, files: { ".polya/PLAN.md": repairU3("rejected last pass") }, gates: [fail("quality-bar"), pass, pass] });
+  const { send, sent } = makeSend({
+    devise: (p) => {
+      assert.match(p, /numbered from U4/);
+      currentIO!.writeFile(".polya/PLAN.md", repairU3("the same repair, rewritten"));
+      currentIO!.writeFile("test/repair.red-until-fixed.test.js", "test('red until fixed', ...)");
+      return json({ written: [".polya/PLAN.md"], units: ["U3"], check_wrong: false });
+    },
+  });
+  const resumed: PolyaState = { ...initialPolyaState(), phase: "look-back", units: parsePlan(PLAN_MD).units, unitIndex: 2, unitRecords: [{ id: "U1", attempts: 1, passed: true }, { id: "U2", attempts: 1, passed: true }], baselineSha: "sha0" };
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null }, resumed);
+  assert.equal(out.stopReason, "complete", out.stopDetail);
+  assert.ok(sent.some((s) => /# Carry out: unit U3/.test(s.prompt) && /rewritten/.test(s.prompt)));
+  assert.equal(calls.gate.filter((g) => g.kind === "finish").length, 2);
+});

@@ -435,8 +435,11 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
   const repair = async (stage: "finish" | "verify" | "review" | "unit", evidence: string, revise?: Unit): Promise<{ reason: PolyaStopReason; detail: string } | undefined> => {
     const stopFor: PolyaStopReason = stage === "finish" ? "finish-check-failed" : stage === "verify" ? "verify-failed" : stage === "unit" ? "unit-gate-failed" : "review-unresolved";
     const problem = readProblem();
+    // Ids the Solver must not reuse: everything in PLAN.md, including a repair an earlier pass rejected and left there.
     const before = readPlan()?.units.map((u) => u.id) ?? [];
     const nextId = `U${before.reduce((n, id) => Math.max(n, Number(id.match(/\d+/)?.[0] ?? 0)), 0) + 1}`;
+    // What counts as new: a unit the loop never accepted. A rejected repair's id rewritten by the Solver is new
+    // (live jsoncount, 2026-09-20: a U4 the old recognizer had rejected made the next pass's U4 "no new unit").
     const prompt = buildPrompt(`${PROMPTS}/repair`, "", {
       stage: stage === "finish" ? "the finish check" : stage === "verify" ? "done-checks from a fresh clone" : stage === "unit" ? `unit ${revise?.id}'s own Check` : "the review",
       evidence,
@@ -455,7 +458,8 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     io.commit("repair: PLAN.md");
     const report = lenientJson<{ check_wrong?: boolean; notes?: string }>(t.result);
     if (report?.check_wrong) return { reason: stopFor, detail: `the Solver says the check is wrong, not the product: ${report.notes ?? ""}`.trim() };
-    const fresh = () => (readPlan()?.units ?? []).filter((u) => !before.includes(u.id) || (revise && u.id === revise.id));
+    const accepted = state.units.map((u) => u.id);
+    const fresh = () => (readPlan()?.units ?? []).filter((u) => !accepted.includes(u.id) || (revise && u.id === revise.id));
     const gapsOf = (): string[] => {
       const units = fresh();
       if (!units.length) return ["- no new unit under `## Repairs`"];
