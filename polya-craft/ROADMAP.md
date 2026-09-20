@@ -328,6 +328,15 @@ prose, the machine ran what the local Verifier had narrated and both failed.
 A prose done-check attested by a walk is a report; the roadmap's item one,
 page checks as tests, is the same lesson from the other side.
 
+**The self-conflict guard, measured** (`examples/request-node-floor-conflict.md`,
+the D5 finding of R2 written as a requester would write it, on the R2 fixture's
+branch): the Solver disposed J1 as `dismissed — conflicts with M1` on its first
+turn, with a second reason no one had seen (Node 18.0.0's CLI has no `--test`,
+so the pinned test script cannot pass there whatever the database does), and
+the loop stopped at Understand: `the request conflicts with itself`. Claude
+Max API-eq $1.42. The same conflict cost $10.21 and a full run to surface in
+the morning, before the request had a place to say what may not move.
+
 Not scored blind: the blind rubric is for web apps, and the point of this
 run was the request, not the product. The product's own numbers are the
 table. Follow-up: the medium finding (a depth limit) is a one-unit repair
