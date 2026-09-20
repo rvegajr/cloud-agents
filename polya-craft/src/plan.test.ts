@@ -430,3 +430,16 @@ test("contractOf: a command that serves or watches is the start probe, never a g
   // A bar of nothing but long-running commands yields no contract rather than an empty bar.
   assert.equal(contractOf({ ...p, bar: { dev: "npm run dev" } }), undefined);
 });
+
+test("commandOf: a fragment inside a sentence is an observation (live R1b, D7)", () => {
+  assert.equal(commandOf("`curl -X POST` with a missing `title` returns a 4xx status with a JSON error body, and the snippet count from `GET /api/snippets` is unchanged before and after"), undefined);
+  assert.equal(commandOf("`npm test` exits 0 with 1 pass, 0 fail"), "npm test");
+});
+
+test("problemGaps: a done-check may not run a server in the foreground (live R1b, D5)", () => {
+  const p = parseProblem(PROBLEM_MD)!;
+  const serving = { ...p, done: [{ ...p.done[0]!, id: "D5", check: "`npm install && npm run dev`", command: "npm install && npm run dev" }] };
+  assert.match(problemGaps(serving).join("\n"), /D5's Check runs a server in the foreground/);
+  const backgrounded = { ...serving, done: [{ ...serving.done[0]!, command: "npm run dev & sleep 2; curl -sf localhost:3000/" }] };
+  assert.ok(!problemGaps(backgrounded).some((g) => /foreground/.test(g)));
+});

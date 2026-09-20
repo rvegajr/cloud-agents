@@ -157,7 +157,11 @@ export function commandOf(check: string | undefined): string | undefined {
   // server, …") is an observation: the Verifier's.
   const residue = check.replace(/`[^`]+`/g, " ");
   const someoneActs = /\b(stranger|person|someone|reader|user|opens?|opening|clicks?|clicking|types?|typing|pastes?|performs?|follows?|walks?|confirms?|creates?|stops?|restarts?|sees?|observes?)\b/i.test(residue);
-  if (ticked.length === 1) return someoneActs ? undefined : ticked[0];
+  // What follows the command tells you which it is. "with a missing title …" says how to invoke it, so the quoted
+  // part is a fragment of a procedure (the Verifier's). "exits 0 with 1 pass" reports its result, so it is a command.
+  const firstWord = residue.trim().replace(/^[^A-Za-z]+/, "").split(/[^A-Za-z]/)[0]?.toLowerCase() ?? "";
+  const modifiesInvocation = ["with", "for", "on", "against", "using", "from", "to", "into", "plus", "where", "whose"].includes(firstWord);
+  if (ticked.length === 1) return someoneActs || modifiesInvocation ? undefined : ticked[0];
   if (ticked.length > 1) {
     // Several backticked commands are one check only when nothing but connectors sits between them
     // ("`a` and `b`"). Commands mentioned inside a sentence ("run `npm ci`, then `npm start` and open …")
@@ -295,6 +299,14 @@ export function problemGaps(p: Problem | undefined, opts: { maxDone?: number; so
     if (lost.length) gaps.push(`- Split carries no row for ${lost.join(", ")}; every D belongs to at least one sub-problem`);
   }
   if (opts.software && !p.bar.test) gaps.push("- `## Quality bar` names no `test` command; discover it from the repo (package.json scripts, Makefile, pyproject)");
+  // A check that runs a server in the foreground never returns; the loop kills it at the timeout and calls it failed.
+  for (const d of p.done) {
+    if (!d.command) continue;
+    const serves = /\bnpm (?:run )?(?:dev|start)\b|\bnode\s+[\w./-]*server[\w./-]*\.js\b|\bvite\b|\bnext dev\b/.test(d.command);
+    // `a && b` is not backgrounding; `a & sleep 2; b` is.
+    const backgrounded = /(^|[^&])&(?!&)|\btimeout\s|\bnohup\b/.test(d.command);
+    if (serves && !backgrounded) gaps.push(`- ${d.id}'s Check runs a server in the foreground (\`${d.command.slice(0, 60)}…\`), which never exits; background it (\`… & sleep 2; curl …\`) or make it an observation a stranger walks`);
+  }
   for (const id of opts.offeredLessons ?? []) if (!p.lessons.some((l) => l.id === id)) gaps.push(`- ${id} was offered and has no disposition under \`## Lessons consulted\``);
   if (opts.oracle) {
     for (const o of ORACLE) {
