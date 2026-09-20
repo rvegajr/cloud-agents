@@ -47,9 +47,11 @@ function makeIO(overrides: Partial<PolyaIO> & { files?: Record<string, string>; 
       calls.writes.push(rel);
     },
     listTests: () => [],
-    headSha: () => `sha${++sha}`,
+    // HEAD moves only when something is committed, as in git; a turn that commits nothing leaves it where it was.
+    headSha: () => `sha${sha}`,
     commit: (m) => {
       calls.commits.push(m);
+      sha++;
       return true;
     },
     gate: async (kind, ctx) => {
@@ -499,7 +501,7 @@ test("ownership failure: the orchestrator reverts what the Hand wrote outside To
   const { send, sent } = makeSend({});
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "complete");
-  assert.deepEqual(reverts, [{ base: "sha2", allowed: ["src/app.js"] }]);
+  assert.deepEqual(reverts, [{ base: "sha3", allowed: ["src/app.js"] }]);
   assert.match(sent[3]!.prompt, /^## Files outside Touches were reverted\n\nThe orchestrator put src\/main\.ts back/);
   assert.match(sent[3]!.prompt, /## Quality gate failed \(attempt 1\)/);
   assert.equal(out.unitRecords[0]!.attempts, 2);
@@ -527,7 +529,7 @@ test("a Hand turn that rewrote history is discarded and retried; the gate never 
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "complete");
   assert.equal(out.unitRecords.find((r) => r.id === "U1")!.attempts, 2);
-  assert.deepEqual(resets, ["sha2"]);
+  assert.deepEqual(resets, ["sha3"]);
   assert.match(sent[3]!.prompt, /rewrote git history/);
   // Only one task gate ran for U1: the discarded turn was never judged.
   assert.equal(calls.gate.filter((g) => g.kind === "task" && g.allowed?.includes("src/app.js")).length, 1);
@@ -854,4 +856,46 @@ test("repair: a unit an earlier pass rejected and left in PLAN.md does not make 
   assert.equal(out.stopReason, "complete", out.stopDetail);
   assert.ok(sent.some((s) => /# Carry out: unit U3/.test(s.prompt) && /rewritten/.test(s.prompt)));
   assert.equal(calls.gate.filter((g) => g.kind === "finish").length, 2);
+});
+
+test("look back (c): what a review turn leaves in the repo is discarded; a repair turn that says the check is wrong leaves nothing behind", async () => {
+  const { io, calls, files } = makeIO();
+  const resets: string[] = [];
+  io.resetTo = (sha) => resets.push(sha);
+  let beforeReview = "";
+  const { send } = makeSend({
+    "look-back": () => {
+      // The reviewer's shell redirections wrote scratch files and the engine committed them, as a real turn does.
+      beforeReview = io.headSha();
+      currentIO!.writeFile("o1.txt", "scratch");
+      currentIO!.commit("hybrid: look-back turn");
+      return json({ verdict: "done", answers_problem: true, another_check: "x", findings: [], worked: [], did_not: [], confirmed: [], lessons: [] });
+    },
+  });
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  assert.deepEqual(resets, [beforeReview]);
+  void files;
+  // A repair turn whose verdict is "the check is wrong" is reset to where it started.
+  const { io: io2, calls: calls2 } = makeIO({ gates: [pass, pass, fail("quality-bar")] });
+  const resets2: string[] = [];
+  io2.resetTo = (sha) => resets2.push(sha);
+  let beforeRepair = "";
+  const { send: s2 } = makeSend({
+    devise: (p) => {
+      if (/^# Devise a repair/m.test(p)) {
+        beforeRepair = io2.headSha();
+        currentIO!.writeFile("err.txt", "scratch");
+        currentIO!.commit("hybrid: devise turn");
+        return json({ written: [], units: [], check_wrong: true, notes: "the check runs from the wrong directory" });
+      }
+      currentIO!.writeFile(".polya/PLAN.md", seed.plan);
+      return json({ written: [".polya/PLAN.md"], units: ["U1", "U2"] });
+    },
+  });
+  const out2 = await runPolyaLoop(s2, { ...base, io: io2, lessons: null });
+  assert.equal(out2.stopReason, "finish-check-failed");
+  assert.match(out2.stopDetail ?? "", /the check is wrong/);
+  assert.deepEqual(resets2, [beforeRepair]);
+  void calls; void calls2;
 });

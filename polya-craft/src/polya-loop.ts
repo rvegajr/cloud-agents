@@ -457,7 +457,12 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     if (t.status !== "finished") return { reason: "run-failed", detail: "repair turn did not finish" };
     io.commit("repair: PLAN.md");
     const report = lenientJson<{ check_wrong?: boolean; notes?: string }>(t.result);
-    if (report?.check_wrong) return { reason: stopFor, detail: `the Solver says the check is wrong, not the product: ${report.notes ?? ""}`.trim() };
+    if (report?.check_wrong) {
+      // Nothing of this turn belongs in the repo: PLAN.md lives under the ignored .polya/, and what the Solver ran to
+      // reach its verdict is scratch. Left committed, it fails ownership at the next finish check.
+      if (io.headSha() !== beforeSha && io.resetTo) io.resetTo(beforeSha);
+      return { reason: stopFor, detail: `the Solver says the check is wrong, not the product: ${report.notes ?? ""}`.trim() };
+    }
     const accepted = state.units.map((u) => u.id);
     const fresh = () => (readPlan()?.units ?? []).filter((u) => !accepted.includes(u.id) || (revise && u.id === revise.id));
     const gapsOf = (): string[] => {
@@ -829,6 +834,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     // (c) the review: fresh session, read-only, Pólya's questions, lessons.
     log("look back (c): review (fresh session, read-only)");
     const base = state.baselineSha ?? "HEAD~1";
+    const beforeReview = io.headSha();
     const t = await send(
       buildPrompt(`${PROMPTS}/look-back`, "", {
         problem: artifact(ARTIFACTS.problem) ?? "",
@@ -842,6 +848,13 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       { mode: "agent", fresh: true },
     );
     track(t);
+    // A review is read-only by contract, but a shell redirection (`> out.txt`) still writes, and the engine commits
+    // whatever a turn leaves. Those files are nobody's; the finish check would fail ownership on them next pass
+    // (live jsoncount, 2026-09-20: six scratch files). The review's report is in `t`; the repo goes back as it was.
+    if (io.headSha() !== beforeReview && io.resetTo) {
+      io.resetTo(beforeReview);
+      log("the review turn left changes in the repo; discarded (a review is read-only)");
+    }
     if (t.status !== "finished") return stop("run-failed", "review turn did not finish");
     const review = lenientJson<LookBackReport>(t.result);
     if (!review || !Array.isArray(review.findings) || !review.verdict) return stop("unparseable-report", "the review returned no findings block");
