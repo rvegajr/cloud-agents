@@ -73,6 +73,17 @@ Then resuming that same run after a reboot (2026-09-20, `polya-live-sv-r2`, "R2"
 
 With that fixed, D5 stopped failing on `command not found` and started failing on something real: this fixture's `test/bootstrap.test.js` pins `engines.node` to `>=18.0.0`, a pre-existing assertion no repair unit may edit, and `better-sqlite3@^12.8.0` has no prebuilt binary for Node 18.0.0 and cannot be built from source on this machine, because the Python here has no `distutils`, which the Node-18-era `node-gyp` needs. That tension was already visible in this same plan's U5–U7 repair history before the reboot. It is a genuine conflict in the fixture's own contract, not an orchestrator defect, and not one any of the three fixes above could touch. Accepted as the run's final state: finish check PASS, 9/10 done-checks met, D5 open for that reason.
 
+Then the first build from a `REQUEST.md` (2026-09-20, `polya-live-json-count`, R3 below), six more, five in the orchestrator and one in the machine:
+
+- **The quality bar table read one column order.** The Solver wrote `| Command | Purpose |` with sentence purposes, and the json block's `bar` as `[{command, purpose}]` rows; the parser wanted a bare purpose word first and an object, found no `test`, and stopped a run whose eight request lines it had just disposed correctly. Answer: either order, a purpose read from its label or implied by a well-known command, rows or an object. The artifact is the fixture. Cost: one resume.
+- **A bare word in a Must-not-change line was a directory.** New code, new defect: "as the package `bin`" made `bin/jsoncount.js` unworkable, and the Solver's rename to `bin/cli.js` too. Answer: a bare backticked word matches a path exactly, never as a prefix; only something written as a path covers what sits under it. Cost: one Devise retry ($1.03) and one resume.
+- **A check opening with `d=$(mktemp -d) && …` was prose.** The head list allowed upper-case assignments and had no `cd`. The review repair was rejected twice for it; then, once fixed, two done-checks the Verifier had walked and reported met (D3, D7) ran as commands and failed. Answer: lower-case assignments, `cd`, and the coreutils are heads. Cost: two Solver repair turns ($1.37) and one resume. The reading matters more than the cost: **a check a machine runs is evidence, a walk is a report**, and this run measured the difference on two checks.
+- **A rejected repair's id blocked its rewrite.** The rejected U4 stayed in `PLAN.md`; the next pass's Solver rewrote U4 for the same evidence and the loop said "no new unit". Answer: new means never accepted by the loop, not absent from the file. Cost: one Solver retry ($0.62).
+- **A review turn's scratch files were committed.** The reviewer's shell redirections left six files in the repo root, the engine committed them as the look-back turn, and the next finish check failed ownership on files nobody owned; the Solver then wrote a seven-file unit to delete them. Answer: the repo goes back to where it was before a review turn, and before a repair turn whose verdict is that the check is wrong. Cost: one Solver turn ($1.19), stopped by hand, and one orchestrator commit.
+- **Docker here is Colima, which shares only the home directory.** D7 mounts the fresh clone into `node:<engines.node>-slim` to test the declared floor; the clone lived under the system temp root and the container saw an empty folder. Not a code defect: `WORK_ROOT=$HOME/.cache/cloud-agents-work` puts the loop's clones where the container can see them, and the check passed on the next pass. Written down here because it will bite the next Docker-based check too.
+
+What the request did, for the record: every one of its seven J and W lines became a done-check on the Solver's first turn, no retry; its one M line went into Given as immovable; the two checks a stranger later found wanting (D3's working directory, the recursion depth) were the two things the requester had not written, and the reviewer found both. D3's resolution was the requester's, made in `ACCEPT.md` against the walk-through they had written: the check runs from the clone after install, not from an unrelated directory through a global `npm link`.
+
 What the models did right, for the record: the Understand turn found the defect's exact branch, wrote the reproduction as D1, named three invariants, and discovered the quality bar from package.json without inventing a lint command. The Devise turn wrote a red regression test with a bonus trailing-slash case, a unit whose Do quotes the exact lines to replace, and answered the first plan-lint gap (no Given) in one retry. The Hand, qwen3-coder-next, made the two-line fix on its first attempt with no question. The reviewer checked the result a second way, curling a server it started itself, and found nothing.
 
 Then the orchestrator defects `../architect-crew-gate/ROADMAP.md`
@@ -288,6 +299,39 @@ drift, the `dev`-in-the-bar timeout, and two checks the parser misread.
 Every one is now a rule with a test (303 → 307 tests). The models
 themselves: 12 units across both runs, 10 passing first attempt, and two
 Solver re-plans that fixed real plan defects.
+
+## R3: the requester's own lines
+
+2026-09-20. `templates/REQUEST.md` filled in for a CLI with no web page
+(`examples/request-json-count.md`), Sonnet default with the oracle, hybrid,
+`rvegajr/polya-live-json-count#1`. The request says four things the
+feature-only idea file (`ideas/ready/farm-json-lines.md`) never said: empty
+stdin is an error, stderr is exactly one line, nested values count, 50 MB
+finishes in seconds. The question was whether they reach the done-checks and
+whether a stranger can then run them.
+
+| what | result |
+| --- | --- |
+| request lines disposed on the first Understand turn | 8/8 (J1–J4 → D2, D3, D4, D1; W1–W3 → D3, D1, D5; M1 immovable in Given), no retry |
+| units | 3 planned + 1 repair, every one gate-green on the first attempt, zero Hand questions |
+| finish check | PASS (install first, then the bar) |
+| done-checks from a fresh clone | 8/8, six by command including the Docker floor check, two walked |
+| review | done, one medium finding (recursion depth, a case nobody wrote) |
+| Solver cost | Claude Max API-eq $11.29; Ollama $0 |
+| resumes | 6, every one for an orchestrator defect listed above, none for a model |
+
+Two readings. First, the request template works as designed: the Solver
+derives checks from features on its own, and what it cannot derive, the
+requester wrote in ten minutes and it became the spec. Second, the same run
+falsified two "met" verdicts: once D3 and D7 parsed as commands instead of
+prose, the machine ran what the local Verifier had narrated and both failed.
+A prose done-check attested by a walk is a report; the roadmap's item one,
+page checks as tests, is the same lesson from the other side.
+
+Not scored blind: the blind rubric is for web apps, and the point of this
+run was the request, not the product. The product's own numbers are the
+table. Follow-up: the medium finding (a depth limit) is a one-unit repair
+the requester deferred in `ACCEPT.md`.
 
 ## Order of work
 
