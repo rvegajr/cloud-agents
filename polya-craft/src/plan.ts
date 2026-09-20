@@ -162,7 +162,7 @@ export interface Plan {
 const TEST_FILE = /(^|\/)(test|tests|__tests__|spec)\/|\.(test|spec)\.[jt]sx?$|(^|\/)test_[^/]+\.py$|_test\.(py|go)$|Tests\.cs$/;
 const ARTIFACT_FILE = /^(\.polya\/.*|(PROBLEM|PLAN|LOOKBACK|ONE-PAGE|LESSONS)\.md)$/;
 const COMMAND_HEAD =
-  /^(npm|npx|pnpm|yarn|node|deno|bun|curl|wget|sh|bash|zsh|git|python3?|pytest|pip|go|cargo|make|mvn|gradle|dotnet|ruby|bundle|\[|ls|cat|grep|diff|cmp|wc|jq|docker|kubectl|railway|gh|rm|mkdir|cp|mv|touch|kill|sleep|printf|echo|env|shasum|sha256sum|for|while|if)\b|^test\s+\S|^[A-Z_]+=\S/;
+  /^(npm|npx|pnpm|yarn|node|deno|bun|curl|wget|sh|bash|zsh|git|python3?|pytest|pip|go|cargo|make|mvn|gradle|dotnet|ruby|bundle|\[|ls|cat|grep|diff|cmp|wc|jq|docker|kubectl|railway|gh|rm|mkdir|cp|mv|touch|kill|sleep|printf|echo|env|shasum|sha256sum|for|while|if|cd|set|export|trap|true|false|exit|xargs|find|sort|head|tail|tee|tr|cut|awk|sed|seq)\b|^test\s+\S|^[A-Za-z_][A-Za-z0-9_]*=\S/;
 /** A backticked path or glob (`test/*.test.js`, `src/app.js`) is a name, not a command. */
 const LOOKS_LIKE_PATH = /^[\w.@-]*[\/*][\w.*\/@-]*$/;
 const FORBIDDEN_IN_DO = /\b(choose|decide|appropriate|as needed|best|etc\.?|or similar|something like|if you (?:think|want|prefer)|use your judg?e?ment)\b/i;

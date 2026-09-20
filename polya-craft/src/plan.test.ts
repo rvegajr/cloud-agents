@@ -567,3 +567,11 @@ test("live jsoncount (2026-09-20): a bar table with the columns swapped and pros
   assert.equal(barPurposeOf("run the automated suite", "node --test test/"), "test");
   assert.equal(barPurposeOf("a note", "make coffee"), undefined);
 });
+
+test("commandOf: a check that opens with a lower-case assignment or cd is a command (live jsoncount repair, U4)", () => {
+  const live = "`d=$(mktemp -d) && (cd \"$d\" && printf '{\"a\":' > broken.json && npx jsoncount broken.json; test $? -ne 0)` — Now: unmet";
+  assert.match(commandOf(live) ?? "", /^d=\$\(mktemp -d\) && \(cd/);
+  assert.equal(commandOf("`cd /tmp && npm test`"), "cd /tmp && npm test");
+  assert.equal(commandOf("`export N=22 && nvm exec $N npm test`"), "export N=22 && nvm exec $N npm test");
+  assert.equal(commandOf("`src/app.js`"), undefined);
+});
