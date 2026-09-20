@@ -642,6 +642,13 @@ export function validateUnits(
     }
     if (u.touches.length > maxTouches) push(`Touches: ${u.touches.length} entries; more than ${maxTouches} is more than one sitting (split the unit)`);
     if (u.check && opts.requireCommand && !u.command) push(`Check: is prose, not a command (${JSON.stringify(u.check.slice(0, 80))}); for software the Check is a command that exits 0 when met`);
+    // A Playwright check needs the toolchain: the repo has the config, or a unit in this plan provides it (the scaffold).
+    if (u.command && /\bplaywright\s+test\b/.test(u.command) && opts.exists) {
+      const configured = ["playwright.config.js", "playwright.config.ts", "playwright.config.mjs", "playwright.config.cjs"];
+      const inRepo = configured.some((f) => opts.exists!(f));
+      const inPlan = units.some((s) => s.touches.some((t) => /(^|\/)playwright\.config\.[cm]?[jt]s$/.test(t)));
+      if (!inRepo && !inPlan) push("Check: runs `playwright test` but neither the repo nor any unit provides playwright.config.*; add the scaffold unit (@playwright/test, the config with webServer, `npx playwright install chromium`) before the page units");
+    }
     // A hash pins bytes. That is right for a file this unit writes whole, and wrong for one that already exists:
     // it demands the Hand reproduce the plan's imagined bytes instead of working behaviour (R0, U7).
     if (u.command && /\b(?:sha(?:256|1|512)(?:sum)?|shasum|md5sum|createHash)\b/.test(u.command) && opts.exists) {
