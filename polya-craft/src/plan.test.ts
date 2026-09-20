@@ -416,3 +416,17 @@ test("validateUnits: a prose file is checked by what it says, not by its bytes (
   const code = `test "$(sha256sum src/app.js | awk '{print $1}')" = "49c8"`;
   assert.ok(!validateUnits([{ ...hashesProse, check: `\`${code}\``, command: code, touches: ["src/app.js"] }], problem, { exists: () => false }).some((p) => /prose/.test(p.problem)));
 });
+
+test("contractOf: a command that serves or watches is the start probe, never a graded command (live R1b)", () => {
+  const p = parseProblem(PROBLEM_MD)!;
+  const withDev = { ...p, bar: { install: "npm ci", test: "npm test", dev: "node --watch server.js", lint: "npm run lint" } };
+  const c = contractOf(withDev)!;
+  assert.deepEqual(Object.keys(c.bar).sort(), ["install", "lint", "test"]);
+  assert.deepEqual(c.start, { command: "node --watch server.js" });
+  // A graded name whose command watches is caught too.
+  const sneaky = contractOf({ ...p, bar: { test: "npm test", verify: "vite --watch" } })!;
+  assert.deepEqual(Object.keys(sneaky.bar), ["test"]);
+  assert.deepEqual(sneaky.start, { command: "vite --watch" });
+  // A bar of nothing but long-running commands yields no contract rather than an empty bar.
+  assert.equal(contractOf({ ...p, bar: { dev: "npm run dev" } }), undefined);
+});

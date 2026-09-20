@@ -558,12 +558,23 @@ export function validateUnits(
 // ---------------------------------------------------------------------------
 
 /** What the borrowed gate needs from PROBLEM.md: the bar. Without it the gate runs the whole suite per unit. */
+/** A command that serves, watches or previews never exits; it is the start probe, not a command that must exit 0. */
+export const LONG_RUNNING_BAR = /^(start|dev|serve|server|watch|preview)$/i;
+
 export function contractOf(p: Problem | undefined): QualityContract | undefined {
   if (!p || !Object.keys(p.bar).length) return undefined;
-  const bar = { ...p.bar };
-  const start = bar.start ? { command: bar.start } : undefined;
-  delete bar.start;
-  return { bar, start, hygieneNeverTracked: DEFAULT_HYGIENE, rubricTargets: {} };
+  const bar: Record<string, string> = {};
+  let start: string | undefined;
+  for (const [name, command] of Object.entries(p.bar)) {
+    // R1b: `dev` in the bar made the finish check run a dev server to its timeout and grade exit 124 as a failure.
+    if (LONG_RUNNING_BAR.test(name) || /\b(--watch|nodemon|vite|next dev|webpack serve)\b/.test(command)) {
+      start ??= command;
+      continue;
+    }
+    bar[name] = command;
+  }
+  if (!Object.keys(bar).length) return undefined;
+  return { bar, start: start ? { command: start } : undefined, hygieneNeverTracked: DEFAULT_HYGIENE, rubricTargets: {} };
 }
 
 const FENCE = "```";
