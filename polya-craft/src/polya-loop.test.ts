@@ -826,3 +826,14 @@ test("request: with dispositions in PROBLEM.md the run proceeds, and a unit touc
   assert.equal(out2.stopReason, "plan-not-workable");
   assert.match(sent[2]!.prompt, /^## Plan not workable[\s\S]*U1: Touches: names src\/config\.js, which the request says must not change/);
 });
+
+test("request: a J line dismissed as conflicting with an M line stops at understand, before any unit runs", async () => {
+  const request = "# Request: 404\n\n## I will judge it by\n- The suite pins engines.node to 18 and the app installs there.\n\n## Must not change\n- `test/bootstrap.test.js`\n";
+  const problem = `${PROBLEM_MD}\n\n## Request\n- J1: dismissed — conflicts with M1: the pinned engines line is asserted by the immovable test\n- M1: immovable — test/bootstrap.test.js\n`;
+  const { io } = makeIO({ files: { ".polya/PROBLEM.md": problem } });
+  const { send, sent } = makeSend({});
+  const out = await runPolyaLoop(send, { ...base, problem: request, io, lessons: null });
+  assert.equal(out.stopReason, "understanding-incomplete");
+  assert.match(out.stopDetail ?? "", /the request conflicts with itself: J1 \(The suite pins[^)]*\) — dismissed — conflicts with M1/);
+  assert.deepEqual(sent.map((s) => s.kind), ["understand"]);
+});

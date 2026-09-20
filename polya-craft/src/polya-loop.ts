@@ -562,6 +562,10 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       if (gaps.length) return stop("understanding-incomplete", gaps.join("; "));
     }
     problem = state.problem!;
+    // A J or W line the Solver could only meet by moving an M line is a defect in the request, not in the product.
+    // The requester fixes it in five minutes now (ACCEPT.md, before any unit runs); a unit would fail ownership on it later.
+    const conflicts = request.filter((r) => r.kind !== "immovable").map((r) => ({ r, d: problem!.request[r.id] ?? "" })).filter(({ d }) => /\bdismissed\b/i.test(d) && /\bM\d+\b/.test(d));
+    if (conflicts.length) return stop("understanding-incomplete", `the request conflicts with itself: ${conflicts.map(({ r, d }) => `${r.id} (${r.text.slice(0, 70)}) — ${d}`).join("; ")}. Edit the request and start again; the Understand turn is the cheap one.`);
     log(`understood: "${problem.title}" (${problem.kind ?? "kind ?"}, ${problem.size ?? "size ?"}); ${problem.done.length} done-check(s), ${problem.done.filter((d) => d.command).length} mechanical; ${problem.lessons.length} lesson(s) consulted`);
     state.phase = "devise";
     await persist();

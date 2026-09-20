@@ -79,8 +79,9 @@ You must list every entry below in `Lessons consulted` with a disposition:
   a done-check, or is named in Restated with the reason it was dropped.
   Silence about one is a gap. **Wrong looks like** lines are checks too.
 - If the request has a **Must not change** section, each item goes in Given
-  marked *(immovable)*, and no done-check may need one moved. A check that
-  would is a defect in the request: say so in `notes` and stop.
+  marked *(immovable)*, and no done-check may need one moved. A J or W line
+  that can only be met by moving one is a defect in the request: dispose it
+  `dismissed — conflicts with M<n>: <why>` and the loop stops there.
 - No plan text. A sentence that begins "first we will" is deleted.
 - Every Check is runnable by a stranger with what Given names.
 - Every D is unmet today, or is an invariant and says so.

@@ -94,7 +94,7 @@ export function requestNote(items: RequestItem[]): string {
     `## The requester's own criteria\n\n` +
     `These lines are the requester's, not a checklist. Each J and W line is a done-check (say which D under \`## Request\` in PROBLEM.md: \`- J1: adopted as D3\`), ` +
     `or is dismissed with the reason (\`- W2: dismissed — …\`). Each M line goes in Given marked *(immovable)* and is disposed as \`- M1: immovable — <where it lives>\`; ` +
-    `no done-check may need it moved, and a unit that touches it is not workable. If a J or W line cannot be met without moving an M line, say so in \`notes\` and stop: that is a defect in the request, cheapest found now.\n\n` +
+    `no done-check may need it moved, and a unit that touches it is not workable. If a J or W line cannot be met without moving an M line, dispose it \`- J2: dismissed — conflicts with M1: <why>\`; the loop stops there, since that is a defect in the request, cheapest found now.\n\n` +
     items.map((i) => `- **${i.id}** (${label[i.kind]}) ${i.text}`).join("\n")
   );
 }
