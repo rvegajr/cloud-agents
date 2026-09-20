@@ -443,3 +443,10 @@ test("problemGaps: a done-check may not run a server in the foreground (live R1b
   const backgrounded = { ...serving, done: [{ ...serving.done[0]!, command: "npm run dev & sleep 2; curl -sf localhost:3000/" }] };
   assert.ok(!problemGaps(backgrounded).some((g) => /foreground/.test(g)));
 });
+
+test("commandOf: a command that wraps across lines, or starts with rm or a subshell, is still a command (live R2, U7)", () => {
+  const wrapped = "`rm -rf node_modules package-lock.json && npm install && (npm\n          run dev & sleep 2; curl -sf localhost:3000/)`";
+  assert.equal(commandOf(wrapped), "rm -rf node_modules package-lock.json && npm install && (npm run dev & sleep 2; curl -sf localhost:3000/)");
+  assert.equal(commandOf("`PORT=4000 npm start & sleep 1; curl -sf localhost:4000/`"), "PORT=4000 npm start & sleep 1; curl -sf localhost:4000/");
+  assert.equal(commandOf("`for f in a b; do echo $f; done`"), "for f in a b; do echo $f; done");
+});

@@ -107,7 +107,8 @@ export interface Plan {
 
 const TEST_FILE = /(^|\/)(test|tests|__tests__|spec)\/|\.(test|spec)\.[jt]sx?$|(^|\/)test_[^/]+\.py$|_test\.(py|go)$|Tests\.cs$/;
 const ARTIFACT_FILE = /^(\.polya\/.*|(PROBLEM|PLAN|LOOKBACK|ONE-PAGE|LESSONS)\.md)$/;
-const COMMAND_HEAD = /^(npm|npx|pnpm|yarn|node|deno|bun|curl|wget|sh|bash|zsh|git|python3?|pytest|pip|go|cargo|make|mvn|gradle|dotnet|ruby|bundle|\[|ls|cat|grep|diff|cmp|wc|jq|docker|kubectl|railway|gh)\b|^test\s+\S/;
+const COMMAND_HEAD =
+  /^(npm|npx|pnpm|yarn|node|deno|bun|curl|wget|sh|bash|zsh|git|python3?|pytest|pip|go|cargo|make|mvn|gradle|dotnet|ruby|bundle|\[|ls|cat|grep|diff|cmp|wc|jq|docker|kubectl|railway|gh|rm|mkdir|cp|mv|touch|kill|sleep|printf|echo|env|shasum|sha256sum|for|while|if)\b|^test\s+\S|^[A-Z_]+=\S/;
 /** A backticked path or glob (`test/*.test.js`, `src/app.js`) is a name, not a command. */
 const LOOKS_LIKE_PATH = /^[\w.@-]*[\/*][\w.*\/@-]*$/;
 const FORBIDDEN_IN_DO = /\b(choose|decide|appropriate|as needed|best|etc\.?|or similar|something like|if you (?:think|want|prefer)|use your judg?e?ment)\b/i;
@@ -150,7 +151,8 @@ export function commandOf(check: string | undefined): string | undefined {
   // Why it is red today is not the check.
   check = check.replace(/\s*(?:—|–|--|-)?\s*\b[Nn]ow:[\s\S]*$/, "");
   const isCommand = (c: string) => COMMAND_HEAD.test(c) && !LOOKS_LIKE_PATH.test(c) && /\s/.test(c) && !/<[a-z][\w-]*>/i.test(c);
-  const segments = [...check.matchAll(/`([^`]+)`/g)].map((m) => m[1]!.trim());
+  // A command in the plan wraps across lines with the block's indentation; that is layout, not part of the command.
+  const segments = [...check.matchAll(/`([^`]+)`/g)].map((m) => m[1]!.replace(/\s*\n\s+/g, " ").trim().replace(/^\(\s*/, ""));
   const ticked = segments.filter(isCommand);
   // One command with a note ("`npm test` exits 0 with 1 pass") is that command. One command inside a sentence about
   // a person acting ("a stranger performs this after `npm ci && npm run dev`, opening …"; "create a snippet, stop the
