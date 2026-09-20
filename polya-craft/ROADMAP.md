@@ -30,14 +30,15 @@ not recorded runs.
 ## Not built
 
 In build order. Each line says what the module is and what it borrows.
+Items 2, 3 and 4 of the earlier list are done: the record now stays out of
+the product branch entirely, a unit that cannot pass is re-planned in
+place, and the oracle is the stranger test for done-checks.
 
-1. The ACG row of the measurement table: the same repair under `--loop blueprint`, same day, same models, scored blind together. Then `examples/site-inspection.md` live, which is the browser's first real test.
-2. Artifacts under `.polya/` in the target repo instead of its root, if the structure penalty holds up across reviewers. Decide after one more scored build.
-3. Re-plan of one unit only. Today `unit-not-workable` re-runs Devise with the question prepended and keeps the units that passed; the Solver rewrites the plan, not one unit. A targeted single-unit re-plan is cheaper and should replace it once a live run shows how often a Hand asks.
-4. A stranger test for done-checks. The `//` crash shows Understand writes checks for what the requester named. A mechanical probe list per problem kind (for a route: `//`, `%2f`, a 2 KB path, a wrong method) that the Solver must either adopt as done-checks or dismiss with a reason. Design first; the ledger carries it until then.
-5. Level checks at run time. `PLAN.md`'s Shape is parsed but the loop does not yet run a group's check when its units complete; the finish check and the done-checks cover the whole. Add when a plan with more than one L1 group has been run live.
-6. Parallel Hands: units with disjoint `Touches` and no `Depends` between them, one worktree each. After the first measurement, not before.
-7. Slack stays on the milestone loop. `--loop polya` is CLI only.
+1. **Page checks as tests the Solver writes.** Both R1 reviews said the same thing independently: a done-check that only a browser can attest is attested by a narrated walk, and that is weaker evidence than the check asks for. The Verifier also costs the most of anything in the loop (26 to 37 minutes a batch on the local model, with frontier fallbacks). A Solver that writes the page check as an automated test at Devise — a Playwright spec where the repo has `@playwright/test`, a Node test against a fake window where it does not — turns the check into a command the loop runs itself. The prompt rule is written; what is not built is the scaffold support (a unit that adds the dependency and the browser binary) and the measurement.
+2. The ACG row of the measurement table: the same repair under `--loop blueprint`, same day, same models, scored blind together. Then `examples/site-inspection.md` live, which is the browser's first real test.
+3. Level checks at run time. `PLAN.md`'s Shape is parsed but the loop does not yet run a group's check when its units complete; the finish check and the done-checks cover the whole. Add when a plan with more than one L1 group has been run live.
+4. Parallel Hands: units with disjoint `Touches` and no `Depends` between them, one worktree each. After the first measurement, not before.
+5. Slack stays on the milestone loop. `--loop polya` is CLI only.
 
 ## Known limitations
 

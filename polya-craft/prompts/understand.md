@@ -46,6 +46,8 @@ You must list every entry below in `Lessons consulted` with a disposition:
    shell command that exits 0 when the D is met, in backticks (for a repair:
    `test "$(curl -s -o /dev/null -w '%{http_code}' :4571/nope)" = 404`).
    A Check only a stranger can observe is written as what they observe.
+   Prefer a command wherever one can decide the same thing: a check a
+   machine runs is evidence, a walk is a report.
 7. Write **Not this**.
 8. If the problem needs more than eight units, write the **Split** table:
    sub-problems bounded by checks that already exist (a release, a
