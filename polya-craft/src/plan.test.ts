@@ -450,3 +450,10 @@ test("commandOf: a command that wraps across lines, or starts with rm or a subsh
   assert.equal(commandOf("`PORT=4000 npm start & sleep 1; curl -sf localhost:4000/`"), "PORT=4000 npm start & sleep 1; curl -sf localhost:4000/");
   assert.equal(commandOf("`for f in a b; do echo $f; done`"), "for f in a b; do echo $f; done");
 });
+
+test("validateUnits: a repair for the finish check need not name a done-check (live R2, U8)", () => {
+  const u = { ...parsePlan(PLAN_MD).units[0]!, serves: [] };
+  const problem = parseProblem(PROBLEM_MD);
+  assert.match(validateUnits([u], problem, { doneIds: [] }).map((p) => p.problem).join("\n"), /Serves: names no D/);
+  assert.ok(!validateUnits([u], problem, { doneIds: [], requireServes: false }).some((p) => /Serves/.test(p.problem)));
+});

@@ -456,7 +456,14 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     const gapsOf = (): string[] => {
       const units = fresh();
       if (!units.length) return ["- no new unit under `## Repairs`"];
-      const lines = validateUnits(units, problem, { requireCommand: software, exists: (p) => artifact(p) !== undefined, doneIds: [], knownUnitIds: (readPlan()?.units ?? []).map((u) => u.id) }).map((p) => `- ${p.id}: ${p.problem}`);
+      const lines = validateUnits(units, problem, {
+        requireCommand: software,
+        exists: (p) => artifact(p) !== undefined,
+        doneIds: [],
+        knownUnitIds: (readPlan()?.units ?? []).map((u) => u.id),
+        // A repair for a failed done-check names it; one for the finish check or a review finding answers the whole job.
+        requireServes: stage === "verify",
+      }).map((p) => `- ${p.id}: ${p.problem}`);
       return lines;
     };
     let gaps = gapsOf();
