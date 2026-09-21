@@ -187,5 +187,9 @@ test("the local runner may not start a process-wide kill (live packing-list, 202
   const excluded = cmd.args.filter((_, i) => cmd.args[i - 1] === "--exclude-tools");
   assert.ok(excluded.includes("run_shell_command(pkill)"), JSON.stringify(cmd.args));
   assert.ok(excluded.includes("run_shell_command(kill -9)"));
+  // The prompt is an explicit option, never a positional after the array option (which would swallow it).
+  assert.equal(cmd.args[cmd.args.length - 2], "-p");
   assert.equal(cmd.args[cmd.args.length - 1], "do the thing");
+  const lastExclude = cmd.args.lastIndexOf("--exclude-tools");
+  assert.ok(cmd.args.slice(lastExclude + 2).every((a) => a.startsWith("-") || a === "do the thing" || cmd.args[cmd.args.indexOf(a) - 1] === "--mcp-config"), "nothing positional between the last --exclude-tools value and -p");
 });

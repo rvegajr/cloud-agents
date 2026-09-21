@@ -166,7 +166,7 @@ const COMMAND_HEAD =
 /** A backticked path or glob (`test/*.test.js`, `src/app.js`) is a name, not a command. */
 const LOOKS_LIKE_PATH = /^[\w.@-]*[\/*][\w.*\/@-]*$/;
 const FORBIDDEN_IN_DO = /\b(choose|decide|appropriate|as needed|best|etc\.?|or similar|something like|if you (?:think|want|prefer)|use your judg?e?ment)\b/i;
-const DEFAULT_HYGIENE = ["node_modules/", "dist/", "build/", "coverage/", "*.db", "*.sqlite", "*.sqlite3", ".env", ".qwen/", ".aider*", ".cursor/worktrees/"];
+export const DEFAULT_HYGIENE = ["node_modules/", "dist/", "build/", "coverage/", "*.db", "*.sqlite", "*.sqlite3", ".env", ".qwen/", ".aider*", ".cursor/worktrees/", "test-results/", "playwright-report/", "blob-report/", "playwright/.cache/"];
 
 function section(md: string, heading: string): string | undefined {
   const re = new RegExp("^##\\s+" + heading + "\\b[^\\n]*\\n([\\s\\S]*?)(?=\\n##\\s|\\n```json|$(?![\\r\\n]))", "im");
@@ -673,8 +673,9 @@ export function validateUnits(
     // A hash pins bytes. That is right for a file this unit writes whole, and wrong for one that already exists:
     // it demands the Hand reproduce the plan's imagined bytes instead of working behaviour (R0, U7).
     if (u.command && /\b(?:sha(?:256|1|512)(?:sum)?|shasum|md5sum|createHash)\b/.test(u.command) && opts.exists) {
-      const hashed = (u.command.match(/readFileSync\(['"]([^'"]+)['"]|sha256sum\s+(\S+)|shasum[^|]*\s(\S+)/g) ?? [])
-        .map((m) => m.match(/['"]([^'"]+)['"]|\s(\S+)$/)?.[1] ?? m.match(/\s(\S+)$/)?.[1])
+      // Inside `node -e "…"` the quotes are escaped: readFileSync(\"app.js\") (live packing-list, 2026-09-21, the U8 repair).
+      const hashed = (u.command.match(/readFileSync\(\\?['"]([^'"\\]+)\\?['"]|sha256sum\s+(\S+)|shasum[^|]*\s(\S+)/g) ?? [])
+        .map((m) => m.match(/['"]([^'"\\]+)\\?['"]|\s(\S+)$/)?.[1] ?? m.match(/\s(\S+)$/)?.[1])
         .filter((p): p is string => Boolean(p));
       const existing = hashed.filter((p) => opts.exists!(p));
       if (existing.length) push(`Check: hashes ${existing.join(", ")}, which already exists; a hash demands the exact bytes the plan imagined, so check the behaviour instead (a test) and keep hashes for files the unit writes whole`);

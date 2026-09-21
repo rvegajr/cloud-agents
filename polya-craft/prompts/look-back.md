@@ -56,6 +56,11 @@ Answer in this order, briefly:
    entry and must be written as one.
 
 ## Rules
+- A finding's check runs under `sh -c` from the repo root in a fresh clone.
+  A script it writes goes under the working directory (`$PWD/.probe.js`),
+  never `mktemp`'s default: a `require` resolves against the script's own
+  directory, and the repo's `node_modules` is not there (live packing-list,
+  2026-09-21: the fix was right and the check said it was not).
 
 - You do not edit anything. A high finding goes to one fix turn, and its
   own check decides.

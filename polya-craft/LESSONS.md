@@ -128,7 +128,7 @@ Tags:     kind:build stage:devise
 When:     a CLI's bin/script name must be invocable via `npx <name>` from any working directory, not just from inside its own repo
 Lesson:   Treat 'installable with npm ci' and 'resolvable by npx from an arbitrary cwd' as two different requirements — the latter needs an explicit global link/install step, since npm only self-recognizes a package's own bin when cwd is inside that package.
 Evidence: npx jsoncount succeeds from the project root (npm's cwd-scoped self-recognition) but 404s against the registry from any other directory, exactly the case D3's check and the problem's external-Makefile Given both depend on.
-Status:   confirmed(4)
+Status:   retired — pointed at a global link, which the reviewer rightly refused; the rule is the reverse: a check invokes an unpublished CLI from the repo root after the bar's install (prompts/understand.md)
 
 ## L-2026-09-20-06
 Tags:     kind:build stage:verify domain:cli-packaging
@@ -149,7 +149,7 @@ Tags:     kind:build stage:verify
 When:     a verify/look-back turn runs ad-hoc shell check commands (redirecting to o1.txt/e1.txt-style files) directly in the repo working directory
 Lesson:   Redirect check-command stdout/stderr scratch files to a dedicated scratch/tmp directory outside the repo, never to the repo root, so a forgotten `rm` cannot leave stray files for git to pick up.
 Evidence: commit d895288 added e1.txt, e2.txt, err.log, err.txt, o1.txt, o2.txt to the repo root during a look-back turn; commit 53e8dba (orchestrator) had to revert them as a Touches violation.
-Status:   confirmed(5)
+Status:   retired — answered in the loop: a review turn's leftovers are discarded, never committed (2026-09-20)
 
 ## L-2026-09-20-09
 Tags:     kind:build stage:devise domain:recursion
@@ -170,7 +170,7 @@ Tags:     kind:build stage:devise source:hand-question
 When:     cron-next
 Lesson:   Unit U2 was not workable; the Hand asked: U1's Check (`npm ci && npm run build && ! npm test`) was written to prove a transient red state at U1's own turn, not a lasting invariant — but the orchestrator's quality gate re-runs it against the final repo state, after U2 correctly makes the suite green. A working implementation and a passing `! npm test` are mutually exclusive by construction; nothing in index.ts (U2's only Touches) can satisfy both. Should U1's Check be retired/rescoped in PLAN.md now that U2 has landed, since its job (proving redness before implementation) is already done and recorded?. Decide it in the unit next time.
 Evidence: cron-next, U2
-Status:   candidate
+Status:   retired — answered by plan-lint: a Check that asserts the suite is red is rejected at Devise (2026-09-21)
 
 ## L-2026-09-21-02
 Tags:     kind:build stage:devise
@@ -233,7 +233,7 @@ Tags:     kind:build stage:devise
 When:     a Devise turn writes new test files to serve as a cycle's done-checks
 Lesson:   Wire every newly-written test file into the project's actual Test command (the one named in the Quality bar) in the same cycle, and verify by grepping npm test's own output for the new tests' names — not just its exit code — since a stale test script exits 0 whether or not the new files ran.
 Evidence: test/db-import.test.ts, test/export-import.test.ts, test/export-import-ui.test.ts (12 tests, including the D7 stub test Lesson L-2026-09-19-10 required) exist, pass when run directly, and are absent from package.json's `test` script; `npm test` reports 5/5 pass having never touched export/import code.
-Status:   candidate
+Status:   confirmed(1) — promoted to prompts/devise.md as a rule, 2026-09-21
 
 ## L-2026-09-21-11
 Tags:     kind:build stage:carry-out

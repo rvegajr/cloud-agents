@@ -626,3 +626,12 @@ test("problemGaps: a Check with a NUL byte is a gap, not a crash", () => {
   const p = parseProblem(PROBLEM_MD.replace("Check: `node --test test/notfound.test.js`", "Check: `tr '\u0000' a`"))!;
   assert.ok(problemGaps(p).some((g) => /D1's Check contains a NUL byte/.test(g)), JSON.stringify(problemGaps(p)));
 });
+
+test("validateUnits: a hash Check on an existing file is caught when the quotes are escaped inside node -e (live packing-list, U8)", () => {
+  const live = "`h=$(node -e \"console.log(require(\\\"crypto\\\").createHash(\\\"sha256\\\").update(require(\\\"fs\\\").readFileSync(\\\"app.js\\\")).digest(\\\"hex\\\"))\") && [ \"$h\" = \"adab\" ] && node --test test/logic.test.js` — Now: unmet";
+  const plan = parsePlan(PLAN_MD.replace("Check:    `node --test test/notfound.test.js` — Now: unmet", `Check:    ${live}`));
+  const problems = validateUnits(plan.units, parseProblem(PROBLEM_MD), { requireCommand: true, exists: (f) => f === "app.js" });
+  assert.ok(problems.some((p) => /hashes app\.js, which already exists/.test(p.problem)), JSON.stringify(problems));
+  // A file the unit creates may be hashed.
+  assert.deepEqual(validateUnits(plan.units, parseProblem(PROBLEM_MD), { requireCommand: true, exists: () => false }).filter((p) => /hashes/.test(p.problem)), []);
+});

@@ -148,7 +148,10 @@ export function buildLocalCommand(cfg: LocalConfig, model: string, prompt: strin
   const mcp = extra.mcpServers && Object.keys(extra.mcpServers).length ? ["--mcp-config", qwenMcpConfigArg(extra.mcpServers)] : [];
   return {
     file: "qwen",
-    args: ["--auth-type", "openai", "--yolo", "--model", model, "--output-format", "text", ...LOCAL_EXCLUDED_TOOLS.flatMap((t) => ["--exclude-tools", t]), ...mcp, prompt],
+    // The prompt goes through `-p`, never as a trailing positional: `--exclude-tools` is a yargs array and swallows
+    // every positional after it, which lost the prompt ("No input provided via stdin") and sent every Hand turn to
+    // the Claude rescue for a day (corpus 07-10 and the resumes, 2026-09-21).
+    args: ["--auth-type", "openai", "--yolo", "--model", model, "--output-format", "text", ...LOCAL_EXCLUDED_TOOLS.flatMap((t) => ["--exclude-tools", t]), ...mcp, "-p", prompt],
     env: {
       ...base,
       OPENAI_API_KEY: "ollama",

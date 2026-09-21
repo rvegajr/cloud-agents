@@ -63,12 +63,22 @@ outer-test step.
 
 ## Rules
 
-- `PROBLEM.md` is not edited in this turn. If it is wrong, say so in `notes`
-  and stop.
+- `PROBLEM.md` is not edited in this turn, with one exception: a D whose
+  Check you turned into an automated test this turn gets that test's
+  command as its Check (`npx playwright test tests/e2e/keyboard.spec.js`),
+  the old observation kept after it as `(was: …)`. The loop then runs it
+  at look back instead of walking it. Nothing else in `PROBLEM.md` changes;
+  if it is wrong, say so in `notes` and stop.
 - Every Check is unmet before its unit runs. A Check that passes now
   measures nothing.
 - One owner per fact. If `Given` would paste content that also lives in a
   file, name the file instead.
+- A test file you write is run by the quality bar's test command, in this
+  plan: if the bar's command names files or a glob the new file is outside,
+  the unit that first needs it edits that script (and names `package.json`
+  under `Touches`), and its Check greps the bar's test output for the new
+  tests. A test the bar never runs is a test that does not exist
+  (L-2026-09-21-10, promoted).
 - A unit whose `Do` runs an installer (`npm install`, `npm ci`, `pnpm i`,
   `bundle install`, …) owns the lock file that installer writes: name it
   under `Touches` beside the manifest.
@@ -90,7 +100,8 @@ outer-test step.
   devDependency; writes `playwright.config.js` with `webServer` running the
   quality bar's `start` command on its port, `reuseExistingServer: true`,
   and headless Chromium; and runs `npx playwright install chromium`. Its
-  `Touches` are `package.json`, `package-lock.json`, `playwright.config.js`;
+  `Touches` are `package.json`, `package-lock.json`, `playwright.config.js`
+  and `.gitignore` (add `test-results/` and `playwright-report/`);
   its `Check` is `npx playwright test --list`, red until the toolchain is
   there. Each page unit's `Check` is then `npx playwright test <its spec>`.
   The browser binary is cached per machine, so a fresh clone needs only the

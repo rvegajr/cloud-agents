@@ -148,11 +148,23 @@ export function fileLessonsStore(path = defaultLessonsPath()): LessonsStore {
   return store;
 }
 
-export function selectLessons(all: Lesson[], tags: string[], opts: { wholeBelow?: number } = {}): Lesson[] {
+/**
+ * The lessons an Understand turn is offered, and must dispose of one by one. Every corpus run (2026-09-21) paid an
+ * Understand retry because the whole ledger, thirty-odd entries, was offered and the Solver missed a few dispositions.
+ * At most `max` (default 12): the whole ledger while it is that small, else the best by tag overlap, then how often
+ * confirmed, then recency.
+ */
+export function selectLessons(all: Lesson[], tags: string[], opts: { wholeBelow?: number; max?: number } = {}): Lesson[] {
   const active = all.filter((l) => l.status !== "retired");
-  if (active.length <= (opts.wholeBelow ?? 40)) return active;
+  const max = opts.max ?? opts.wholeBelow ?? 12;
+  if (active.length <= max) return active;
   const want = new Set(tags.map((t) => t.toLowerCase()));
-  return active.filter((l) => l.tags.some((t) => want.has(t.toLowerCase())));
+  const score = (l: Lesson) => l.tags.filter((t) => want.has(t.toLowerCase())).length;
+  return [...active]
+    .map((l, i) => ({ l, i }))
+    .sort((a, b) => score(b.l) - score(a.l) || (b.l.confirmations ?? 0) - (a.l.confirmations ?? 0) || b.i - a.i)
+    .slice(0, max)
+    .map(({ l }) => l);
 }
 
 /** Tags a problem statement carries before the Solver has read it: its kind if stated, the repo's name, and the file extensions it mentions. */

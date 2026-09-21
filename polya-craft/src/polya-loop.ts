@@ -4,7 +4,7 @@ import { lenientJson, type BlueprintIO } from "../../architect-crew-gate/src/blu
 import { browserToolNote, scenarioNeedsBrowser } from "../../architect-crew-gate/src/browser.js";
 import { gateFeedbackNote, type GateResult } from "../../architect-crew-gate/src/quality-gate.js";
 import { fileLessonsStore, priorLessonsNote, tagsForProblem, type LessonsStore, type NewLesson } from "./lessons.js";
-import { ARTIFACTS, POLYA_DIR, immovableOf, oracleNote, parsePlan, parseProblem, parseRequest, problemGaps, renderPlan, renderProblem, requestNote, validateUnits, type DoneCheck, type Plan, type Problem, type Unit } from "./plan.js";
+import { ARTIFACTS, DEFAULT_HYGIENE, POLYA_DIR, immovableOf, oracleNote, parsePlan, parseProblem, parseRequest, problemGaps, renderPlan, renderProblem, requestNote, validateUnits, type DoneCheck, type Plan, type Problem, type Unit } from "./plan.js";
 
 /**
  * The polya-craft loop (PATTERN.md section 4), engine-free so a fake `send`
@@ -270,6 +270,16 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     return md ? parsePlan(md) : undefined;
   };
 
+  // A tool's own artifacts (Playwright's test-results/, a coverage folder) appear when a Check runs and would be
+  // committed with the turn and read as the Hand's change (live packing-list rerun, 2026-09-21: U5 failed ownership
+  // on test-results/.last-run.json). .git/info/exclude keeps them out of every commit without touching the
+  // product's .gitignore, which is nobody's Touches.
+  {
+    const excludePath = ".git/info/exclude";
+    const have = io.readFile(excludePath) ?? "";
+    const missing = DEFAULT_HYGIENE.filter((line) => !have.split("\n").map((l) => l.trim()).includes(line));
+    if (missing.length && artifact(".git/HEAD") !== undefined) io.writeFile(excludePath, `${have.trim() ? `${have.trimEnd()}\n` : ""}${missing.join("\n")}\n`);
+  }
   // Whatever phase this run starts in: a record a model forced into git makes every later Hand turn look like an
   // ownership violation, because edits to a tracked file are visible to the gate.
   {
@@ -604,11 +614,34 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     const replan = state.replanNote ? `## Re-plan\n\nThe previous plan stopped because a Hand had to ask a question. ${state.replanNote}\n\nRewrite the unit it names so the question is answered inside the unit; leave the units that already passed unchanged.\n\n---\n\n` : "";
     const prompt = `${replan}${buildPrompt(`${PROMPTS}/devise`, "", { problem_md: problemMd, max_units: String(maxUnits), done_ids: carried.join(" ") })}`;
     const exists = (p: string) => artifact(p) !== undefined;
+    // The one edit Devise may make to PROBLEM.md: a D's Check becomes the command that runs a test written this turn
+    // (a Playwright spec, a Node test against a fake window). Then look back runs it instead of walking it, which is
+    // the point of page checks as tests (live packing-list rerun, 2026-09-21: the specs ran in the unit's gate and the
+    // Verifier still walked the same Ds, four batches as before). Anything else changed in PROBLEM.md is a gap.
+    const before = problem;
+    const problemChanges = (): string[] => {
+      const after = readProblem();
+      if (!after) return [`- ${ARTIFACTS.problem} is missing after the Devise turn`];
+      const out: string[] = [];
+      const ids = new Set(before.done.map((d) => d.id));
+      for (const d of after.done) {
+        const was = before.done.find((x) => x.id === d.id);
+        if (!was) { out.push(`- ${d.id} was added to PROBLEM.md at Devise; the done-checks are Understand's`); continue; }
+        if (was.text.trim() !== d.text.trim()) out.push(`- ${d.id}'s statement changed at Devise; only a Check may change, to the command that runs a test written this turn`);
+        if (was.check.trim() !== d.check.trim()) {
+          const file = d.command?.match(/(?:^|\s)((?:tests?|e2e|spec|__tests__)\/[\w./-]+|[\w./-]+\.(?:spec|test)\.[cm]?[jt]sx?)\b/)?.[1];
+          if (!d.command) out.push(`- ${d.id}'s Check changed at Devise but is not a command; a Check may change only to the command that runs a test written this turn`);
+          else if (!file || !exists(file)) out.push(`- ${d.id}'s Check changed at Devise to \`${d.command.slice(0, 60)}\`, which names no test file on disk; a Check may change only to the command that runs a test written this turn`);
+        }
+      }
+      for (const id of ids) if (!after.done.some((d) => d.id === id)) out.push(`- ${id} was removed from PROBLEM.md at Devise`);
+      return out;
+    };
     const gapsOf = (): string[] => {
       const plan = readPlan();
       if (!plan) return [`- ${ARTIFACTS.plan} missing`];
       state.units = plan.units;
-      const lines = validateUnits(plan.units, problem, { requireCommand: software, exists, doneIds: carried, immovable }).map((p) => `- ${p.id}: ${p.problem}`);
+      const lines = [...problemChanges(), ...validateUnits(plan.units, state.problem ?? problem, { requireCommand: software, exists, doneIds: carried, immovable }).map((p) => `- ${p.id}: ${p.problem}`)];
       if (!plan.units.length) lines.push("- no units under `## Units`");
       if (plan.units.length > maxUnits) lines.push(`- ${plan.units.length} units; at most ${maxUnits}. Split the problem into sub-problems`);
       if (!plan.outer.length) lines.push("- no `## Outer test` steps");
