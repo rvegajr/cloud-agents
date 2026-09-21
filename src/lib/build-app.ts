@@ -465,6 +465,17 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
       // Playwright MCP writes console logs and page snapshots into its working directory; a Hand turn with a
       // browser would commit them. Every browser turn in this run writes to a temp folder instead.
       process.env.PLAYWRIGHT_MCP_OUTPUT_DIR ??= resolve(tmpdir(), "polya-playwright-mcp");
+      // .polya/ is gitignored (it's the loop's own record, never the Hand's), so a workspace re-cloned after a
+      // reboot or a lost temp dir starts without it. The mirror image of the backup below, written the same way.
+      if (opts.resume) {
+        const backup = resolve(stateDir, `polya-${record.agentId}`);
+        const from = resolve(workspace, ".polya");
+        if (existsSync(backup) && !existsSync(from)) {
+          mkdirSync(from, { recursive: true });
+          for (const f of readdirSync(backup)) copyFileSync(resolve(backup, f), resolve(from, f));
+          log(`restored .polya/ from ${backup}`);
+        }
+      }
       const io = makePolyaIO(workspace, { log: (line) => log(line) });
       const initialState = record.polya ?? initialPolyaState();
       if (opts.resume) {
