@@ -8,6 +8,8 @@ cd "$ROOT" || exit 1
 mkdir -p .runs/corpus
 export PATH="/opt/homebrew/bin:$PATH"
 export WORK_ROOT="${WORK_ROOT:-$HOME/.cache/cloud-agents-work}"
+# Colima shares only $HOME with containers: a check that mounts a mktemp file needs mktemp to land under it too.
+export TMPDIR="$WORK_ROOT/tmp"; mkdir -p "$TMPDIR"
 export POLYA_ORACLE=1
 SUMMARY=.runs/corpus/summary.tsv
 [ -f "$SUMMARY" ] || printf 'name\tstarted\tresult\tagent\tcost\n' > "$SUMMARY"
