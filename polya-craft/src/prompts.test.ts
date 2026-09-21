@@ -51,3 +51,7 @@ test("the promoted ledger lessons are prompt rules: new tests are wired into the
   assert.match(readFileSync(new URL("../prompts/devise.md", import.meta.url), "utf8"), /A test the bar never runs is a test that does not exist/);
   assert.match(readFileSync(new URL("../prompts/repair.md", import.meta.url), "utf8"), /the repair unit may edit that one\n\s+script so it does/);
 });
+
+test("the reviewer is told where a finding's check may write its script", () => {
+  assert.match(readFileSync(new URL("../prompts/look-back.md", import.meta.url), "utf8"), /A script it writes goes under the working directory/);
+});
