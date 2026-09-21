@@ -148,7 +148,7 @@ export function buildLocalCommand(cfg: LocalConfig, model: string, prompt: strin
   const mcp = extra.mcpServers && Object.keys(extra.mcpServers).length ? ["--mcp-config", qwenMcpConfigArg(extra.mcpServers)] : [];
   return {
     file: "qwen",
-    args: ["--auth-type", "openai", "--yolo", "--model", model, "--output-format", "text", ...mcp, prompt],
+    args: ["--auth-type", "openai", "--yolo", "--model", model, "--output-format", "text", ...LOCAL_EXCLUDED_TOOLS.flatMap((t) => ["--exclude-tools", t]), ...mcp, prompt],
     env: {
       ...base,
       OPENAI_API_KEY: "ollama",
@@ -158,6 +158,14 @@ export function buildLocalCommand(cfg: LocalConfig, model: string, prompt: strin
     },
   };
 }
+
+/**
+ * Shell commands the local runner may not start with. A Verifier walking a page ran
+ * `ps aux | grep node | … | xargs kill -9` to restart the app's server and killed every Node process on the
+ * machine, the orchestrator included (live packing-list, 2026-09-21, exit 137). A prefix list cannot catch a
+ * pipeline that ends in kill; the prompts carry the rule, and the sandbox is the real answer (ROADMAP).
+ */
+export const LOCAL_EXCLUDED_TOOLS = ["run_shell_command(pkill)", "run_shell_command(killall)", "run_shell_command(kill -9)", "run_shell_command(kill -KILL)", "run_shell_command(sudo)"];
 
 export type ExecFn = (cmd: LocalCommand, cwd: string, timeoutMs: number) => Promise<{ stdout: string; stderr: string; code: number }>;
 

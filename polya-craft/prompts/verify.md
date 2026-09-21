@@ -19,6 +19,13 @@ imply.
 
 ## How to run the thing
 
+Processes are not yours to stop unless you started them. The loop started the
+app and stops it after; never run `pkill`, `killall`, `kill -9`, or
+`ps … | xargs kill`, which reach every process on this machine, the loop's
+own included. A check that needs its own server starts one on another port
+and kills only that `$pid`.
+
+
 {{run_instructions}}
 
 ## Browser
