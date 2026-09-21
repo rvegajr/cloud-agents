@@ -50,7 +50,12 @@ anything yourself; write the unit.
    `Touches`: a `node --test` file or a Playwright spec that fails for the
    reason in the evidence.
 4. Do not edit existing units, `PROBLEM.md`, or any test that already
-   exists. Do not touch `package.json` scripts, lint, or type config.
+   exists. Do not touch `package.json` scripts, lint, or type config, with
+   one exception: when the finding is that the quality bar's test command
+   does not run a test file that exists, the repair unit may edit that one
+   script so it does, names `package.json` under `Touches`, and its Check
+   runs the bar's test command and greps its output for the file's tests
+   (live snippet-vault-export, 2026-09-21: twelve tests `npm test` never ran).
 5. Write the files and stop there: do not run `git add`, `git commit`, or
    `git add -f`. `.polya/` is ignored by git on purpose, and the
    orchestrator commits what belongs in the repo.

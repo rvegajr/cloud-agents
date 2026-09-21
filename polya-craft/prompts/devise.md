@@ -69,6 +69,12 @@ outer-test step.
   measures nothing.
 - One owner per fact. If `Given` would paste content that also lives in a
   file, name the file instead.
+- A test file you write is run by the quality bar's test command, in this
+  plan: if the bar's command names files or a glob the new file is outside,
+  the unit that first needs it edits that script (and names `package.json`
+  under `Touches`), and its Check greps the bar's test output for the new
+  tests. A test the bar never runs is a test that does not exist
+  (L-2026-09-21-10, promoted).
 - A unit whose `Do` runs an installer (`npm install`, `npm ci`, `pnpm i`,
   `bundle install`, …) owns the lock file that installer writes: name it
   under `Touches` beside the manifest.
