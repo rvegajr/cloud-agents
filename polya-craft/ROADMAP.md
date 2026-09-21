@@ -344,6 +344,32 @@ run was the request, not the product. The product's own numbers are the
 table. Follow-up: the medium finding (a depth limit) is a one-unit repair
 the requester deferred in `ACCEPT.md`.
 
+## R4: the corpus, ten requests of different shapes
+
+2026-09-20 to 21, overnight. `examples/corpus/`: ten `REQUEST.md` files, one driver (`run-corpus.sh`) that ran them one at a time under the 75 % budget rule, one resume driver for what stopped. Sonnet with the oracle, hybrid, the local Hand throughout. Per-run logs and the summary are in `.runs/corpus/`; the summary as it stood is `examples/corpus/summary-2026-09-21.tsv`.
+
+| request | shape | final | passes | cost (Max API-eq) | units green first try | done-checks | review |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| jsoncount-depth | repair on an existing repo | complete | 2 | $2.86 | 1/1 | 4/4 | done, 1 finding |
+| slugify | CLI | complete | 1 | $3.99 | 4/4 | 8/8 | 1 high, repaired |
+| iso-week | CLI, dates and time zones | complete | 1 | $3.14 | 4/4 | 9/9 | clean |
+| kv-api | HTTP API, no UI, persistence | complete | 3 | $12.74 | 6/6 | 10/10 | done |
+| packing-list | a page, keyboard only | 9/9 met; review repair unresolved | 2 | $10.13 | 7/8 | 9/9 | 1 high, real |
+| ledger-report | streaming CSV, 300 MB, Docker floor check | complete | 3 | $6.69 | 6/6 | 10/10 | done |
+| snippet-vault-export | change on an existing app | 10/10 met; review repair unresolved | 3 | $18.01 | 5/5 | 10/10 | 1 high, real |
+| cron-next | typed library, no CLI | complete | 3 | $11.09 | 2/2 | 9/9 | clean |
+| dedupe-py | Python CLI, pytest | complete | 1 | $7.37 | 5/5 | 10/10 | clean |
+| job-queue | long-running process, SIGTERM | complete | 2 | $17.53 | 6/6 | 8/8 | done |
+| **total** | | **8 complete, 2 done-as-product** | 21 | **$93.55** | 46/47 | 87/88 | |
+
+**What held.** Every request's J/W/M lines reached the done-checks on the first Understand turn, ten for ten; no run needed the request-disposition retry. Forty-six of forty-seven Hand units passed their gate on the first attempt on the local model, across four toolchains (npm, TypeScript with `tsc`, Python with `pytest`, Docker), and the one that did not was the packing-list repair below. The Verifier's mechanical share was high where the product is a command (8 to 10 of 10) and low where it is a page (2 of 9, 2 of 10), which is roadmap item one's case restated with numbers. Five of ten completed unattended after the first orchestrator fixes; the three CLIs completed first time.
+
+**What stopped runs, and whose fault.** Eleven stops on the first pass, none a model's: nine orchestrator defects (a fenced-script Check read with its language tag; the suite-must-be-red rule applied to a repair whose checks live outside the suite; a placeholder inside a quoted string; a result note after a leading command; a rejected repair's id blocking its rewrite; a negation not read as a command; a check that could not run at all treated as unmet; a transient "suite is red" Check; a NUL byte crashing the spawn), one environment (Colima shares only `$HOME`, twice), and one Verifier killing the loop with `ps | xargs kill -9`. Each is fixed with the live artifact as the test, in this branch, and the resumes ran on the fixed code. Five stops were the Solver's own checks written for an environment they were not run in: a temp file `mktemp` puts where a container cannot see it, a probe file in `/tmp` importing a relative path, a 2 MB literal on the command line, a restart check that killed `npm` and left `node` running, a `pkill` for a server the loop had started. Each was reworded by hand as the requester's ACCEPT edit and is now a rule in the understand prompt: a check runs from the repo root, makes its files under `$PWD`, sends a body through a file, and starts its own server on another port if it needs one.
+
+**The two that did not complete, both at the review-repair stage, both with the product done.** `packing-list`: the reviewer found a real keyboard bug (list keys firing while the input has focus), the Solver's repair Check pinned the SHA-256 of the whole `app.js`, and the local Hand could not reproduce a two-hundred-line file byte for byte in three attempts. A whole-file hash is a plan device a frontier Hand meets and a local one does not; the answer is a lint that caps hash-pinned Checks at a file size a Hand can carry verbatim, not built yet. `snippet-vault-export`: the reviewer found that `package.json`'s `test` script still names only the four original files, so the twelve new tests never run under `npm test`; the repair procedure's own rules forbade editing that line. A one-line human follow-up, and an argument for letting a review repair touch the test script when the finding is about the test script.
+
+**Cost.** $93.55 Max API-eq for ten requests, $2.86 to $18.01 each; Ollama $0. The three that cost most (`snippet-vault-export`, `job-queue`, `kv-api`) each paid for repeated look-back passes as their checks were reworded, and two of them for Verifier walks with frontier fallbacks. The Max weekly window went from 59 % to 69 %. Twenty-two lessons were appended to the ledger over the day; curation is next.
+
 ## Order of work
 
 **Phase 1: the pattern.** The documents, templates, prompts, ledger,
