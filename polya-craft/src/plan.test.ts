@@ -585,3 +585,15 @@ test("commandOf: a fenced script is one command, without its language tag (live 
   assert.equal(commandOf("```sh\n$ npm test\n```"), "npm test");
   assert.equal(commandOf("```\nsome prose about running things\n```"), undefined);
 });
+
+test("commandOf: a placeholder inside a quoted string is text, and a note after a leading command is a note (live kv-api, 2026-09-20)", () => {
+  const plan = parsePlan(readFileSync(new URL("./fixtures-live-plan-kv.md", import.meta.url), "utf8"));
+  const u5 = plan.units.find((u) => u.id === "U5")!;
+  assert.ok(u5.command, "U5's grep chain is a command");
+  assert.match(u5.command!, /grep -q "\/kv\/<key>" README\.md/);
+  assert.equal(commandOf("`node --test test/integration.test.js` — exit code 0, the kill-and-restart subtest passes"), "node --test test/integration.test.js");
+  // Still not commands: a placeholder in the command itself; a person acting before the command; an invocation modifier after it.
+  assert.equal(commandOf("`curl localhost:8787/kv/<key>`"), undefined);
+  assert.equal(commandOf("a stranger runs `npm start` and opens the page"), undefined);
+  assert.equal(commandOf("`curl -X POST /api/snippets` with a missing title"), undefined);
+});

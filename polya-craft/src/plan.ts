@@ -204,7 +204,10 @@ export function commandOf(check: string | undefined): string | undefined {
   if (!check) return undefined;
   // Why it is red today is not the check.
   check = check.replace(/\s*(?:—|–|--|-)?\s*\b[Nn]ow:[\s\S]*$/, "");
-  const isCommand = (c: string) => COMMAND_HEAD.test(c) && !LOOKS_LIKE_PATH.test(c) && /\s/.test(c) && !/<[a-z][\w-]*>/i.test(c);
+  // A placeholder is `<name>` in the command itself; inside a quoted string it is text the command looks for
+  // (live kv-api, 2026-09-20: `grep -q "/kv/<key>" README.md`).
+  const unquoted = (c: string) => c.replace(/(["'])(?:\\.|(?!\1).)*\1/g, "");
+  const isCommand = (c: string) => COMMAND_HEAD.test(c) && !LOOKS_LIKE_PATH.test(c) && /\s/.test(c) && !/<[a-z][\w-]*>/i.test(unquoted(c));
   // A fenced block is a script: its body runs as one command under `sh -c`, the language tag is not a line of it
   // (live jsoncount-depth, 2026-09-20: "```bash\nset -e\n…" ran `bash` first, which waits on stdin).
   const fence = check.match(/```[ \t]*(?:bash|sh|shell|zsh|console)?[ \t]*\n([\s\S]*?)```/);
@@ -225,7 +228,10 @@ export function commandOf(check: string | undefined): string | undefined {
   // part is a fragment of a procedure (the Verifier's). "exits 0 with 1 pass" reports its result, so it is a command.
   const firstWord = residue.trim().replace(/^[^A-Za-z]+/, "").split(/[^A-Za-z]/)[0]?.toLowerCase() ?? "";
   const modifiesInvocation = ["with", "for", "on", "against", "using", "from", "to", "into", "plus", "where", "whose"].includes(firstWord);
-  if (ticked.length === 1) return someoneActs || modifiesInvocation ? undefined : ticked[0];
+  // A check that opens with its command is that command; what follows is a note about its result ("— exit code 0,
+  // the kill-and-restart subtest passes"), and a verb in the note is not a person acting (live kv-api, 2026-09-20).
+  const leading = /^\s*`/.test(check);
+  if (ticked.length === 1) return modifiesInvocation || (someoneActs && !leading) ? undefined : ticked[0];
   if (ticked.length > 1) {
     // Several backticked commands are one check only when nothing but connectors sits between them
     // ("`a` and `b`"). Commands mentioned inside a sentence ("run `npm ci`, then `npm start` and open …")
