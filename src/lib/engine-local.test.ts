@@ -181,3 +181,11 @@ test("a browser turn hands qwen-code the Playwright server with --mcp-config for
   await noBrowser("qa turn", { browser: true });
   assert.ok(!seen[2]!.includes("--mcp-config"), "QA_BROWSER off: asked, none attached");
 });
+
+test("the local runner may not start a process-wide kill (live packing-list, 2026-09-21)", () => {
+  const cmd = buildLocalCommand({ ...cfg, runner: "qwen" }, "qwen3-coder-next", "do the thing");
+  const excluded = cmd.args.filter((_, i) => cmd.args[i - 1] === "--exclude-tools");
+  assert.ok(excluded.includes("run_shell_command(pkill)"), JSON.stringify(cmd.args));
+  assert.ok(excluded.includes("run_shell_command(kill -9)"));
+  assert.equal(cmd.args[cmd.args.length - 1], "do the thing");
+});

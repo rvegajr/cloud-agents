@@ -1,0 +1,22 @@
+name	started	result	agent	cost
+jsoncount-depth	2026-09-20T22:37:14Z	plan-not-workable	cc-cc9cdde5-9eb6-4a35-8a77-13e6d2fc883a	$1.79  Claude API-eq (not a card charge)
+slugify	2026-09-20T23:05:01Z	complete	cc-5fa648d3-5a39-4aab-aa96-ddbc31c8ce46	$3.99  Claude API-eq (not a card charge)
+iso-week	2026-09-20T23:31:07Z	complete	cc-e0c98253-0866-4de8-81f0-92d85e88b641	$3.14  Claude API-eq (not a card charge)
+kv-api	2026-09-21T00:03:51Z	plan-not-workable	cc-76666016-cbe4-4f97-a74e-448e3aa2abb1	$4.67  Claude API-eq (not a card charge)
+packing-list	2026-09-21T00:58:33Z	exit 137	cc-af0f7fec-e6d5-411a-b1a7-bd04e5d1b548	
+ledger-report	2026-09-21T01:39:06Z	verify-failed	cc-239ba26e-f58c-4a32-8a52-a6d726e47218	$4.17  Claude API-eq (not a card charge)
+snippet-vault-export	2026-09-21T02:32:35Z	verify-failed	cc-36fb4665-6f5b-42d8-acc2-a23da2fe5e42	$10.08  Claude API-eq (not a card charge)
+cron-next	2026-09-21T03:06:38Z	unit-not-workable	cc-67dd3f7c-842d-46ad-92e2-50e88ef82e07	$7.65  Claude API-eq (not a card charge)
+dedupe-py	2026-09-21T03:36:12Z	complete	cc-0fb8df10-edbc-4119-a956-ba81fbe56538	$7.37  Claude API-eq (not a card charge)
+job-queue	2026-09-21T04:13:53Z	verify-failed	cc-888dc7b5-4a89-4d49-a4c1-b1104fcc523a	$7.16  Claude API-eq (not a card charge)
+jsoncount-depth-resume	2026-09-21T04:17:43Z	complete	cc-cc9cdde5-9eb6-4a35-8a77-13e6d2fc883a	$2.86  Claude API-eq (not a card charge)
+kv-api-resume	2026-09-21T04:38:20Z	verify-failed	cc-76666016-cbe4-4f97-a74e-448e3aa2abb1	$12.25  Claude API-eq (not a card charge)
+packing-list-resume	2026-09-21T05:17:33Z	review-unresolved	cc-af0f7fec-e6d5-411a-b1a7-bd04e5d1b548	$10.13  Claude API-eq (not a card charge)
+ledger-report-resume	2026-09-21T05:19:26Z	verify-failed	cc-239ba26e-f58c-4a32-8a52-a6d726e47218	$5.59  Claude API-eq (not a card charge)
+snippet-vault-export-resume	2026-09-21T05:19:36Z	exit 1	cc-36fb4665-6f5b-42d8-acc2-a23da2fe5e42	
+cron-next-resume	2026-09-21T05:23:38Z	verify-failed	cc-67dd3f7c-842d-46ad-92e2-50e88ef82e07	$10.67  Claude API-eq (not a card charge)
+job-queue-resume	2026-09-21T05:48:46Z	complete	cc-888dc7b5-4a89-4d49-a4c1-b1104fcc523a	$17.53  Claude API-eq (not a card charge)
+kv-api2-resume	2026-09-21T05:52:07Z	complete	cc-76666016-cbe4-4f97-a74e-448e3aa2abb1	$12.74  Claude API-eq (not a card charge)
+ledger-report2-resume	2026-09-21T05:57:19Z	complete	cc-239ba26e-f58c-4a32-8a52-a6d726e47218	$6.69  Claude API-eq (not a card charge)
+snippet-vault-export2-resume	2026-09-21T07:00:23Z	review-unresolved	cc-36fb4665-6f5b-42d8-acc2-a23da2fe5e42	$18.01  Claude API-eq (not a card charge)
+cron-next2-resume	2026-09-21T07:02:31Z	complete	cc-67dd3f7c-842d-46ad-92e2-50e88ef82e07	$11.09  Claude API-eq (not a card charge)

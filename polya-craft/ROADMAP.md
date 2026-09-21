@@ -73,6 +73,19 @@ Then resuming that same run after a reboot (2026-09-20, `polya-live-sv-r2`, "R2"
 
 With that fixed, D5 stopped failing on `command not found` and started failing on something real: this fixture's `test/bootstrap.test.js` pins `engines.node` to `>=18.0.0`, a pre-existing assertion no repair unit may edit, and `better-sqlite3@^12.8.0` has no prebuilt binary for Node 18.0.0 and cannot be built from source on this machine, because the Python here has no `distutils`, which the Node-18-era `node-gyp` needs. That tension was already visible in this same plan's U5–U7 repair history before the reboot. It is a genuine conflict in the fixture's own contract, not an orchestrator defect, and not one any of the three fixes above could touch. Accepted as the run's final state: finish check PASS, 9/10 done-checks met, D5 open for that reason.
 
+Then the first build from a `REQUEST.md` (2026-09-20, `polya-live-json-count`, R3 below), six more, five in the orchestrator and one in the machine:
+
+- **The quality bar table read one column order.** The Solver wrote `| Command | Purpose |` with sentence purposes, and the json block's `bar` as `[{command, purpose}]` rows; the parser wanted a bare purpose word first and an object, found no `test`, and stopped a run whose eight request lines it had just disposed correctly. Answer: either order, a purpose read from its label or implied by a well-known command, rows or an object. The artifact is the fixture. Cost: one resume.
+- **A bare word in a Must-not-change line was a directory.** New code, new defect: "as the package `bin`" made `bin/jsoncount.js` unworkable, and the Solver's rename to `bin/cli.js` too. Answer: a bare backticked word matches a path exactly, never as a prefix; only something written as a path covers what sits under it. Cost: one Devise retry ($1.03) and one resume.
+- **A check opening with `d=$(mktemp -d) && …` was prose.** The head list allowed upper-case assignments and had no `cd`. The review repair was rejected twice for it; then, once fixed, two done-checks the Verifier had walked and reported met (D3, D7) ran as commands and failed. Answer: lower-case assignments, `cd`, and the coreutils are heads. Cost: two Solver repair turns ($1.37) and one resume. The reading matters more than the cost: **a check a machine runs is evidence, a walk is a report**, and this run measured the difference on two checks.
+- **A rejected repair's id blocked its rewrite.** The rejected U4 stayed in `PLAN.md`; the next pass's Solver rewrote U4 for the same evidence and the loop said "no new unit". Answer: new means never accepted by the loop, not absent from the file. Cost: one Solver retry ($0.62).
+- **A review turn's scratch files were committed.** The reviewer's shell redirections left six files in the repo root, the engine committed them as the look-back turn, and the next finish check failed ownership on files nobody owned; the Solver then wrote a seven-file unit to delete them. Answer: the repo goes back to where it was before a review turn, and before a repair turn whose verdict is that the check is wrong. Cost: one Solver turn ($1.19), stopped by hand, and one orchestrator commit.
+- **Docker here is Colima, which shares only the home directory, twice.** First D7 of the json-count run: the fresh clone under the system temp root mounted as an empty folder. Then D10 of `ledger-report` (corpus 06): the check mounted a file it had made with `mktemp`, which lands under `/var/folders`, and the container saw an empty directory; the Solver reproduced it with busybox and called the check wrong, correctly. `WORK_ROOT=$HOME/.cache/cloud-agents-work`, and a check makes its files under `$PWD`: BSD `mktemp` ignores `TMPDIR`, as the second resume of `ledger-report` proved, so the understand prompt now says where a check's files go. Not a code defect, and written down because it bit twice in one day.
+
+- **A Verifier with a shell killed the orchestrator** (corpus, `packing-list`, 2026-09-21). Walking D3 and D4 it ran `ps aux | grep node | grep -v grep | awk '{print $2}' | xargs kill -9` to restart the page's server, which is every Node process on the machine: the loop died with 137 mid-batch, the driver moved on, the run resumes. Answer, in two parts and a confession: the verify and carry-out prompts now say processes are not the model's to stop unless it started them; the local runner is started with `--exclude-tools` for `pkill`, `killall`, `kill -9`, `sudo`, which a prefix list cannot make watertight (this pipeline begins with `ps`); and the real answer is the sandbox, `qwen --sandbox` on Colima with the clone mounted from `WORK_ROOT` and Ollama reached over the host, which is the same fix for the Hand rewriting history. Not built yet.
+
+What the request did, for the record: every one of its seven J and W lines became a done-check on the Solver's first turn, no retry; its one M line went into Given as immovable; the two checks a stranger later found wanting (D3's working directory, the recursion depth) were the two things the requester had not written, and the reviewer found both. D3's resolution was the requester's, made in `ACCEPT.md` against the walk-through they had written: the check runs from the clone after install, not from an unrelated directory through a global `npm link`.
+
 What the models did right, for the record: the Understand turn found the defect's exact branch, wrote the reproduction as D1, named three invariants, and discovered the quality bar from package.json without inventing a lint command. The Devise turn wrote a red regression test with a bonus trailing-slash case, a unit whose Do quotes the exact lines to replace, and answered the first plan-lint gap (no Given) in one retry. The Hand, qwen3-coder-next, made the two-line fix on its first attempt with no question. The reviewer checked the result a second way, curling a server it started itself, and found nothing.
 
 Then the orchestrator defects `../architect-crew-gate/ROADMAP.md`
@@ -288,6 +301,74 @@ drift, the `dev`-in-the-bar timeout, and two checks the parser misread.
 Every one is now a rule with a test (303 → 307 tests). The models
 themselves: 12 units across both runs, 10 passing first attempt, and two
 Solver re-plans that fixed real plan defects.
+
+## R3: the requester's own lines
+
+2026-09-20. `templates/REQUEST.md` filled in for a CLI with no web page
+(`examples/request-json-count.md`), Sonnet default with the oracle, hybrid,
+`rvegajr/polya-live-json-count#1`. The request says four things the
+feature-only idea file (`ideas/ready/farm-json-lines.md`) never said: empty
+stdin is an error, stderr is exactly one line, nested values count, 50 MB
+finishes in seconds. The question was whether they reach the done-checks and
+whether a stranger can then run them.
+
+| what | result |
+| --- | --- |
+| request lines disposed on the first Understand turn | 8/8 (J1–J4 → D2, D3, D4, D1; W1–W3 → D3, D1, D5; M1 immovable in Given), no retry |
+| units | 3 planned + 1 repair, every one gate-green on the first attempt, zero Hand questions |
+| finish check | PASS (install first, then the bar) |
+| done-checks from a fresh clone | 8/8, six by command including the Docker floor check, two walked |
+| review | done, one medium finding (recursion depth, a case nobody wrote) |
+| Solver cost | Claude Max API-eq $11.29; Ollama $0 |
+| resumes | 6, every one for an orchestrator defect listed above, none for a model |
+
+Two readings. First, the request template works as designed: the Solver
+derives checks from features on its own, and what it cannot derive, the
+requester wrote in ten minutes and it became the spec. Second, the same run
+falsified two "met" verdicts: once D3 and D7 parsed as commands instead of
+prose, the machine ran what the local Verifier had narrated and both failed.
+A prose done-check attested by a walk is a report; the roadmap's item one,
+page checks as tests, is the same lesson from the other side.
+
+**The self-conflict guard, measured** (`examples/request-node-floor-conflict.md`,
+the D5 finding of R2 written as a requester would write it, on the R2 fixture's
+branch): the Solver disposed J1 as `dismissed — conflicts with M1` on its first
+turn, with a second reason no one had seen (Node 18.0.0's CLI has no `--test`,
+so the pinned test script cannot pass there whatever the database does), and
+the loop stopped at Understand: `the request conflicts with itself`. Claude
+Max API-eq $1.42. The same conflict cost $10.21 and a full run to surface in
+the morning, before the request had a place to say what may not move.
+
+Not scored blind: the blind rubric is for web apps, and the point of this
+run was the request, not the product. The product's own numbers are the
+table. Follow-up: the medium finding (a depth limit) is a one-unit repair
+the requester deferred in `ACCEPT.md`.
+
+## R4: the corpus, ten requests of different shapes
+
+2026-09-20 to 21, overnight. `examples/corpus/`: ten `REQUEST.md` files, one driver (`run-corpus.sh`) that ran them one at a time under the 75 % budget rule, one resume driver for what stopped. Sonnet with the oracle, hybrid, the local Hand throughout. Per-run logs and the summary are in `.runs/corpus/`; the summary as it stood is `examples/corpus/summary-2026-09-21.tsv`.
+
+| request | shape | final | passes | cost (Max API-eq) | units green first try | done-checks | review |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| jsoncount-depth | repair on an existing repo | complete | 2 | $2.86 | 1/1 | 4/4 | done, 1 finding |
+| slugify | CLI | complete | 1 | $3.99 | 4/4 | 8/8 | 1 high, repaired |
+| iso-week | CLI, dates and time zones | complete | 1 | $3.14 | 4/4 | 9/9 | clean |
+| kv-api | HTTP API, no UI, persistence | complete | 3 | $12.74 | 6/6 | 10/10 | done |
+| packing-list | a page, keyboard only | 9/9 met; review repair unresolved | 2 | $10.13 | 7/8 | 9/9 | 1 high, real |
+| ledger-report | streaming CSV, 300 MB, Docker floor check | complete | 3 | $6.69 | 6/6 | 10/10 | done |
+| snippet-vault-export | change on an existing app | 10/10 met; review repair unresolved | 3 | $18.01 | 5/5 | 10/10 | 1 high, real |
+| cron-next | typed library, no CLI | complete | 3 | $11.09 | 2/2 | 9/9 | clean |
+| dedupe-py | Python CLI, pytest | complete | 1 | $7.37 | 5/5 | 10/10 | clean |
+| job-queue | long-running process, SIGTERM | complete | 2 | $17.53 | 6/6 | 8/8 | done |
+| **total** | | **8 complete, 2 done-as-product** | 21 | **$93.55** | 46/47 | 87/88 | |
+
+**What held.** Every request's J/W/M lines reached the done-checks on the first Understand turn, ten for ten; no run needed the request-disposition retry. Forty-six of forty-seven Hand units passed their gate on the first attempt on the local model, across four toolchains (npm, TypeScript with `tsc`, Python with `pytest`, Docker), and the one that did not was the packing-list repair below. The Verifier's mechanical share was high where the product is a command (8 to 10 of 10) and low where it is a page (2 of 9, 2 of 10), which is roadmap item one's case restated with numbers. Five of ten completed unattended after the first orchestrator fixes; the three CLIs completed first time.
+
+**What stopped runs, and whose fault.** Eleven stops on the first pass, none a model's: nine orchestrator defects (a fenced-script Check read with its language tag; the suite-must-be-red rule applied to a repair whose checks live outside the suite; a placeholder inside a quoted string; a result note after a leading command; a rejected repair's id blocking its rewrite; a negation not read as a command; a check that could not run at all treated as unmet; a transient "suite is red" Check; a NUL byte crashing the spawn), one environment (Colima shares only `$HOME`, twice), and one Verifier killing the loop with `ps | xargs kill -9`. Each is fixed with the live artifact as the test, in this branch, and the resumes ran on the fixed code. Five stops were the Solver's own checks written for an environment they were not run in: a temp file `mktemp` puts where a container cannot see it, a probe file in `/tmp` importing a relative path, a 2 MB literal on the command line, a restart check that killed `npm` and left `node` running, a `pkill` for a server the loop had started. Each was reworded by hand as the requester's ACCEPT edit and is now a rule in the understand prompt: a check runs from the repo root, makes its files under `$PWD`, sends a body through a file, and starts its own server on another port if it needs one.
+
+**The two that did not complete, both at the review-repair stage, both with the product done.** `packing-list`: the reviewer found a real keyboard bug (list keys firing while the input has focus), the Solver's repair Check pinned the SHA-256 of the whole `app.js`, and the local Hand could not reproduce a two-hundred-line file byte for byte in three attempts. A whole-file hash is a plan device a frontier Hand meets and a local one does not; the answer is a lint that caps hash-pinned Checks at a file size a Hand can carry verbatim, not built yet. `snippet-vault-export`: the reviewer found that `package.json`'s `test` script still names only the four original files, so the twelve new tests never run under `npm test`; the repair procedure's own rules forbade editing that line. A one-line human follow-up, and an argument for letting a review repair touch the test script when the finding is about the test script.
+
+**Cost.** $93.55 Max API-eq for ten requests, $2.86 to $18.01 each; Ollama $0. The three that cost most (`snippet-vault-export`, `job-queue`, `kv-api`) each paid for repeated look-back passes as their checks were reworded, and two of them for Verifier walks with frontier fallbacks. The Max weekly window went from 59 % to 69 %. Twenty-two lessons were appended to the ledger over the day; curation is next.
 
 ## Order of work
 

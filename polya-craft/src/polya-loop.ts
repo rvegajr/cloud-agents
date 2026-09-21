@@ -4,7 +4,7 @@ import { lenientJson, type BlueprintIO } from "../../architect-crew-gate/src/blu
 import { browserToolNote, scenarioNeedsBrowser } from "../../architect-crew-gate/src/browser.js";
 import { gateFeedbackNote, type GateResult } from "../../architect-crew-gate/src/quality-gate.js";
 import { fileLessonsStore, priorLessonsNote, tagsForProblem, type LessonsStore, type NewLesson } from "./lessons.js";
-import { ARTIFACTS, POLYA_DIR, oracleNote, parsePlan, parseProblem, problemGaps, renderPlan, renderProblem, validateUnits, type DoneCheck, type Plan, type Problem, type Unit } from "./plan.js";
+import { ARTIFACTS, POLYA_DIR, immovableOf, oracleNote, parsePlan, parseProblem, parseRequest, problemGaps, renderPlan, renderProblem, requestNote, validateUnits, type DoneCheck, type Plan, type Problem, type Unit } from "./plan.js";
 
 /**
  * The polya-craft loop (PATTERN.md section 4), engine-free so a fake `send`
@@ -252,6 +252,9 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
   const lessons: LessonsStore | undefined = opts.lessons === null ? undefined : (opts.lessons ?? fileLessonsStore());
   const state: PolyaState = { ...initialPolyaState(), ...initial };
   const persist = async () => opts.onState?.(state);
+  // The requester's J/W/M lines, if the problem came from REQUEST.md; the same text on a resume, so nothing to persist.
+  const request = parseRequest(opts.problem);
+  const immovable = immovableOf(request);
   const artifact = (name: string) => io.readFile(name);
   const track = (t: TurnResult) => {
     if (t.runId) state.runIds.push(t.runId);
@@ -432,8 +435,11 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
   const repair = async (stage: "finish" | "verify" | "review" | "unit", evidence: string, revise?: Unit): Promise<{ reason: PolyaStopReason; detail: string } | undefined> => {
     const stopFor: PolyaStopReason = stage === "finish" ? "finish-check-failed" : stage === "verify" ? "verify-failed" : stage === "unit" ? "unit-gate-failed" : "review-unresolved";
     const problem = readProblem();
+    // Ids the Solver must not reuse: everything in PLAN.md, including a repair an earlier pass rejected and left there.
     const before = readPlan()?.units.map((u) => u.id) ?? [];
     const nextId = `U${before.reduce((n, id) => Math.max(n, Number(id.match(/\d+/)?.[0] ?? 0)), 0) + 1}`;
+    // What counts as new: a unit the loop never accepted. A rejected repair's id rewritten by the Solver is new
+    // (live jsoncount, 2026-09-20: a U4 the old recognizer had rejected made the next pass's U4 "no new unit").
     const prompt = buildPrompt(`${PROMPTS}/repair`, "", {
       stage: stage === "finish" ? "the finish check" : stage === "verify" ? "done-checks from a fresh clone" : stage === "unit" ? `unit ${revise?.id}'s own Check` : "the review",
       evidence,
@@ -451,8 +457,14 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     if (t.status !== "finished") return { reason: "run-failed", detail: "repair turn did not finish" };
     io.commit("repair: PLAN.md");
     const report = lenientJson<{ check_wrong?: boolean; notes?: string }>(t.result);
-    if (report?.check_wrong) return { reason: stopFor, detail: `the Solver says the check is wrong, not the product: ${report.notes ?? ""}`.trim() };
-    const fresh = () => (readPlan()?.units ?? []).filter((u) => !before.includes(u.id) || (revise && u.id === revise.id));
+    if (report?.check_wrong) {
+      // Nothing of this turn belongs in the repo: PLAN.md lives under the ignored .polya/, and what the Solver ran to
+      // reach its verdict is scratch. Left committed, it fails ownership at the next finish check.
+      if (io.headSha() !== beforeSha && io.resetTo) io.resetTo(beforeSha);
+      return { reason: stopFor, detail: `the Solver says the check is wrong, not the product: ${report.notes ?? ""}`.trim() };
+    }
+    const accepted = state.units.map((u) => u.id);
+    const fresh = () => (readPlan()?.units ?? []).filter((u) => !accepted.includes(u.id) || (revise && u.id === revise.id));
     const gapsOf = (): string[] => {
       const units = fresh();
       if (!units.length) return ["- no new unit under `## Repairs`"];
@@ -463,6 +475,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
         knownUnitIds: (readPlan()?.units ?? []).map((u) => u.id),
         // A repair for a failed done-check names it; one for the finish check or a review finding answers the whole job.
         requireServes: stage === "verify",
+        immovable,
       }).map((p) => `- ${p.id}: ${p.problem}`);
       return lines;
     };
@@ -534,8 +547,9 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       repo: opts.repo,
       prior_lessons: priorLessonsNote(offered, artifact(ARTIFACTS.lookback)),
       oracle: opts.oracle ? oracleNote() : "",
+      request: requestNote(request),
     });
-    const gapsOf = () => problemGaps(readProblem(), { maxDone: opts.oracle ? 10 : 8, software, offeredLessons: offered.map((l) => l.id), oracle: opts.oracle });
+    const gapsOf = () => problemGaps(readProblem(), { maxDone: opts.oracle ? 10 : 8, software, offeredLessons: offered.map((l) => l.id), oracle: opts.oracle, request });
     // Already on disk (a resume, or a person wrote it): do not pay for the full turn again. Gaps get the one targeted retry below.
     if (artifact(ARTIFACTS.problem)) {
       log(`${ARTIFACTS.problem} is on disk; ${gapsOf().length ? "it has gaps, asking the Solver to fix only those" : "skipping the Solver turn"}`);
@@ -545,7 +559,21 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     }
     let problem = readProblem();
     if (!problem) return stop("unparseable-report", `${ARTIFACTS.problem} is missing or has no title`);
-    let gaps = gapsOf();
+    // A mechanical done-check that cannot run at all (a 2 MB literal past ARG_MAX, a command not found, a syntax
+    // error) would sit "unmet" for the wrong reason until look back, then cost a repair turn to be called wrong
+    // (live snippet-vault-export, 2026-09-21, D8). It is run once here; red is fine, unable to run is a gap.
+    const cannotRun = async (): Promise<string[]> => {
+      if (!software) return [];
+      const out: string[] = [];
+      for (const d of state.problem?.done ?? []) {
+        if (!d.command) continue;
+        const r = await io.runCommand(d.command);
+        const why = r.code === 126 || r.code === 127 ? `exit ${r.code}` : /Argument list too long|command not found|syntax error|is a directory/i.exec(r.output)?.[0];
+        if (why) out.push(`- ${d.id}'s Check cannot run (${why}); a Check may be unmet, never unrunnable. Fix the command`);
+      }
+      return out;
+    };
+    let gaps = [...gapsOf(), ...(await cannotRun())];
     if (gaps.length) {
       log(`understanding has gaps; asking the Solver once more:\n${gaps.join("\n")}`);
       const note = `## Understanding incomplete\n\n${ARTIFACTS.problem} is on disk but the orchestrator found these gaps. Fix only these, commit, then reply with the same JSON block.\n\n${gaps.join("\n")}\n\n---\n\n`;
@@ -553,10 +581,14 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       track(t);
       if (t.status !== "finished") return stop("run-failed", "understand retry did not finish");
       io.commit("understand: gap fixes");
-      gaps = gapsOf();
+      gaps = [...gapsOf(), ...(await cannotRun())];
       if (gaps.length) return stop("understanding-incomplete", gaps.join("; "));
     }
     problem = state.problem!;
+    // A J or W line the Solver could only meet by moving an M line is a defect in the request, not in the product.
+    // The requester fixes it in five minutes now (ACCEPT.md, before any unit runs); a unit would fail ownership on it later.
+    const conflicts = request.filter((r) => r.kind !== "immovable").map((r) => ({ r, d: problem!.request[r.id] ?? "" })).filter(({ d }) => /\bdismissed\b/i.test(d) && /\bM\d+\b/.test(d));
+    if (conflicts.length) return stop("understanding-incomplete", `the request conflicts with itself: ${conflicts.map(({ r, d }) => `${r.id} (${r.text.slice(0, 70)}) — ${d.slice(0, 240)}`).join("; ")}. Edit the request and start again; the Understand turn is the cheap one.`);
     log(`understood: "${problem.title}" (${problem.kind ?? "kind ?"}, ${problem.size ?? "size ?"}); ${problem.done.length} done-check(s), ${problem.done.filter((d) => d.command).length} mechanical; ${problem.lessons.length} lesson(s) consulted`);
     state.phase = "devise";
     await persist();
@@ -576,7 +608,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       const plan = readPlan();
       if (!plan) return [`- ${ARTIFACTS.plan} missing`];
       state.units = plan.units;
-      const lines = validateUnits(plan.units, problem, { requireCommand: software, exists, doneIds: carried }).map((p) => `- ${p.id}: ${p.problem}`);
+      const lines = validateUnits(plan.units, problem, { requireCommand: software, exists, doneIds: carried, immovable }).map((p) => `- ${p.id}: ${p.problem}`);
       if (!plan.units.length) lines.push("- no units under `## Units`");
       if (plan.units.length > maxUnits) lines.push(`- ${plan.units.length} units; at most ${maxUnits}. Split the problem into sub-problems`);
       if (!plan.outer.length) lines.push("- no `## Outer test` steps");
@@ -601,11 +633,21 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       gaps = gapsOf();
       if (gaps.length) return stop("plan-not-workable", gaps.join("; "));
     }
-    // A first plan must leave the suite red. A re-plan after a Hand's question keeps the units that passed, so the suite may be partly green.
+    // Every Check is unmet before its unit runs. A unit whose Check is a command is measured by that command, now; a
+    // repair whose Checks live outside the suite leaves the suite green and that is fine (live jsoncount-depth,
+    // 2026-09-20). Only a plan with no command Check at all falls back to the suite being red. A re-plan after a
+    // Hand's question keeps the units that passed, so those are not re-measured.
     const anyPassed = state.unitRecords.some((r) => r.passed);
-    if (software && problem.bar.test && !anyPassed) {
-      const red = await io.runCommand(problem.bar.test);
-      if (red.code === 0) return stop("plan-not-workable", "the test suite is already green before any unit ran; every Check must be unmet now (write the red tests at Devise)");
+    if (software && !anyPassed) {
+      const measured = state.units.filter((u) => u.command);
+      for (const u of measured) {
+        const r = await io.runCommand(u.command!);
+        if (r.code === 0) return stop("plan-not-workable", `${u.id}'s Check already passes before the unit ran; it measures nothing (every Check is unmet now; write the red test at Devise)`);
+      }
+      if (!measured.length && problem.bar.test) {
+        const red = await io.runCommand(problem.bar.test);
+        if (red.code === 0) return stop("plan-not-workable", "the test suite is already green before any unit ran; every Check must be unmet now (write the red tests at Devise)");
+      }
     }
     state.baselineSha = io.headSha();
     state.unitIndex = 0;
@@ -816,6 +858,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     // (c) the review: fresh session, read-only, Pólya's questions, lessons.
     log("look back (c): review (fresh session, read-only)");
     const base = state.baselineSha ?? "HEAD~1";
+    const beforeReview = io.headSha();
     const t = await send(
       buildPrompt(`${PROMPTS}/look-back`, "", {
         problem: artifact(ARTIFACTS.problem) ?? "",
@@ -829,6 +872,13 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       { mode: "agent", fresh: true },
     );
     track(t);
+    // A review is read-only by contract, but a shell redirection (`> out.txt`) still writes, and the engine commits
+    // whatever a turn leaves. Those files are nobody's; the finish check would fail ownership on them next pass
+    // (live jsoncount, 2026-09-20: six scratch files). The review's report is in `t`; the repo goes back as it was.
+    if (io.headSha() !== beforeReview && io.resetTo) {
+      io.resetTo(beforeReview);
+      log("the review turn left changes in the repo; discarded (a review is read-only)");
+    }
     if (t.status !== "finished") return stop("run-failed", "review turn did not finish");
     const review = lenientJson<LookBackReport>(t.result);
     if (!review || !Array.isArray(review.findings) || !review.verdict) return stop("unparseable-report", "the review returned no findings block");

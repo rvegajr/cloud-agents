@@ -451,9 +451,166 @@ test("commandOf: a command that wraps across lines, or starts with rm or a subsh
   assert.equal(commandOf("`for f in a b; do echo $f; done`"), "for f in a b; do echo $f; done");
 });
 
+// ---------------------------------------------------------------------------
+// The requester's REQUEST.md: J/W/M items, their dispositions, and immovable paths
+// ---------------------------------------------------------------------------
+
+import { barPurposeOf, immovableOf, parseRequest, requestNote } from "./plan.js";
+
+export const REQUEST_MD = `# Request: count JSON values on stdin
+
+## Why
+wc -l lies about pretty-printed JSON.
+
+## I will judge it by
+- I pipe a 200 MB file and it finishes without loading it all into memory.
+- \`jsoncount < broken.json\` exits non-zero and prints one line on stderr.
+
+## Wrong looks like
+- An invalid line is skipped silently and the count still prints.
+
+## Must not change
+- \`test/cli.test.js\` (the CLI contract; the exit codes are fixed there)
+- \`src/schema.sql\`
+
+## Not this
+- No NDJSON.
+`;
+
+test("parseRequest: the template's placeholders are not items; a filled request yields J/W/M ids in order", () => {
+  assert.deepEqual(parseRequest(readFileSync(new URL("../templates/REQUEST.md", import.meta.url), "utf8")), []);
+  assert.deepEqual(parseRequest(readFileSync(new URL("../../ideas/TEMPLATE.md", import.meta.url), "utf8")), []);
+  const items = parseRequest(REQUEST_MD);
+  assert.deepEqual(
+    items.map((i) => [i.id, i.kind]),
+    [["J1", "judge"], ["J2", "judge"], ["W1", "wrong"], ["M1", "immovable"], ["M2", "immovable"]],
+  );
+  assert.match(items[0]!.text, /200 MB/);
+  assert.deepEqual(immovableOf(items), ["`test/cli.test.js` (the CLI contract; the exit codes are fixed there)", "`src/schema.sql`"]);
+  assert.deepEqual(parseRequest("# Idea\n\n## Must have (v1)\n- a thing\n"), []);
+  assert.equal(requestNote([]), "");
+  assert.match(requestNote(items), /## The requester's own criteria[\s\S]*\*\*J1\*\* \(will judge it by\) I pipe[\s\S]*\*\*M2\*\* \(says must not change\)/);
+});
+
+test("problemGaps: every request item needs a disposition; adopted-as must name a D; an M line must be disposed immovable", () => {
+  const items = parseRequest(REQUEST_MD);
+  const p = parseProblem(PROBLEM_MD)!;
+  const gaps = problemGaps(p, { request: items });
+  assert.equal(gaps.filter((g) => /has no disposition under `## Request`/.test(g)).length, 5, gaps.join("\n"));
+  const withRequest = parseProblem(
+    `${PROBLEM_MD}\n\n## Request\n- J1: adopted as D1\n- J2: adopted as D9\n- W1: adopted as D2\n- M1: it lives in test/\n- M2: immovable — src/schema.sql, in Given\n`,
+  )!;
+  assert.deepEqual(withRequest.request.J1, "adopted as D1");
+  const g2 = problemGaps(withRequest, { request: items });
+  assert.ok(g2.some((g) => /J2 is adopted as D9, which is not a done-check/.test(g)), g2.join("\n"));
+  assert.ok(g2.some((g) => /M1 must be disposed `immovable/.test(g)), g2.join("\n"));
+  assert.ok(!g2.some((g) => /M2/.test(g)), g2.join("\n"));
+  const clean = parseProblem(
+    `${PROBLEM_MD}\n\n## Request\n- J1: adopted as D1\n- J2: dismissed — the CLI reads whole files by design; noted in Restated\n- W1: adopted as D2\n- M1: immovable — test/cli.test.js\n- M2: immovable — src/schema.sql\n`,
+  )!;
+  assert.deepEqual(problemGaps(clean, { request: items }).filter((g) => /[JWM]\d/.test(g)), []);
+  // A disposition that is neither adopted nor dismissed is a gap.
+  const vague = parseProblem(`${PROBLEM_MD}\n\n## Request\n- J1: noted\n`)!;
+  assert.ok(problemGaps(vague, { request: items.slice(0, 1) }).some((g) => /J1's disposition is neither/.test(g)));
+});
+
+test("validateUnits: a unit whose Touches names a path the request says must not change is not workable", () => {
+  const plan = parsePlan(PLAN_MD);
+  const immovable = immovableOf(parseRequest(REQUEST_MD));
+  assert.deepEqual(validateUnits(plan.units, parseProblem(PROBLEM_MD), { immovable }), []);
+  const touching = parsePlan(PLAN_MD.replace("Touches:  src/app.js", "Touches:  src/app.js, src/schema.sql"));
+  const problems = validateUnits(touching.units, parseProblem(PROBLEM_MD), { immovable });
+  assert.equal(problems.length, 1, JSON.stringify(problems));
+  assert.match(problems[0]!.problem, /Touches: names src\/schema\.sql, which the request says must not change/);
+  // A directory named immovable covers everything under it; a sibling path is untouched.
+  const dir = validateUnits(parsePlan(PLAN_MD.replace("Touches:  src/app.js", "Touches:  config/app.json")).units, parseProblem(PROBLEM_MD), { immovable: ["the `config/` folder (ops owns it)"] });
+  assert.equal(dir.length, 1, JSON.stringify(dir));
+  assert.deepEqual(validateUnits(parsePlan(PLAN_MD.replace("Touches:  src/app.js", "Touches:  src/configure.js")).units, parseProblem(PROBLEM_MD), { immovable: ["`src/config.js`"] }), []);
+  // A bare word in backticks is a name, not a directory (live jsoncount: "as the package `bin`" must not cover bin/cli.js);
+  // written as a path, `bin/` does.
+  const binUnit = parsePlan(PLAN_MD.replace("Touches:  src/app.js", "Touches:  bin/jsoncount.js, package.json")).units;
+  assert.deepEqual(validateUnits(binUnit, parseProblem(PROBLEM_MD), { immovable: ["The command is `jsoncount`, as the package `bin` and the `npm run` script name"] }), []);
+  assert.equal(validateUnits(binUnit, parseProblem(PROBLEM_MD), { immovable: ["`bin/` is generated"] }).length, 1);
+  assert.equal(validateUnits(binUnit, parseProblem(PROBLEM_MD), { immovable: ["`package.json`"] }).length, 1);
+});
+
+test("templates: REQUEST.md and ACCEPT.md exist with the sections the loop and the requester rely on", () => {
+  const req = readFileSync(new URL("../templates/REQUEST.md", import.meta.url), "utf8");
+  for (const h of ["## I will judge it by", "## Wrong looks like", "## Must not change", "## The one walk-through"]) assert.ok(req.includes(h), h);
+  const acc = readFileSync(new URL("../templates/ACCEPT.md", import.meta.url), "utf8");
+  for (const h of ["## Before any unit runs", "## After look back", "## Lesson"]) assert.ok(acc.includes(h), h);
+  const idea = readFileSync(new URL("../../ideas/TEMPLATE.md", import.meta.url), "utf8");
+  for (const h of ["## I will judge it by", "## Wrong looks like", "## Must not change", "## Must have (v1)"]) assert.ok(idea.includes(h), h);
+});
+
 test("validateUnits: a repair for the finish check need not name a done-check (live R2, U8)", () => {
   const u = { ...parsePlan(PLAN_MD).units[0]!, serves: [] };
   const problem = parseProblem(PROBLEM_MD);
   assert.match(validateUnits([u], problem, { doneIds: [] }).map((p) => p.problem).join("\n"), /Serves: names no D/);
   assert.ok(!validateUnits([u], problem, { doneIds: [], requireServes: false }).some((p) => /Serves/.test(p.problem)));
+});
+
+test("live jsoncount (2026-09-20): a bar table with the columns swapped and prose purposes, and a json bar as a list of rows, both read", () => {
+  const md = readFileSync(new URL("./fixtures-live-problem-jc.md", import.meta.url), "utf8");
+  const p = parseProblem(md)!;
+  assert.deepEqual(p.bar, { install: "npm ci", test: "npm test" });
+  assert.equal(p.done.length, 8);
+  assert.deepEqual(Object.keys(p.request), ["J1", "J2", "J3", "J4", "W1", "W2", "W3", "M1"]);
+  assert.match(p.request.M1!, /^immovable/);
+  assert.deepEqual(problemGaps(p, { software: true, request: parseRequest(readFileSync(new URL("../examples/request-json-count.md", import.meta.url), "utf8")) }).filter((g) => /Quality bar|[JWM]\d/.test(g)), []);
+  // The block alone, as a list of rows, when the markdown table is absent.
+  const blockOnly = parseProblem('# Problem: x\n\n## Done-check\n- D1: a — Check: `true` — Now: unmet\n\n```json problem\n{ "bar": [{ "command": "npm ci", "purpose": "install deps" }, { "command": "npm test", "purpose": "the suite" }, { "command": "npm run typecheck", "purpose": "types" }] }\n```\n')!;
+  assert.deepEqual(blockOnly.bar, { install: "npm ci", test: "npm test", typecheck: "npm run typecheck" });
+  // The canonical shape still reads, and a placeholder row is skipped.
+  const canon = parseProblem("# Problem: x\n\n## Quality bar\n| Purpose | Command |\n| --- | --- |\n| install | `npm ci` |\n| test | `npm test` (no deps) |\n| lint | `<none>` |\n")!;
+  assert.deepEqual(canon.bar, { install: "npm ci", test: "npm test" });
+  assert.equal(barPurposeOf("run the automated suite", "node --test test/"), "test");
+  assert.equal(barPurposeOf("a note", "make coffee"), undefined);
+});
+
+test("commandOf: a check that opens with a lower-case assignment or cd is a command (live jsoncount repair, U4)", () => {
+  const live = "`d=$(mktemp -d) && (cd \"$d\" && printf '{\"a\":' > broken.json && npx jsoncount broken.json; test $? -ne 0)` — Now: unmet";
+  assert.match(commandOf(live) ?? "", /^d=\$\(mktemp -d\) && \(cd/);
+  assert.equal(commandOf("`cd /tmp && npm test`"), "cd /tmp && npm test");
+  assert.equal(commandOf("`export N=22 && nvm exec $N npm test`"), "export N=22 && nvm exec $N npm test");
+  assert.equal(commandOf("`src/app.js`"), undefined);
+});
+
+test("commandOf: a fenced script is one command, without its language tag (live jsoncount-depth, 2026-09-20)", () => {
+  const plan = parsePlan(readFileSync(new URL("./fixtures-live-plan-jc-depth.md", import.meta.url), "utf8"));
+  const u1 = plan.units[0]!;
+  assert.ok(u1.command, "U1 has a command");
+  assert.match(u1.command!, /^set -e\n/);
+  assert.doesNotMatch(u1.command!, /^bash\n/);
+  assert.equal(commandOf("```sh\n$ npm test\n```"), "npm test");
+  assert.equal(commandOf("```\nsome prose about running things\n```"), undefined);
+});
+
+test("commandOf: a placeholder inside a quoted string is text, and a note after a leading command is a note (live kv-api, 2026-09-20)", () => {
+  const plan = parsePlan(readFileSync(new URL("./fixtures-live-plan-kv.md", import.meta.url), "utf8"));
+  const u5 = plan.units.find((u) => u.id === "U5")!;
+  assert.ok(u5.command, "U5's grep chain is a command");
+  assert.match(u5.command!, /grep -q "\/kv\/<key>" README\.md/);
+  assert.equal(commandOf("`node --test test/integration.test.js` — exit code 0, the kill-and-restart subtest passes"), "node --test test/integration.test.js");
+  // Still not commands: a placeholder in the command itself; a person acting before the command; an invocation modifier after it.
+  assert.equal(commandOf("`curl localhost:8787/kv/<key>`"), undefined);
+  assert.equal(commandOf("a stranger runs `npm start` and opens the page"), undefined);
+  assert.equal(commandOf("`curl -X POST /api/snippets` with a missing title"), undefined);
+});
+
+test("validateUnits: a Check that asserts the suite is red is a transient state, not a Check (live cron-next, 2026-09-21)", () => {
+  for (const check of ["`npm ci && npm run build && ! npm test`", "`npm test; test $? -ne 0`", "`! npm run test`"]) {
+    const plan = parsePlan(PLAN_MD.replace("Check:    `node --test test/notfound.test.js` — Now: unmet", `Check:    ${check} — Now: unmet`));
+    const problems = validateUnits(plan.units, parseProblem(PROBLEM_MD), { requireCommand: true });
+    assert.ok(problems.some((p) => p.id === "U1" && /asserts that the test suite fails/.test(p.problem)), check);
+  }
+  for (const check of ["`npm test`", "`! grep -q TODO src/app.js`", "`npm run build && node --test test/x.test.js`"]) {
+    const plan = parsePlan(PLAN_MD.replace("Check:    `node --test test/notfound.test.js` — Now: unmet", `Check:    ${check} — Now: unmet`));
+    assert.deepEqual(validateUnits(plan.units, parseProblem(PROBLEM_MD), { requireCommand: true }).filter((p) => /suite fails/.test(p.problem)), [], check);
+  }
+});
+
+test("problemGaps: a Check with a NUL byte is a gap, not a crash", () => {
+  const p = parseProblem(PROBLEM_MD.replace("Check: `node --test test/notfound.test.js`", "Check: `tr '\u0000' a`"))!;
+  assert.ok(problemGaps(p).some((g) => /D1's Check contains a NUL byte/.test(g)), JSON.stringify(problemGaps(p)));
 });

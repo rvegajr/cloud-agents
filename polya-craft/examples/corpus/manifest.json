@@ -1,0 +1,54 @@
+[
+  {
+    "name": "jsoncount-depth",
+    "file": "01-jsoncount-depth.md",
+    "repo": "https://github.com/rvegajr/polya-live-json-count",
+    "ref": "claude/f9a3cb48"
+  },
+  {
+    "name": "slugify",
+    "file": "02-slugify.md",
+    "create": "polya-corpus-slugify"
+  },
+  {
+    "name": "iso-week",
+    "file": "03-iso-week.md",
+    "create": "polya-corpus-iso-week"
+  },
+  {
+    "name": "kv-api",
+    "file": "04-kv-api.md",
+    "create": "polya-corpus-kv-api"
+  },
+  {
+    "name": "packing-list",
+    "file": "05-packing-list.md",
+    "create": "polya-corpus-packing-list"
+  },
+  {
+    "name": "ledger-report",
+    "file": "06-ledger-report.md",
+    "create": "polya-corpus-ledger-report"
+  },
+  {
+    "name": "snippet-vault-export",
+    "file": "07-snippet-vault-export.md",
+    "repo": "https://github.com/rvegajr/polya-live-snippet-vault",
+    "ref": "claude/04846696"
+  },
+  {
+    "name": "cron-next",
+    "file": "08-cron-next.md",
+    "create": "polya-corpus-cron-next"
+  },
+  {
+    "name": "dedupe-py",
+    "file": "09-dedupe-py.md",
+    "create": "polya-corpus-dedupe-py"
+  },
+  {
+    "name": "job-queue",
+    "file": "10-job-queue.md",
+    "create": "polya-corpus-job-queue"
+  }
+]

@@ -47,9 +47,11 @@ function makeIO(overrides: Partial<PolyaIO> & { files?: Record<string, string>; 
       calls.writes.push(rel);
     },
     listTests: () => [],
-    headSha: () => `sha${++sha}`,
+    // HEAD moves only when something is committed, as in git; a turn that commits nothing leaves it where it was.
+    headSha: () => `sha${sha}`,
     commit: (m) => {
       calls.commits.push(m);
+      sha++;
       return true;
     },
     gate: async (kind, ctx) => {
@@ -59,8 +61,8 @@ function makeIO(overrides: Partial<PolyaIO> & { files?: Record<string, string>; 
     runCommand: async (command, cwd) => {
       calls.commands.push({ command, cwd });
       if (overrides.commands && command in overrides.commands) return { code: overrides.commands[command]!, output: "scripted" };
-      // The suite is red before any unit ran; everything else exits 0.
-      if (command === "npm test" && calls.gate.length === 0) return { code: 1, output: "1 failing" };
+      // Before any unit ran, every check is red (the suite and each unit's own Check); after that everything else exits 0.
+      if (calls.gate.length === 0 && !command.startsWith("ok:")) return { code: 1, output: "1 failing" };
       if (command.startsWith("fail:")) return { code: 1, output: "" };
       if (command.includes("red-until-fixed")) return { code: 1, output: "1 failing" };
       return { code: 0, output: "ok" };
@@ -203,12 +205,20 @@ test("plan-not-workable: a unit naming a test file under Touches is sent back on
   assert.match(sent[2]!.prompt, /^## Plan not workable[\s\S]*U1: Touches: names test file/);
 });
 
-test("plan-not-workable: a suite that is already green means no Check is unmet", async () => {
-  const { io } = makeIO({ commands: { "npm test": 0 } });
-  const { send } = makeSend({});
-  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+test("plan-not-workable: a unit whose Check already passes measures nothing; a green suite is fine when every unit has its own red command", async () => {
+  const { io } = makeIO({ commands: { "node --test test/notfound.test.js": 0 } });
+  const out = await runPolyaLoop(makeSend({}).send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "plan-not-workable");
-  assert.match(out.stopDetail!, /already green/);
+  assert.match(out.stopDetail ?? "", /U1's Check already passes before the unit ran/);
+  // The suite green, both unit Checks red: the plan stands (a repair whose Checks live outside the suite).
+  const { io: io2 } = makeIO({ commands: { "npm test": 0 } });
+  const ok = await runPolyaLoop(makeSend({}).send, { ...base, io: io2, lessons: null });
+  assert.equal(ok.stopReason, "complete", ok.stopDetail);
+  // No unit has a command (prose Checks, software off): the suite must be red.
+  const prose = PLAN_MD.replace("Check:    `node --test test/notfound.test.js` — Now: unmet", "Check:    a stranger curls /nope and sees 404 — Now: unmet").replace("Check:    `grep -q \"npm start\" README.md` — Now: unmet", "Check:    a stranger reads the README — Now: unmet");
+  const { io: io3 } = makeIO({ files: { ".polya/PLAN.md": prose }, commands: { "npm test": 0 } });
+  const out3 = await runPolyaLoop(makeSend({}).send, { ...base, io: io3, lessons: null, software: true });
+  assert.equal(out3.stopReason, "plan-not-workable");
 });
 
 test("unit gate: a failing gate feeds its findings back and the second attempt passes", async () => {
@@ -447,7 +457,8 @@ test("look back (b): a done-check that curls localhost starts the bar's start co
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "complete");
   assert.deepEqual(started, [{ command: "npm start", cwd: "/tmp/clone-1", stopped: true }]);
-  const check = calls.commands.find((c) => c.command.startsWith("test \"$(curl"));
+  // Understand runs the check once in the workspace to see that it can run at all; look back runs it in the clone.
+  const check = calls.commands.find((c) => c.command.startsWith("test \"$(curl") && c.cwd);
   assert.equal(check?.cwd, "/tmp/clone-1");
   // Without a server-shaped check, nothing is started.
   const { io: io2 } = makeIO();
@@ -499,7 +510,7 @@ test("ownership failure: the orchestrator reverts what the Hand wrote outside To
   const { send, sent } = makeSend({});
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "complete");
-  assert.deepEqual(reverts, [{ base: "sha2", allowed: ["src/app.js"] }]);
+  assert.deepEqual(reverts, [{ base: "sha3", allowed: ["src/app.js"] }]);
   assert.match(sent[3]!.prompt, /^## Files outside Touches were reverted\n\nThe orchestrator put src\/main\.ts back/);
   assert.match(sent[3]!.prompt, /## Quality gate failed \(attempt 1\)/);
   assert.equal(out.unitRecords[0]!.attempts, 2);
@@ -527,7 +538,7 @@ test("a Hand turn that rewrote history is discarded and retried; the gate never 
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "complete");
   assert.equal(out.unitRecords.find((r) => r.id === "U1")!.attempts, 2);
-  assert.deepEqual(resets, ["sha2"]);
+  assert.deepEqual(resets, ["sha3"]);
   assert.match(sent[3]!.prompt, /rewrote git history/);
   // Only one task gate ran for U1: the discarded turn was never judged.
   assert.equal(calls.gate.filter((g) => g.kind === "task" && g.allowed?.includes("src/app.js")).length, 1);
@@ -797,4 +808,115 @@ test("a unit that cannot pass its own Check goes back to the Solver once, and th
   assert.equal(out.unitRecords.find((r) => r.id === "U1")!.passed, true);
   assert.equal(sent.filter((s) => /# Carry out: unit U1/.test(s.prompt)).length, 4);
   assert.deepEqual(calls.gate.find((g) => g.allowed?.includes("public/index.html"))!.allowed, ["src/app.js", "public/index.html"]);
+});
+
+test("request: the understand prompt carries the requester's J/W/M lines, and a PROBLEM.md without dispositions gets the targeted retry", async () => {
+  const request = "# Request: 404\n\n## I will judge it by\n- I curl /nope and see 404.\n\n## Must not change\n- `src/config.js`\n";
+  const { io } = makeIO();
+  const { send, sent } = makeSend({});
+  const out = await runPolyaLoop(send, { ...base, problem: request, io, lessons: null });
+  assert.match(sent[0]!.prompt, /## The requester's own criteria[\s\S]*\*\*J1\*\* \(will judge it by\) I curl \/nope[\s\S]*\*\*M1\*\* \(says must not change\) `src\/config\.js`/);
+  assert.match(sent[1]!.prompt, /^## Understanding incomplete[\s\S]*J1 \(the requester's: I curl \/nope and see 404\.\) has no disposition[\s\S]*M1 \(must not change: `src\/config\.js`\) has no disposition/);
+  assert.equal(out.stopReason, "understanding-incomplete");
+  // A plain problem statement carries no such section and needs no disposition.
+  const { send: s2, sent: sent2 } = makeSend({});
+  const out2 = await runPolyaLoop(s2, { ...base, io: makeIO().io, lessons: null });
+  assert.doesNotMatch(sent2[0]!.prompt, /requester's own criteria/);
+  assert.equal(out2.stopReason, "complete");
+});
+
+test("request: with dispositions in PROBLEM.md the run proceeds, and a unit touching an immovable path is sent back at devise", async () => {
+  const request = "# Request: 404\n\n## I will judge it by\n- I curl /nope and see 404.\n\n## Must not change\n- `src/config.js` (ops owns it)\n";
+  const problem = `${PROBLEM_MD}\n\n## Request\n- J1: adopted as D1\n- M1: immovable — src/config.js, in Given\n`;
+  const { io } = makeIO({ files: { ".polya/PROBLEM.md": problem } });
+  const out = await runPolyaLoop(makeSend({}).send, { ...base, problem: request, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  const { io: io2 } = makeIO({ files: { ".polya/PROBLEM.md": problem, ".polya/PLAN.md": PLAN_MD.replace("Touches:  src/app.js", "Touches:  src/app.js, src/config.js") } });
+  const { send, sent } = makeSend({});
+  const out2 = await runPolyaLoop(send, { ...base, problem: request, io: io2, lessons: null });
+  assert.equal(out2.stopReason, "plan-not-workable");
+  assert.match(sent[2]!.prompt, /^## Plan not workable[\s\S]*U1: Touches: names src\/config\.js, which the request says must not change/);
+});
+
+test("request: a J line dismissed as conflicting with an M line stops at understand, before any unit runs", async () => {
+  const request = "# Request: 404\n\n## I will judge it by\n- The suite pins engines.node to 18 and the app installs there.\n\n## Must not change\n- `test/bootstrap.test.js`\n";
+  const problem = `${PROBLEM_MD}\n\n## Request\n- J1: dismissed — conflicts with M1: the pinned engines line is asserted by the immovable test\n- M1: immovable — test/bootstrap.test.js\n`;
+  const { io } = makeIO({ files: { ".polya/PROBLEM.md": problem } });
+  const { send, sent } = makeSend({});
+  const out = await runPolyaLoop(send, { ...base, problem: request, io, lessons: null });
+  assert.equal(out.stopReason, "understanding-incomplete");
+  assert.match(out.stopDetail ?? "", /the request conflicts with itself: J1 \(The suite pins[^)]*\) — dismissed — conflicts with M1/);
+  assert.deepEqual(sent.map((s) => s.kind), ["understand"]);
+});
+
+test("repair: a unit an earlier pass rejected and left in PLAN.md does not make the Solver's rewrite of it 'no new unit'", async () => {
+  const repairU3 = (title: string) => `${PLAN_MD}\n\n## Repairs\n\n## U3: ${title}\nServes:   D1\nProduces: x\nGiven:    y\nDo:       1. Fix src/app.js.\nTouches:  src/app.js\nCheck:    \`node --test test/repair.red-until-fixed.test.js\`\nDepends:  none\nNot:      z\n`;
+  const { io, calls } = makeIO({ preload: true, files: { ".polya/PLAN.md": repairU3("rejected last pass") }, gates: [fail("quality-bar"), pass, pass] });
+  const { send, sent } = makeSend({
+    devise: (p) => {
+      assert.match(p, /numbered from U4/);
+      currentIO!.writeFile(".polya/PLAN.md", repairU3("the same repair, rewritten"));
+      currentIO!.writeFile("test/repair.red-until-fixed.test.js", "test('red until fixed', ...)");
+      return json({ written: [".polya/PLAN.md"], units: ["U3"], check_wrong: false });
+    },
+  });
+  const resumed: PolyaState = { ...initialPolyaState(), phase: "look-back", units: parsePlan(PLAN_MD).units, unitIndex: 2, unitRecords: [{ id: "U1", attempts: 1, passed: true }, { id: "U2", attempts: 1, passed: true }], baselineSha: "sha0" };
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null }, resumed);
+  assert.equal(out.stopReason, "complete", out.stopDetail);
+  assert.ok(sent.some((s) => /# Carry out: unit U3/.test(s.prompt) && /rewritten/.test(s.prompt)));
+  assert.equal(calls.gate.filter((g) => g.kind === "finish").length, 2);
+});
+
+test("look back (c): what a review turn leaves in the repo is discarded; a repair turn that says the check is wrong leaves nothing behind", async () => {
+  const { io, calls, files } = makeIO();
+  const resets: string[] = [];
+  io.resetTo = (sha) => resets.push(sha);
+  let beforeReview = "";
+  const { send } = makeSend({
+    "look-back": () => {
+      // The reviewer's shell redirections wrote scratch files and the engine committed them, as a real turn does.
+      beforeReview = io.headSha();
+      currentIO!.writeFile("o1.txt", "scratch");
+      currentIO!.commit("hybrid: look-back turn");
+      return json({ verdict: "done", answers_problem: true, another_check: "x", findings: [], worked: [], did_not: [], confirmed: [], lessons: [] });
+    },
+  });
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  assert.deepEqual(resets, [beforeReview]);
+  void files;
+  // A repair turn whose verdict is "the check is wrong" is reset to where it started.
+  const { io: io2, calls: calls2 } = makeIO({ gates: [pass, pass, fail("quality-bar")] });
+  const resets2: string[] = [];
+  io2.resetTo = (sha) => resets2.push(sha);
+  let beforeRepair = "";
+  const { send: s2 } = makeSend({
+    devise: (p) => {
+      if (/^# Devise a repair/m.test(p)) {
+        beforeRepair = io2.headSha();
+        currentIO!.writeFile("err.txt", "scratch");
+        currentIO!.commit("hybrid: devise turn");
+        return json({ written: [], units: [], check_wrong: true, notes: "the check runs from the wrong directory" });
+      }
+      currentIO!.writeFile(".polya/PLAN.md", seed.plan);
+      return json({ written: [".polya/PLAN.md"], units: ["U1", "U2"] });
+    },
+  });
+  const out2 = await runPolyaLoop(s2, { ...base, io: io2, lessons: null });
+  assert.equal(out2.stopReason, "finish-check-failed");
+  assert.match(out2.stopDetail ?? "", /the check is wrong/);
+  assert.deepEqual(resets2, [beforeRepair]);
+  void calls; void calls2;
+});
+
+test("understand: a mechanical done-check that cannot run is a gap, not an unmet check (live snippet-vault-export, D8)", async () => {
+  const { io } = makeIO({ commands: { "node --test test/notfound.test.js": 127 } });
+  const { send, sent } = makeSend({});
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "understanding-incomplete");
+  assert.match(out.stopDetail ?? "", /D1's Check cannot run \(exit 127\)/);
+  assert.match(sent[1]!.prompt, /^## Understanding incomplete[\s\S]*D1's Check cannot run/);
+  // Red for a product reason is what a check should be.
+  const ok = await runPolyaLoop(makeSend({}).send, { ...base, io: makeIO().io, lessons: null });
+  assert.equal(ok.stopReason, "complete");
 });
