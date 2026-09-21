@@ -96,7 +96,8 @@ outer-test step.
   devDependency; writes `playwright.config.js` with `webServer` running the
   quality bar's `start` command on its port, `reuseExistingServer: true`,
   and headless Chromium; and runs `npx playwright install chromium`. Its
-  `Touches` are `package.json`, `package-lock.json`, `playwright.config.js`;
+  `Touches` are `package.json`, `package-lock.json`, `playwright.config.js`
+  and `.gitignore` (add `test-results/` and `playwright-report/`);
   its `Check` is `npx playwright test --list`, red until the toolchain is
   there. Each page unit's `Check` is then `npx playwright test <its spec>`.
   The browser binary is cached per machine, so a fresh clone needs only the

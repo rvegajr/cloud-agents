@@ -212,7 +212,7 @@ export function jobKindOf(md: string): "build" | "change" | "repair" | "maintain
 // QUALITY.md
 // ---------------------------------------------------------------------------
 
-const DEFAULT_HYGIENE = ["node_modules/", "dist/", "build/", "coverage/", "*.db", "*.sqlite", "*.sqlite3", ".env", ".qwen/", ".aider*", ".cursor/worktrees/"];
+const DEFAULT_HYGIENE = ["node_modules/", "dist/", "build/", "coverage/", "*.db", "*.sqlite", "*.sqlite3", ".env", ".qwen/", ".aider*", ".cursor/worktrees/", "test-results/", "playwright-report/", "blob-report/", "playwright/.cache/"];
 
 export function parseQuality(md: string): QualityContract | undefined {
   const block = extractTaggedJson<{

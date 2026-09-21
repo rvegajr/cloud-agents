@@ -920,3 +920,17 @@ test("understand: a mechanical done-check that cannot run is a gap, not an unmet
   const ok = await runPolyaLoop(makeSend({}).send, { ...base, io: makeIO().io, lessons: null });
   assert.equal(ok.stopReason, "complete");
 });
+
+test("a run starts by excluding tool artifacts in .git/info/exclude, so Playwright's test-results/ is never a Hand's change", async () => {
+  const { io, files } = makeIO({ files: { ".git/HEAD": "ref: refs/heads/main", ".git/info/exclude": "# git\nnode_modules/\n" } });
+  const out = await runPolyaLoop(makeSend({}).send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete");
+  const exclude = files[".git/info/exclude"]!;
+  assert.match(exclude, /^# git\nnode_modules\/\n/);
+  assert.match(exclude, /\ntest-results\/\n/);
+  assert.equal(exclude.split("\n").filter((l) => l === "node_modules/").length, 1, "no duplicate lines");
+  // No .git (a fake repo in a test): nothing is written.
+  const { io: io2, files: files2 } = makeIO();
+  await runPolyaLoop(makeSend({}).send, { ...base, io: io2, lessons: null });
+  assert.equal(files2[".git/info/exclude"], undefined);
+});

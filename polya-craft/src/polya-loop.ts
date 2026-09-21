@@ -4,7 +4,7 @@ import { lenientJson, type BlueprintIO } from "../../architect-crew-gate/src/blu
 import { browserToolNote, scenarioNeedsBrowser } from "../../architect-crew-gate/src/browser.js";
 import { gateFeedbackNote, type GateResult } from "../../architect-crew-gate/src/quality-gate.js";
 import { fileLessonsStore, priorLessonsNote, tagsForProblem, type LessonsStore, type NewLesson } from "./lessons.js";
-import { ARTIFACTS, POLYA_DIR, immovableOf, oracleNote, parsePlan, parseProblem, parseRequest, problemGaps, renderPlan, renderProblem, requestNote, validateUnits, type DoneCheck, type Plan, type Problem, type Unit } from "./plan.js";
+import { ARTIFACTS, DEFAULT_HYGIENE, POLYA_DIR, immovableOf, oracleNote, parsePlan, parseProblem, parseRequest, problemGaps, renderPlan, renderProblem, requestNote, validateUnits, type DoneCheck, type Plan, type Problem, type Unit } from "./plan.js";
 
 /**
  * The polya-craft loop (PATTERN.md section 4), engine-free so a fake `send`
@@ -270,6 +270,16 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     return md ? parsePlan(md) : undefined;
   };
 
+  // A tool's own artifacts (Playwright's test-results/, a coverage folder) appear when a Check runs and would be
+  // committed with the turn and read as the Hand's change (live packing-list rerun, 2026-09-21: U5 failed ownership
+  // on test-results/.last-run.json). .git/info/exclude keeps them out of every commit without touching the
+  // product's .gitignore, which is nobody's Touches.
+  {
+    const excludePath = ".git/info/exclude";
+    const have = io.readFile(excludePath) ?? "";
+    const missing = DEFAULT_HYGIENE.filter((line) => !have.split("\n").map((l) => l.trim()).includes(line));
+    if (missing.length && artifact(".git/HEAD") !== undefined) io.writeFile(excludePath, `${have.trim() ? `${have.trimEnd()}\n` : ""}${missing.join("\n")}\n`);
+  }
   // Whatever phase this run starts in: a record a model forced into git makes every later Hand turn look like an
   // ownership violation, because edits to a tracked file are visible to the gate.
   {
