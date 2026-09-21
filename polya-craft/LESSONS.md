@@ -30,7 +30,7 @@ Tags:     kind:repair domain:software stage:understand routing http
 When:     the problem is about which paths an HTTP app answers, and the done-checks curl the paths the requester named
 Lesson:   add a done-check for malformed paths (`//`, `%2f`, a 2 KB path, a wrong method): the app must answer, never exit; a request that kills the process is the defect the requester did not name
 Evidence: polya-live-404, both loops' fixes passed every check and review; a blind reviewer sent GET // and the process died on `new URL(req.url, …)`, a line neither loop touched
-Status:   confirmed(15)
+Status:   confirmed(16)
 
 ## L-2026-09-19-02
 Tags:     kind:build stage:devise runtime:node
@@ -72,7 +72,7 @@ Tags:     kind:build stage:understand done-check
 When:     the request's example names the command the requester will type (`npm run dev`, a CLI invocation)
 Lesson:   put that exact command in a done-check or an outer-test step; a sibling command that shares its code path (`npm start`) does not prove it
 Evidence: snippet-vault (Fable): the idea says "I run `npm run dev`"; every D and outer step used `npm start`; `npm run dev` was first run at the review.
-Status:   confirmed(9)
+Status:   confirmed(10)
 
 ## L-2026-09-19-09
 Tags:     kind:build stage:devise storage
@@ -163,7 +163,7 @@ Tags:     kind:build stage:devise
 When:     a Condition states an output invariant unconditionally (e.g. 'output is ASCII-only, never a leading/trailing/doubled hyphen') and the CLI has more than one argument that can shape the final output
 Lesson:   Write at least one done-check that exercises every argument capable of contributing to output (here, --suffix with an empty, non-ASCII, or hyphen-laden value), not only the title path, before trusting that the invariant holds everywhere.
 Evidence: D1-D8 only ever pass --suffix the clean value '2026-09'; `npx slugify --suffix '' 'Hello'` yields 'hello-' and `--suffix 'Café!' 'Hello'` yields 'hello-Café!', both exit 0, both violating the stated Condition, and both invisible to every existing done-check.
-Status:   confirmed(1)
+Status:   confirmed(2)
 
 ## L-2026-09-21-01
 Tags:     kind:build stage:devise source:hand-question
@@ -247,4 +247,18 @@ Tags:     kind:build stage:verify
 When:     a plan names an unbounded-search risk (L-2026-09-20-09-style) but declines to fold it into a done-check because no J/W/Oracle line named it
 Lesson:   when a search-based function ships a hard iteration cap as its only defense against an impossible/unsatisfiable input, add one done-check that exercises that exact cap (e.g. an unreachable date) and asserts it throws within a bounded time, even if no Oracle line demanded it — the cap is part of the contract once it exists in the code.
 Evidence: index.ts:139-172's MAX_ITERATIONS=6_000_000 guard against inputs like '0 0 31 2 *' was never exercised by D1-D9; I had to construct and run that case myself (0.33s, correct throw) to confirm the guard actually works rather than merely existing.
+Status:   candidate
+
+## L-2026-09-21-13
+Tags:     kind:build stage:devise source:hand-question
+When:     a keyboard-only packing-list page that remembers its state
+Lesson:   Unit U2 was not workable; the Hand asked: U2's Check requires GET '//', '/%2f', and a final plain GET '/' to each return 200, which is only possible once index.html exists — but index.html is U3's deliverable and U2 declares Depends: none (run in parallel with U3). Should U2 instead Depends: U3 (and move to a level ordered after U3), should a minimal placeholder index.html be added to U2's own Touches so the server has something to serve on its own, or should the Check accept 404 for these paths when index.html is absent (matching the original precedent's 'not 000 / any real status' style check)?. Decide it in the unit next time.
+Evidence: a keyboard-only packing-list page that remembers its state, U2
+Status:   candidate
+
+## L-2026-09-21-14
+Tags:     kind:build stage:devise area:keyboard
+When:     a done-check's own text says 'never leak, whichever order', but a global keydown router has N guarded branches
+Lesson:   enumerate every branch's guard explicitly in the Check text and test each key individually against 'input already focused', not just the one or two orderings the sample walkthrough happens to use.
+Evidence: D10 tested Arrow-before-click-into-input and Space/Delete-while-focused, but never plain Arrow-while-focused; that gap let app.js ship with isTypingInInput present on 4 of 5 relevant branches and missing on the 5th (plain ArrowUp/ArrowDown), reproduced live as a focus-stealing, keystroke-dropping bug.
 Status:   candidate
