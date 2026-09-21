@@ -41,12 +41,14 @@ test("parseLessons / formatLesson round-trip", () => {
   assert.deepEqual(parseLessons(formatLesson(all[1]!)), [all[1]]);
 });
 
-test("selectLessons: the whole active ledger when small, tag intersection when large", () => {
+test("selectLessons: the whole active ledger when small, the twelve best by tag when large", () => {
   const all = parseLessons(LEDGER);
   assert.deepEqual(selectLessons(all, ["kind:repair"]).map((l) => l.id), ["L-2026-09-18-01", "L-2026-09-18-02"]);
   const many: Lesson[] = Array.from({ length: 45 }, (_, i) => ({ id: `L-x-${i}`, tags: [i % 2 ? "kind:repair" : "kind:build"], when: "", lesson: "l", evidence: "", status: "candidate", confirmations: 0 }));
-  assert.equal(selectLessons(many, ["kind:repair"]).length, 22);
-  assert.equal(selectLessons(many, ["KIND:REPAIR"]).length, 22);
+  // Above the cap, the twelve best by tag overlap: the matching ones first, and no more than twelve.
+  assert.equal(selectLessons(many, ["kind:repair"]).length, 12);
+  assert.ok(selectLessons(many, ["kind:repair"]).every((l) => l.tags.includes("kind:repair")));
+  assert.equal(selectLessons(many, ["KIND:REPAIR"]).length, 12);
 });
 
 test("fileLessonsStore: append numbers ids by day, keeps the preamble, confirm increments", () => {
@@ -104,3 +106,20 @@ test("lessonOverlap and append: a lesson that says what an entry already says co
   assert.equal(after.length, 4);
 });
 
+
+test("selectLessons: at most twelve are offered, the best by tag overlap, then confirmations, then recency", () => {
+  const mk = (i: number, tags: string[], status: string): Lesson => ({ id: `L-2026-01-01-${String(i).padStart(2, "0")}`, tags, when: "w", lesson: `lesson ${i} about thing ${i}`, evidence: "e", status: status.startsWith("confirmed") ? "confirmed" : status.startsWith("retired") ? "retired" : "candidate", confirmations: Number(status.match(/\((\d+)\)/)?.[1] ?? 0) });
+  const all = [
+    ...Array.from({ length: 20 }, (_, i) => mk(i, ["kind:build"], i % 3 === 0 ? "confirmed(2)" : "candidate")),
+    mk(30, ["kind:repair", "stage:understand"], "confirmed(9)"),
+    mk(31, ["kind:repair"], "candidate"),
+    mk(32, ["kind:build"], "retired"),
+  ];
+  const picked = selectLessons(all, ["kind:repair", "stage:understand"]);
+  assert.equal(picked.length, 12);
+  assert.equal(picked[0]!.id, "L-2026-01-01-30", "two matching tags first");
+  assert.equal(picked[1]!.id, "L-2026-01-01-31", "one matching tag next");
+  assert.ok(!picked.some((l) => l.status === "retired"));
+  // Below the cap the whole ledger is offered, as before.
+  assert.equal(selectLessons(all.slice(0, 10), ["kind:repair"]).length, 10);
+});
