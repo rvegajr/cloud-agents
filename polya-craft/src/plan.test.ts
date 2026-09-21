@@ -576,6 +576,18 @@ test("commandOf: a check that opens with a lower-case assignment or cd is a comm
   assert.equal(commandOf("`src/app.js`"), undefined);
 });
 
+test("validateUnits: a Playwright check needs the config in the repo or a scaffold unit in the plan", () => {
+  const spec = PLAN_MD.replace("Check:    `node --test test/notfound.test.js` — Now: unmet", "Check:    `npx playwright test tests/routes.spec.js` — Now: unmet");
+  const none = () => false;
+  const problems = validateUnits(parsePlan(spec).units, parseProblem(PROBLEM_MD), { requireCommand: true, exists: none });
+  assert.ok(problems.some((p) => p.id === "U1" && /playwright test.*scaffold unit/.test(p.problem)), JSON.stringify(problems));
+  // The repo already has it.
+  assert.deepEqual(validateUnits(parsePlan(spec).units, parseProblem(PROBLEM_MD), { requireCommand: true, exists: (f) => f === "playwright.config.ts" }).filter((p) => /playwright/.test(p.problem)), []);
+  // A scaffold unit in the plan provides it.
+  const scaffold = spec.replace("## U1: reorder the not-found handler", "## U0: scaffold Playwright\nServes:   D1\nProduces: `playwright.config.js`, `@playwright/test` in devDependencies, Chromium installed\nGiven:    `package.json`\nDo:       1. npm i -D @playwright/test. 2. Write playwright.config.js. 3. npx playwright install chromium.\nTouches:  package.json, package-lock.json, playwright.config.js\nCheck:    `npx playwright test --list` — Now: unmet\nDepends:  none\nNot:      the page.\n\n## U1: reorder the not-found handler");
+  assert.deepEqual(validateUnits(parsePlan(scaffold).units, parseProblem(PROBLEM_MD), { requireCommand: true, exists: none }).filter((p) => /playwright/.test(p.problem)), []);
+});
+
 test("commandOf: a fenced script is one command, without its language tag (live jsoncount-depth, 2026-09-20)", () => {
   const plan = parsePlan(readFileSync(new URL("./fixtures-live-plan-jc-depth.md", import.meta.url), "utf8"));
   const u1 = plan.units[0]!;

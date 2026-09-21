@@ -657,6 +657,13 @@ export function validateUnits(
     }
     if (u.touches.length > maxTouches) push(`Touches: ${u.touches.length} entries; more than ${maxTouches} is more than one sitting (split the unit)`);
     if (u.check && opts.requireCommand && !u.command) push(`Check: is prose, not a command (${JSON.stringify(u.check.slice(0, 80))}); for software the Check is a command that exits 0 when met`);
+    // A Playwright check needs the toolchain: the repo has the config, or a unit in this plan provides it (the scaffold).
+    if (u.command && /\bplaywright\s+test\b/.test(u.command) && opts.exists) {
+      const configured = ["playwright.config.js", "playwright.config.ts", "playwright.config.mjs", "playwright.config.cjs"];
+      const inRepo = configured.some((f) => opts.exists!(f));
+      const inPlan = units.some((s) => s.touches.some((t) => /(^|\/)playwright\.config\.[cm]?[jt]s$/.test(t)));
+      if (!inRepo && !inPlan) push("Check: runs `playwright test` but neither the repo nor any unit provides playwright.config.*; add the scaffold unit (@playwright/test, the config with webServer, `npx playwright install chromium`) before the page units");
+    }
     // A Check holds after every later unit too, since each unit's gate re-runs the passed units' Checks. One that asserts
     // the suite is red ("! npm test", "npm test; test $? -ne 0") is a transient state, not a Check: the unit that makes
     // the suite green fails it by construction (live cron-next, 2026-09-21: the Hand stopped to ask, correctly).

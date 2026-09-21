@@ -80,8 +80,21 @@ outer-test step.
   `navigator.clipboard` the test controls. If it can, write that test now,
   red, and say so in the unit that serves the D; a human walk is weaker
   evidence than a test, and it is the slowest part of the loop. Keep the
-  observation for what a test genuinely cannot see: layout, a real
-  clipboard, a real browser's refusal.
+  observation for what a test genuinely cannot see: a real clipboard, a
+  real browser's refusal.
+- **When only a real browser can see it and the repo has no
+  `@playwright/test`, scaffold it.** Keyboard focus, layout at a width,
+  what survives a reload: a fake `window` cannot attest these, and a walk
+  should not have to. Write the spec anyway, red, under `tests/` or `e2e/`,
+  and add one unit before the page units that: adds `@playwright/test` as a
+  devDependency; writes `playwright.config.js` with `webServer` running the
+  quality bar's `start` command on its port, `reuseExistingServer: true`,
+  and headless Chromium; and runs `npx playwright install chromium`. Its
+  `Touches` are `package.json`, `package-lock.json`, `playwright.config.js`;
+  its `Check` is `npx playwright test --list`, red until the toolchain is
+  there. Each page unit's `Check` is then `npx playwright test <its spec>`.
+  The browser binary is cached per machine, so a fresh clone needs only the
+  bar's install.
 - The loop commits the Hand's work before it runs the Check, and its
   ownership gate rejects any change outside `Touches`. A Check never
   inspects `git status`, `git diff`, or the commit; it checks the files and
