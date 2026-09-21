@@ -14,6 +14,7 @@ export POLYA_ORACLE=1
 SUMMARY=.runs/corpus/summary.tsv
 [ -f "$SUMMARY" ] || printf 'name\tstarted\tresult\tagent\tcost\n' > "$SUMMARY"
 python3 -c 'import json;[print(e["name"], e["file"], e.get("create","-"), e.get("repo","-"), e.get("ref","-")) for e in json.load(open("polya-craft/examples/corpus/manifest.json"))]' |
+name= file= create= repo= ref=
 while read -r name file create repo ref; do
   if grep -q "^$name$(printf '\t')" "$SUMMARY"; then echo "skip $name (already in summary)"; continue; fi
   util=$(python3 -c 'import json;print(json.load(open(".runs/max-usage.json")).get("utilization",0))' 2>/dev/null || echo 0)
