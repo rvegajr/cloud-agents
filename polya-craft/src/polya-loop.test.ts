@@ -934,3 +934,48 @@ test("a run starts by excluding tool artifacts in .git/info/exclude, so Playwrig
   await runPolyaLoop(makeSend({}).send, { ...base, io: io2, lessons: null });
   assert.equal(files2[".git/info/exclude"], undefined);
 });
+
+test("devise may turn a D's Check into the command that runs a test it wrote; then look back runs it and the Verifier is not sent", async () => {
+  const rewritten = PROBLEM_MD.replace(
+    "- D2: a stranger can start the app from the README — Check: a stranger follows the README and the app starts — Now: unmet",
+    "- D2: a stranger can start the app from the README — Check: `npx playwright test tests/e2e/start.spec.js` (was: a stranger follows the README and the app starts) — Now: unmet",
+  );
+  const { io, calls } = makeIO();
+  const { send, sent } = makeSend({
+    devise: () => {
+      currentIO!.writeFile("tests/e2e/start.spec.js", "test('starts', ...)");
+      currentIO!.writeFile(".polya/PROBLEM.md", rewritten);
+      currentIO!.writeFile(".polya/PLAN.md", seed.plan);
+      return json({ written: [".polya/PLAN.md", "tests/e2e/start.spec.js"], units: ["U1", "U2"] });
+    },
+  });
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete", out.stopDetail);
+  assert.ok(!sent.some((s) => s.kind === "walk"), "every D is a command now; no Verifier turn");
+  assert.ok(calls.commands.some((c) => c.command === "npx playwright test tests/e2e/start.spec.js" && c.cwd === "/tmp/clone-1"), "the spec ran in the fresh clone");
+  assert.equal(out.checks?.find((c) => c.id === "D2")?.how, "mechanical");
+  // Any other change to PROBLEM.md at Devise is a gap.
+  const { io: io2 } = makeIO();
+  const { send: s2, sent: sent2 } = makeSend({
+    devise: () => {
+      currentIO!.writeFile(".polya/PROBLEM.md", PROBLEM_MD.replace("- D2: a stranger can start the app from the README", "- D2: the app starts"));
+      currentIO!.writeFile(".polya/PLAN.md", seed.plan);
+      return json({ written: [".polya/PLAN.md"], units: ["U1", "U2"] });
+    },
+  });
+  const out2 = await runPolyaLoop(s2, { ...base, io: io2, lessons: null });
+  assert.equal(out2.stopReason, "plan-not-workable");
+  assert.match(sent2[2]!.prompt, /D2's statement changed at Devise/);
+  // A Check rewritten to a command that names no test on disk is a gap too.
+  const { io: io3 } = makeIO();
+  const { send: s3 } = makeSend({
+    devise: () => {
+      currentIO!.writeFile(".polya/PROBLEM.md", PROBLEM_MD.replace("Check: a stranger follows the README and the app starts", "Check: `curl -s localhost:4571/`"));
+      currentIO!.writeFile(".polya/PLAN.md", seed.plan);
+      return json({ written: [".polya/PLAN.md"], units: ["U1", "U2"] });
+    },
+  });
+  const out3 = await runPolyaLoop(s3, { ...base, io: io3, lessons: null });
+  assert.equal(out3.stopReason, "plan-not-workable");
+  assert.match(out3.stopDetail ?? "", /names no test file on disk/);
+});

@@ -63,8 +63,12 @@ outer-test step.
 
 ## Rules
 
-- `PROBLEM.md` is not edited in this turn. If it is wrong, say so in `notes`
-  and stop.
+- `PROBLEM.md` is not edited in this turn, with one exception: a D whose
+  Check you turned into an automated test this turn gets that test's
+  command as its Check (`npx playwright test tests/e2e/keyboard.spec.js`),
+  the old observation kept after it as `(was: …)`. The loop then runs it
+  at look back instead of walking it. Nothing else in `PROBLEM.md` changes;
+  if it is wrong, say so in `notes` and stop.
 - Every Check is unmet before its unit runs. A Check that passes now
   measures nothing.
 - One owner per fact. If `Given` would paste content that also lives in a
