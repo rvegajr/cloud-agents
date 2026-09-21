@@ -597,3 +597,15 @@ test("commandOf: a placeholder inside a quoted string is text, and a note after 
   assert.equal(commandOf("a stranger runs `npm start` and opens the page"), undefined);
   assert.equal(commandOf("`curl -X POST /api/snippets` with a missing title"), undefined);
 });
+
+test("validateUnits: a Check that asserts the suite is red is a transient state, not a Check (live cron-next, 2026-09-21)", () => {
+  for (const check of ["`npm ci && npm run build && ! npm test`", "`npm test; test $? -ne 0`", "`! npm run test`"]) {
+    const plan = parsePlan(PLAN_MD.replace("Check:    `node --test test/notfound.test.js` — Now: unmet", `Check:    ${check} — Now: unmet`));
+    const problems = validateUnits(plan.units, parseProblem(PROBLEM_MD), { requireCommand: true });
+    assert.ok(problems.some((p) => p.id === "U1" && /asserts that the test suite fails/.test(p.problem)), check);
+  }
+  for (const check of ["`npm test`", "`! grep -q TODO src/app.js`", "`npm run build && node --test test/x.test.js`"]) {
+    const plan = parsePlan(PLAN_MD.replace("Check:    `node --test test/notfound.test.js` — Now: unmet", `Check:    ${check} — Now: unmet`));
+    assert.deepEqual(validateUnits(plan.units, parseProblem(PROBLEM_MD), { requireCommand: true }).filter((p) => /suite fails/.test(p.problem)), [], check);
+  }
+});

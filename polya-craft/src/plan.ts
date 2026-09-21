@@ -162,7 +162,7 @@ export interface Plan {
 const TEST_FILE = /(^|\/)(test|tests|__tests__|spec)\/|\.(test|spec)\.[jt]sx?$|(^|\/)test_[^/]+\.py$|_test\.(py|go)$|Tests\.cs$/;
 const ARTIFACT_FILE = /^(\.polya\/.*|(PROBLEM|PLAN|LOOKBACK|ONE-PAGE|LESSONS)\.md)$/;
 const COMMAND_HEAD =
-  /^(npm|npx|pnpm|yarn|node|deno|bun|curl|wget|sh|bash|zsh|git|python3?|pytest|pip|go|cargo|make|mvn|gradle|dotnet|ruby|bundle|\[|ls|cat|grep|diff|cmp|wc|jq|docker|kubectl|railway|gh|rm|mkdir|cp|mv|touch|kill|sleep|printf|echo|env|shasum|sha256sum|for|while|if|cd|set|export|trap|true|false|exit|xargs|find|sort|head|tail|tee|tr|cut|awk|sed|seq)\b|^test\s+\S|^[A-Za-z_][A-Za-z0-9_]*=\S/;
+  /^(?:!\s*)?(npm|npx|pnpm|yarn|node|deno|bun|curl|wget|sh|bash|zsh|git|python3?|pytest|pip|go|cargo|make|mvn|gradle|dotnet|ruby|bundle|\[|ls|cat|grep|diff|cmp|wc|jq|docker|kubectl|railway|gh|rm|mkdir|cp|mv|touch|kill|sleep|printf|echo|env|shasum|sha256sum|for|while|if|cd|set|export|trap|true|false|exit|xargs|find|sort|head|tail|tee|tr|cut|awk|sed|seq)\b|^test\s+\S|^[A-Za-z_][A-Za-z0-9_]*=\S/;
 /** A backticked path or glob (`test/*.test.js`, `src/app.js`) is a name, not a command. */
 const LOOKS_LIKE_PATH = /^[\w.@-]*[\/*][\w.*\/@-]*$/;
 const FORBIDDEN_IN_DO = /\b(choose|decide|appropriate|as needed|best|etc\.?|or similar|something like|if you (?:think|want|prefer)|use your judg?e?ment)\b/i;
@@ -656,6 +656,12 @@ export function validateUnits(
     }
     if (u.touches.length > maxTouches) push(`Touches: ${u.touches.length} entries; more than ${maxTouches} is more than one sitting (split the unit)`);
     if (u.check && opts.requireCommand && !u.command) push(`Check: is prose, not a command (${JSON.stringify(u.check.slice(0, 80))}); for software the Check is a command that exits 0 when met`);
+    // A Check holds after every later unit too, since each unit's gate re-runs the passed units' Checks. One that asserts
+    // the suite is red ("! npm test", "npm test; test $? -ne 0") is a transient state, not a Check: the unit that makes
+    // the suite green fails it by construction (live cron-next, 2026-09-21: the Hand stopped to ask, correctly).
+    if (u.command && /(^|[;&|]\s*)!\s*(npm|pnpm|yarn)\s+(run\s+)?test\b|\b(npm|pnpm|yarn)\s+(run\s+)?test\b[^;&|]*;\s*(test|\[)\s+"?\$\?"?\s+-ne\s+0/.test(u.command)) {
+      push("Check: asserts that the test suite fails, which stops being true the moment a later unit makes it pass; a Check must hold from this unit on (assert what this unit produces: the files, the build, its own test)");
+    }
     // A hash pins bytes. That is right for a file this unit writes whole, and wrong for one that already exists:
     // it demands the Hand reproduce the plan's imagined bytes instead of working behaviour (R0, U7).
     if (u.command && /\b(?:sha(?:256|1|512)(?:sum)?|shasum|md5sum|createHash)\b/.test(u.command) && opts.exists) {
