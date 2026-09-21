@@ -162,7 +162,7 @@ export interface Plan {
 const TEST_FILE = /(^|\/)(test|tests|__tests__|spec)\/|\.(test|spec)\.[jt]sx?$|(^|\/)test_[^/]+\.py$|_test\.(py|go)$|Tests\.cs$/;
 const ARTIFACT_FILE = /^(\.polya\/.*|(PROBLEM|PLAN|LOOKBACK|ONE-PAGE|LESSONS)\.md)$/;
 const COMMAND_HEAD =
-  /^(npm|npx|pnpm|yarn|node|deno|bun|curl|wget|sh|bash|zsh|git|python3?|pytest|pip|go|cargo|make|mvn|gradle|dotnet|ruby|bundle|\[|ls|cat|grep|diff|cmp|wc|jq|docker|kubectl|railway|gh|rm|mkdir|cp|mv|touch|kill|sleep|printf|echo|env|shasum|sha256sum|for|while|if|cd|set|export|trap|true|false|exit|xargs|find|sort|head|tail|tee|tr|cut|awk|sed|seq)\b|^test\s+\S|^[A-Za-z_][A-Za-z0-9_]*=\S/;
+  /^(?:!\s*)?(npm|npx|pnpm|yarn|node|deno|bun|curl|wget|sh|bash|zsh|git|python3?|pytest|pip|go|cargo|make|mvn|gradle|dotnet|ruby|bundle|\[|ls|cat|grep|diff|cmp|wc|jq|docker|kubectl|railway|gh|rm|mkdir|cp|mv|touch|kill|sleep|printf|echo|env|shasum|sha256sum|for|while|if|cd|set|export|trap|true|false|exit|xargs|find|sort|head|tail|tee|tr|cut|awk|sed|seq)\b|^test\s+\S|^[A-Za-z_][A-Za-z0-9_]*=\S/;
 /** A backticked path or glob (`test/*.test.js`, `src/app.js`) is a name, not a command. */
 const LOOKS_LIKE_PATH = /^[\w.@-]*[\/*][\w.*\/@-]*$/;
 const FORBIDDEN_IN_DO = /\b(choose|decide|appropriate|as needed|best|etc\.?|or similar|something like|if you (?:think|want|prefer)|use your judg?e?ment)\b/i;
@@ -204,7 +204,18 @@ export function commandOf(check: string | undefined): string | undefined {
   if (!check) return undefined;
   // Why it is red today is not the check.
   check = check.replace(/\s*(?:—|–|--|-)?\s*\b[Nn]ow:[\s\S]*$/, "");
-  const isCommand = (c: string) => COMMAND_HEAD.test(c) && !LOOKS_LIKE_PATH.test(c) && /\s/.test(c) && !/<[a-z][\w-]*>/i.test(c);
+  // A placeholder is `<name>` in the command itself; inside a quoted string it is text the command looks for
+  // (live kv-api, 2026-09-20: `grep -q "/kv/<key>" README.md`).
+  const unquoted = (c: string) => c.replace(/(["'])(?:\\.|(?!\1).)*\1/g, "");
+  const isCommand = (c: string) => COMMAND_HEAD.test(c) && !LOOKS_LIKE_PATH.test(c) && /\s/.test(c) && !/<[a-z][\w-]*>/i.test(unquoted(c));
+  // A fenced block is a script: its body runs as one command under `sh -c`, the language tag is not a line of it
+  // (live jsoncount-depth, 2026-09-20: "```bash\nset -e\n…" ran `bash` first, which waits on stdin).
+  const fence = check.match(/```[ \t]*(?:bash|sh|shell|zsh|console)?[ \t]*\n([\s\S]*?)```/);
+  if (fence) {
+    const body = fence[1]!.replace(/^\$ /gm, "").trim();
+    const first = body.split("\n").find((l) => l.trim() && !l.trim().startsWith("#"))?.trim() ?? "";
+    if (body && (isCommand(first) || /^set\s+-/.test(first))) return body;
+  }
   // A command in the plan wraps across lines with the block's indentation; that is layout, not part of the command.
   const segments = [...check.matchAll(/`([^`]+)`/g)].map((m) => m[1]!.replace(/\s*\n\s+/g, " ").trim().replace(/^\(\s*/, ""));
   const ticked = segments.filter(isCommand);
@@ -217,7 +228,10 @@ export function commandOf(check: string | undefined): string | undefined {
   // part is a fragment of a procedure (the Verifier's). "exits 0 with 1 pass" reports its result, so it is a command.
   const firstWord = residue.trim().replace(/^[^A-Za-z]+/, "").split(/[^A-Za-z]/)[0]?.toLowerCase() ?? "";
   const modifiesInvocation = ["with", "for", "on", "against", "using", "from", "to", "into", "plus", "where", "whose"].includes(firstWord);
-  if (ticked.length === 1) return someoneActs || modifiesInvocation ? undefined : ticked[0];
+  // A check that opens with its command is that command; what follows is a note about its result ("— exit code 0,
+  // the kill-and-restart subtest passes"), and a verb in the note is not a person acting (live kv-api, 2026-09-20).
+  const leading = /^\s*`/.test(check);
+  if (ticked.length === 1) return modifiesInvocation || (someoneActs && !leading) ? undefined : ticked[0];
   if (ticked.length > 1) {
     // Several backticked commands are one check only when nothing but connectors sits between them
     // ("`a` and `b`"). Commands mentioned inside a sentence ("run `npm ci`, then `npm start` and open …")
@@ -403,6 +417,7 @@ export function problemGaps(p: Problem | undefined, opts: { maxDone?: number; so
   if (!p.done.length) gaps.push("- no done-checks: list D1..Dn under `## Done-check`, each `- D<n>: <statement> — Check: <what a stranger runs> — Now: unmet|met`");
   if (p.done.length > max) gaps.push(`- ${p.done.length} done-checks; at most ${max}. More means the problem is not yet understood, or is size L and needs a Split table`);
   for (const d of p.done) if (!d.check) gaps.push(`- ${d.id} has no Check`);
+  for (const d of p.done) if (d.check.includes("\0")) gaps.push(`- ${d.id}'s Check contains a NUL byte; a shell cannot run it (write the escape as text)`);
   if (!p.restated) gaps.push("- no `## Restated` section in your own words");
   if (p.size === "L" && !p.split.length) gaps.push("- Size L but no `## Split` table: sub-problems, the existing check that bounds each, the D ids each carries");
   if (p.split.length) {
@@ -648,6 +663,12 @@ export function validateUnits(
       const inRepo = configured.some((f) => opts.exists!(f));
       const inPlan = units.some((s) => s.touches.some((t) => /(^|\/)playwright\.config\.[cm]?[jt]s$/.test(t)));
       if (!inRepo && !inPlan) push("Check: runs `playwright test` but neither the repo nor any unit provides playwright.config.*; add the scaffold unit (@playwright/test, the config with webServer, `npx playwright install chromium`) before the page units");
+    }
+    // A Check holds after every later unit too, since each unit's gate re-runs the passed units' Checks. One that asserts
+    // the suite is red ("! npm test", "npm test; test $? -ne 0") is a transient state, not a Check: the unit that makes
+    // the suite green fails it by construction (live cron-next, 2026-09-21: the Hand stopped to ask, correctly).
+    if (u.command && /(^|[;&|]\s*)!\s*(npm|pnpm|yarn)\s+(run\s+)?test\b|\b(npm|pnpm|yarn)\s+(run\s+)?test\b[^;&|]*;\s*(test|\[)\s+"?\$\?"?\s+-ne\s+0/.test(u.command)) {
+      push("Check: asserts that the test suite fails, which stops being true the moment a later unit makes it pass; a Check must hold from this unit on (assert what this unit produces: the files, the build, its own test)");
     }
     // A hash pins bytes. That is right for a file this unit writes whole, and wrong for one that already exists:
     // it demands the Hand reproduce the plan's imagined bytes instead of working behaviour (R0, U7).

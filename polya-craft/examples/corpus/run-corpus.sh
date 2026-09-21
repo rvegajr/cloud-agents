@@ -8,10 +8,14 @@ cd "$ROOT" || exit 1
 mkdir -p .runs/corpus
 export PATH="/opt/homebrew/bin:$PATH"
 export WORK_ROOT="${WORK_ROOT:-$HOME/.cache/cloud-agents-work}"
+# Colima shares only $HOME with containers. TMPDIR helps Node and Python temp files; BSD mktemp ignores it, so a
+# check that mounts a file it made must create it under $PWD (the understand prompt says so).
+export TMPDIR="$WORK_ROOT/tmp"; mkdir -p "$TMPDIR"
 export POLYA_ORACLE=1
 SUMMARY=.runs/corpus/summary.tsv
 [ -f "$SUMMARY" ] || printf 'name\tstarted\tresult\tagent\tcost\n' > "$SUMMARY"
 python3 -c 'import json;[print(e["name"], e["file"], e.get("create","-"), e.get("repo","-"), e.get("ref","-")) for e in json.load(open("polya-craft/examples/corpus/manifest.json"))]' |
+name= file= create= repo= ref=
 while read -r name file create repo ref; do
   if grep -q "^$name$(printf '\t')" "$SUMMARY"; then echo "skip $name (already in summary)"; continue; fi
   util=$(python3 -c 'import json;print(json.load(open(".runs/max-usage.json")).get("utilization",0))' 2>/dev/null || echo 0)

@@ -559,7 +559,21 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     }
     let problem = readProblem();
     if (!problem) return stop("unparseable-report", `${ARTIFACTS.problem} is missing or has no title`);
-    let gaps = gapsOf();
+    // A mechanical done-check that cannot run at all (a 2 MB literal past ARG_MAX, a command not found, a syntax
+    // error) would sit "unmet" for the wrong reason until look back, then cost a repair turn to be called wrong
+    // (live snippet-vault-export, 2026-09-21, D8). It is run once here; red is fine, unable to run is a gap.
+    const cannotRun = async (): Promise<string[]> => {
+      if (!software) return [];
+      const out: string[] = [];
+      for (const d of state.problem?.done ?? []) {
+        if (!d.command) continue;
+        const r = await io.runCommand(d.command);
+        const why = r.code === 126 || r.code === 127 ? `exit ${r.code}` : /Argument list too long|command not found|syntax error|is a directory/i.exec(r.output)?.[0];
+        if (why) out.push(`- ${d.id}'s Check cannot run (${why}); a Check may be unmet, never unrunnable. Fix the command`);
+      }
+      return out;
+    };
+    let gaps = [...gapsOf(), ...(await cannotRun())];
     if (gaps.length) {
       log(`understanding has gaps; asking the Solver once more:\n${gaps.join("\n")}`);
       const note = `## Understanding incomplete\n\n${ARTIFACTS.problem} is on disk but the orchestrator found these gaps. Fix only these, commit, then reply with the same JSON block.\n\n${gaps.join("\n")}\n\n---\n\n`;
@@ -567,7 +581,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       track(t);
       if (t.status !== "finished") return stop("run-failed", "understand retry did not finish");
       io.commit("understand: gap fixes");
-      gaps = gapsOf();
+      gaps = [...gapsOf(), ...(await cannotRun())];
       if (gaps.length) return stop("understanding-incomplete", gaps.join("; "));
     }
     problem = state.problem!;
@@ -619,11 +633,21 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       gaps = gapsOf();
       if (gaps.length) return stop("plan-not-workable", gaps.join("; "));
     }
-    // A first plan must leave the suite red. A re-plan after a Hand's question keeps the units that passed, so the suite may be partly green.
+    // Every Check is unmet before its unit runs. A unit whose Check is a command is measured by that command, now; a
+    // repair whose Checks live outside the suite leaves the suite green and that is fine (live jsoncount-depth,
+    // 2026-09-20). Only a plan with no command Check at all falls back to the suite being red. A re-plan after a
+    // Hand's question keeps the units that passed, so those are not re-measured.
     const anyPassed = state.unitRecords.some((r) => r.passed);
-    if (software && problem.bar.test && !anyPassed) {
-      const red = await io.runCommand(problem.bar.test);
-      if (red.code === 0) return stop("plan-not-workable", "the test suite is already green before any unit ran; every Check must be unmet now (write the red tests at Devise)");
+    if (software && !anyPassed) {
+      const measured = state.units.filter((u) => u.command);
+      for (const u of measured) {
+        const r = await io.runCommand(u.command!);
+        if (r.code === 0) return stop("plan-not-workable", `${u.id}'s Check already passes before the unit ran; it measures nothing (every Check is unmet now; write the red test at Devise)`);
+      }
+      if (!measured.length && problem.bar.test) {
+        const red = await io.runCommand(problem.bar.test);
+        if (red.code === 0) return stop("plan-not-workable", "the test suite is already green before any unit ran; every Check must be unmet now (write the red tests at Devise)");
+      }
     }
     state.baselineSha = io.headSha();
     state.unitIndex = 0;

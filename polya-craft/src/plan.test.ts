@@ -587,3 +587,42 @@ test("validateUnits: a Playwright check needs the config in the repo or a scaffo
   const scaffold = spec.replace("## U1: reorder the not-found handler", "## U0: scaffold Playwright\nServes:   D1\nProduces: `playwright.config.js`, `@playwright/test` in devDependencies, Chromium installed\nGiven:    `package.json`\nDo:       1. npm i -D @playwright/test. 2. Write playwright.config.js. 3. npx playwright install chromium.\nTouches:  package.json, package-lock.json, playwright.config.js\nCheck:    `npx playwright test --list` — Now: unmet\nDepends:  none\nNot:      the page.\n\n## U1: reorder the not-found handler");
   assert.deepEqual(validateUnits(parsePlan(scaffold).units, parseProblem(PROBLEM_MD), { requireCommand: true, exists: none }).filter((p) => /playwright/.test(p.problem)), []);
 });
+
+test("commandOf: a fenced script is one command, without its language tag (live jsoncount-depth, 2026-09-20)", () => {
+  const plan = parsePlan(readFileSync(new URL("./fixtures-live-plan-jc-depth.md", import.meta.url), "utf8"));
+  const u1 = plan.units[0]!;
+  assert.ok(u1.command, "U1 has a command");
+  assert.match(u1.command!, /^set -e\n/);
+  assert.doesNotMatch(u1.command!, /^bash\n/);
+  assert.equal(commandOf("```sh\n$ npm test\n```"), "npm test");
+  assert.equal(commandOf("```\nsome prose about running things\n```"), undefined);
+});
+
+test("commandOf: a placeholder inside a quoted string is text, and a note after a leading command is a note (live kv-api, 2026-09-20)", () => {
+  const plan = parsePlan(readFileSync(new URL("./fixtures-live-plan-kv.md", import.meta.url), "utf8"));
+  const u5 = plan.units.find((u) => u.id === "U5")!;
+  assert.ok(u5.command, "U5's grep chain is a command");
+  assert.match(u5.command!, /grep -q "\/kv\/<key>" README\.md/);
+  assert.equal(commandOf("`node --test test/integration.test.js` — exit code 0, the kill-and-restart subtest passes"), "node --test test/integration.test.js");
+  // Still not commands: a placeholder in the command itself; a person acting before the command; an invocation modifier after it.
+  assert.equal(commandOf("`curl localhost:8787/kv/<key>`"), undefined);
+  assert.equal(commandOf("a stranger runs `npm start` and opens the page"), undefined);
+  assert.equal(commandOf("`curl -X POST /api/snippets` with a missing title"), undefined);
+});
+
+test("validateUnits: a Check that asserts the suite is red is a transient state, not a Check (live cron-next, 2026-09-21)", () => {
+  for (const check of ["`npm ci && npm run build && ! npm test`", "`npm test; test $? -ne 0`", "`! npm run test`"]) {
+    const plan = parsePlan(PLAN_MD.replace("Check:    `node --test test/notfound.test.js` — Now: unmet", `Check:    ${check} — Now: unmet`));
+    const problems = validateUnits(plan.units, parseProblem(PROBLEM_MD), { requireCommand: true });
+    assert.ok(problems.some((p) => p.id === "U1" && /asserts that the test suite fails/.test(p.problem)), check);
+  }
+  for (const check of ["`npm test`", "`! grep -q TODO src/app.js`", "`npm run build && node --test test/x.test.js`"]) {
+    const plan = parsePlan(PLAN_MD.replace("Check:    `node --test test/notfound.test.js` — Now: unmet", `Check:    ${check} — Now: unmet`));
+    assert.deepEqual(validateUnits(plan.units, parseProblem(PROBLEM_MD), { requireCommand: true }).filter((p) => /suite fails/.test(p.problem)), [], check);
+  }
+});
+
+test("problemGaps: a Check with a NUL byte is a gap, not a crash", () => {
+  const p = parseProblem(PROBLEM_MD.replace("Check: `node --test test/notfound.test.js`", "Check: `tr '\u0000' a`"))!;
+  assert.ok(problemGaps(p).some((g) => /D1's Check contains a NUL byte/.test(g)), JSON.stringify(problemGaps(p)));
+});

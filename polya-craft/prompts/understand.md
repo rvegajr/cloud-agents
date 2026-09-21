@@ -82,6 +82,11 @@ You must list every entry below in `Lessons consulted` with a disposition:
   marked *(immovable)*, and no done-check may need one moved. A J or W line
   that can only be met by moving one is a defect in the request: dispose it
   `dismissed — conflicts with M<n>: <why>` and the loop stops there.
+- A Check runs under `sh -c` in a fresh clone, non-interactive, from the
+  repo root. A file it makes goes under the working directory
+  (`mktemp "$PWD/tmp.XXXXXX"`), never `mktemp`'s default, which a container
+  on this machine cannot see. A body over a few KB goes through a file, not
+  the command line.
 - No plan text. A sentence that begins "first we will" is deleted.
 - Every Check is runnable by a stranger with what Given names.
 - Every D is unmet today, or is an invariant and says so.

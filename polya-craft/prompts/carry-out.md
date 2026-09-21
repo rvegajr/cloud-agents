@@ -40,6 +40,13 @@ ready, and it goes back to the planner.
 
 ## Rules the gate enforces after your turn
 
+Processes are not yours to stop unless you started them. The loop started the
+app and stops it after; never run `pkill`, `killall`, `kill -9`, or
+`ps … | xargs kill`, which reach every process on this machine, the loop's
+own included. A check that needs its own server starts one on another port
+and kills only that `$pid`.
+
+
 - Do not edit any test, check, or checklist. If one looks wrong, say so in
   `notes` and stop.
 - Do not edit anything under `.polya/` (the plan and its record), lint or type config,

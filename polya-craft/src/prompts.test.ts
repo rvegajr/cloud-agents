@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildPrompt } from "../../src/lib/prompts.js";
@@ -37,4 +38,11 @@ test("a gate-feedback note prepended to a carry-out prompt still classifies as c
   const prompt = `${note}${buildPrompt("polya-craft/prompts/carry-out", "", SLOTS["carry-out"]!)}`;
   assert.ok(note.length > 1500);
   assert.equal(classifyPrompt(prompt), "carry-out");
+});
+
+test("the Verifier and the Hand are told never to stop a process they did not start", () => {
+  for (const name of ["verify", "carry-out"]) {
+    const md = readFileSync(new URL(`../prompts/${name}.md`, import.meta.url), "utf8");
+    assert.match(md, /never run `pkill`, `killall`, `kill -9`/, name);
+  }
 });
