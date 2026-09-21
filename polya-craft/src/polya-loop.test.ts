@@ -457,7 +457,8 @@ test("look back (b): a done-check that curls localhost starts the bar's start co
   const out = await runPolyaLoop(send, { ...base, io, lessons: null });
   assert.equal(out.stopReason, "complete");
   assert.deepEqual(started, [{ command: "npm start", cwd: "/tmp/clone-1", stopped: true }]);
-  const check = calls.commands.find((c) => c.command.startsWith("test \"$(curl"));
+  // Understand runs the check once in the workspace to see that it can run at all; look back runs it in the clone.
+  const check = calls.commands.find((c) => c.command.startsWith("test \"$(curl") && c.cwd);
   assert.equal(check?.cwd, "/tmp/clone-1");
   // Without a server-shaped check, nothing is started.
   const { io: io2 } = makeIO();
@@ -906,4 +907,16 @@ test("look back (c): what a review turn leaves in the repo is discarded; a repai
   assert.match(out2.stopDetail ?? "", /the check is wrong/);
   assert.deepEqual(resets2, [beforeRepair]);
   void calls; void calls2;
+});
+
+test("understand: a mechanical done-check that cannot run is a gap, not an unmet check (live snippet-vault-export, D8)", async () => {
+  const { io } = makeIO({ commands: { "node --test test/notfound.test.js": 127 } });
+  const { send, sent } = makeSend({});
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "understanding-incomplete");
+  assert.match(out.stopDetail ?? "", /D1's Check cannot run \(exit 127\)/);
+  assert.match(sent[1]!.prompt, /^## Understanding incomplete[\s\S]*D1's Check cannot run/);
+  // Red for a product reason is what a check should be.
+  const ok = await runPolyaLoop(makeSend({}).send, { ...base, io: makeIO().io, lessons: null });
+  assert.equal(ok.stopReason, "complete");
 });

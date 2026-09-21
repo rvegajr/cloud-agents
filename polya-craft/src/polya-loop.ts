@@ -559,7 +559,21 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     }
     let problem = readProblem();
     if (!problem) return stop("unparseable-report", `${ARTIFACTS.problem} is missing or has no title`);
-    let gaps = gapsOf();
+    // A mechanical done-check that cannot run at all (a 2 MB literal past ARG_MAX, a command not found, a syntax
+    // error) would sit "unmet" for the wrong reason until look back, then cost a repair turn to be called wrong
+    // (live snippet-vault-export, 2026-09-21, D8). It is run once here; red is fine, unable to run is a gap.
+    const cannotRun = async (): Promise<string[]> => {
+      if (!software) return [];
+      const out: string[] = [];
+      for (const d of state.problem?.done ?? []) {
+        if (!d.command) continue;
+        const r = await io.runCommand(d.command);
+        const why = r.code === 126 || r.code === 127 ? `exit ${r.code}` : /Argument list too long|command not found|syntax error|is a directory/i.exec(r.output)?.[0];
+        if (why) out.push(`- ${d.id}'s Check cannot run (${why}); a Check may be unmet, never unrunnable. Fix the command`);
+      }
+      return out;
+    };
+    let gaps = [...gapsOf(), ...(await cannotRun())];
     if (gaps.length) {
       log(`understanding has gaps; asking the Solver once more:\n${gaps.join("\n")}`);
       const note = `## Understanding incomplete\n\n${ARTIFACTS.problem} is on disk but the orchestrator found these gaps. Fix only these, commit, then reply with the same JSON block.\n\n${gaps.join("\n")}\n\n---\n\n`;
@@ -567,7 +581,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       track(t);
       if (t.status !== "finished") return stop("run-failed", "understand retry did not finish");
       io.commit("understand: gap fixes");
-      gaps = gapsOf();
+      gaps = [...gapsOf(), ...(await cannotRun())];
       if (gaps.length) return stop("understanding-incomplete", gaps.join("; "));
     }
     problem = state.problem!;
