@@ -417,6 +417,7 @@ export function problemGaps(p: Problem | undefined, opts: { maxDone?: number; so
   if (!p.done.length) gaps.push("- no done-checks: list D1..Dn under `## Done-check`, each `- D<n>: <statement> — Check: <what a stranger runs> — Now: unmet|met`");
   if (p.done.length > max) gaps.push(`- ${p.done.length} done-checks; at most ${max}. More means the problem is not yet understood, or is size L and needs a Split table`);
   for (const d of p.done) if (!d.check) gaps.push(`- ${d.id} has no Check`);
+  for (const d of p.done) if (d.check.includes("\0")) gaps.push(`- ${d.id}'s Check contains a NUL byte; a shell cannot run it (write the escape as text)`);
   if (!p.restated) gaps.push("- no `## Restated` section in your own words");
   if (p.size === "L" && !p.split.length) gaps.push("- Size L but no `## Split` table: sub-problems, the existing check that bounds each, the D ids each carries");
   if (p.split.length) {

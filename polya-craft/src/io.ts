@@ -30,6 +30,9 @@ export function makePolyaIO(
     ...base,
     runCheck: (command, dir) =>
       new Promise((resolveCheck) => {
+        // spawn throws on a NUL byte, which took the whole loop down once (a corrupted PROBLEM.md); a check that
+        // cannot be spawned is a failed check, never a crash.
+        if (command.includes("\0")) return resolveCheck({ code: 1, output: "the command contains a NUL byte and cannot be run" });
         const child = spawn("sh", ["-c", command], { cwd: dir, env: subprocessEnv() as NodeJS.ProcessEnv, detached: true, stdio: ["ignore", "pipe", "pipe"] });
         let output = "";
         const keep = (b: Buffer) => {

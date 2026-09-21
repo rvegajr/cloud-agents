@@ -609,3 +609,8 @@ test("validateUnits: a Check that asserts the suite is red is a transient state,
     assert.deepEqual(validateUnits(plan.units, parseProblem(PROBLEM_MD), { requireCommand: true }).filter((p) => /suite fails/.test(p.problem)), [], check);
   }
 });
+
+test("problemGaps: a Check with a NUL byte is a gap, not a crash", () => {
+  const p = parseProblem(PROBLEM_MD.replace("Check: `node --test test/notfound.test.js`", "Check: `tr '\u0000' a`"))!;
+  assert.ok(problemGaps(p).some((g) => /D1's Check contains a NUL byte/.test(g)), JSON.stringify(problemGaps(p)));
+});
