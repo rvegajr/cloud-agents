@@ -15,7 +15,8 @@ This repo **is** the factory (`npm run build-farm`, `build-app`, Slack bot).
 
 ## Meters
 
-- Farm and Slack: `composer-2.5`, Fast off. `FARM_MAX_USD` caps a wave.
+- Farm and Slack: `composer-2.5`, Fast off. That is the best value measured on the snippet vault ($1.20). `FARM_MAX_USD` caps a wave.
+- Do not default the farm to GPT-5.6 Sol, Opus 5.5, or Grok Fast. Sol and Opus bill Other Models. A quality miss gets a checklist on the cheap solver before a frontier model. `ARTICLE-FRONTIER-VALUE.md`.
 - Hybrid: Max plans, local types, 85% ceiling, never extra usage.
 - Empty `SLACK_CLAUDE_USER_IDS`. No `ANTHROPIC_API_KEY` in the shell.
 - Resume failed farm jobs. Do not re-farm. Do not raise concurrency until `complete`.

@@ -14,6 +14,8 @@ Read this file top to bottom once. Then run the numbered scripts in order.
 walkthrough, with a jam.dev recording as the preferred bug report.
 `ARTICLE-CLAUDE-MAX.md` is how the build loop moves onto a Claude Max plan;
 `ARTICLE-CLAUDE-MAX-RESULTS.md` is the snippet-vault A/B that measured it.
+`ARTICLE-FRONTIER-VALUE.md` prices GPT-5.6 Sol, Opus 5.5, and Grok 4.7 on that
+same vault and keeps Composer, Fast off, as the default.
 `architect-crew-gate/` is the pattern that A/B led to, in its own folder:
 `THEORY.md` (two pages; hand it to any AI with a job and it can act on it),
 `ARTICLE.md` (what the A/B found wrong with the hybrid engine's output and the
@@ -326,7 +328,10 @@ engine): both `complete` in 6 iterations. Cursor charged **$1.20** in 13.5
 minutes ([sv-cursor #1](https://github.com/rvegajr/sv-cursor/pull/1)). Claude
 Max logged **$6.65** API-equivalent in 16.2 minutes and billed nothing extra
 ([sv-claude #1](https://github.com/rvegajr/sv-claude/pull/1)). Write-up:
-[ARTICLE-CLAUDE-MAX-RESULTS.md](ARTICLE-CLAUDE-MAX-RESULTS.md). Slack stays on
+[ARTICLE-CLAUDE-MAX-RESULTS.md](ARTICLE-CLAUDE-MAX-RESULTS.md). The same token
+mix at 22 September 2026 list rates is about $2.50 on Opus 5.5, $3.09 on
+Grok 4.7, and $3.53 on GPT-5.6 Sol. Composer stays the default.
+[ARTICLE-FRONTIER-VALUE.md](ARTICLE-FRONTIER-VALUE.md). Slack stays on
 Cursor.
 
 ### Step 8: trigger from Slack
@@ -506,6 +511,7 @@ cloud-agents/
   ARTICLE-SLACK.md               walkthrough: Slack @mention -> PR
   ARTICLE-CLAUDE-MAX.md          move the build loop onto a Max plan
   ARTICLE-CLAUDE-MAX-RESULTS.md  snippet-vault A/B: Cursor $1.20 vs Max $6.65 API-eq
+  ARTICLE-FRONTIER-VALUE.md      Sol / Opus 5.5 / Grok 4.7 on that vault; Composer stays default
   IMPLEMENTATION-GUIDE.md        agent-executable recipe: credentials, phases, human gates
   CHANGELOG.md                   what changed between tags
   slack-app-manifest.json        paste at api.slack.com/apps
