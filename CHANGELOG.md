@@ -17,6 +17,11 @@ npm run deploy                        # stamp the commit, then ship
 
 ### Added
 
+- **Frontier value on the measured vault** (`ARTICLE-FRONTIER-VALUE.md`).
+  The 17 Sep snippet-vault (5.28M tokens, Composer 2.5 Fast off, $1.20) fitted
+  to 22 Sep list rates is about $2.50 on Opus 5.5, $3.09 on Grok 4.7, and $3.53
+  on GPT-5.6 Sol. Sol and Opus bill Other Models. Farm and Slack stay on
+  Composer, Fast off. A quality miss gets a checklist before a frontier model.
 - **`polya-craft/`: a fresh problem-solving loop on Pólya's four steps.**
   Understand ends with the done-checks (`D1` is the answer in use); Devise is
   judged by whether every unit passes the stranger test; Carry out is one unit
