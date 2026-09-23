@@ -23,3 +23,8 @@ Last lines of every job are COST. Every AI provider is its own meter — never o
 - Record whichever engine is running. Do not fold an unknown AI into Cursor.
 - Only print meters that have spend — no `$0.00` padding.
 - Missing usage: `COST this run: unknown`.
+
+## Noctusoft platforms
+
+- **LLM Relay** — apps call `https://ai.noctusoft.com/v1` on litellm-vm (Azure `20.46.250.159`). Virtual key. Not noctusoft-relay on `ns`.
+- **Mail / text / store / marketplace** — noctusoft-relay on `ns` (`74.235.141.84`) with a product-scoped `nsk_…` key. Catalog: `~/Dev/Noctusoft/noctusoft-relay/README.md`.

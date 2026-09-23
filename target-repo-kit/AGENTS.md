@@ -10,6 +10,13 @@ things are, how to build, how to test, what never to touch.
 ## What this project is
 One paragraph. What it does, who uses it, what "working" looks like.
 
+## Noctusoft platforms (when this product is a Noctusoft app)
+
+A product does not sign up for OpenAI, Twilio, or SendGrid. The product id is the only difference.
+
+- **LLM Relay** — `https://ai.noctusoft.com/v1` on litellm-vm (Azure `20.46.250.159`, Tailscale `100.112.233.46`). Virtual key. No provider SDK.
+- **Mail / text / store / marketplace** — noctusoft-relay on `ns` (`74.235.141.84`) with a product-scoped `nsk_…` key. Catalog: `noctusoft-relay/README.md`.
+
 ## Layout
 - `src/` - application code. Entry point: `src/index.ts`.
 - `src/routes/` - one file per HTTP route. Add new routes here, register in `src/app.ts`.
