@@ -24,6 +24,14 @@ Last lines of every job are COST. Every AI provider is its own meter — never o
 - Only print meters that have spend — no `$0.00` padding.
 - Missing usage: `COST this run: unknown`.
 
+## Deployed
+
+- "Is the latest out?" is `npm run version-board` (`--strict`, `--json`). Exit 1 on stale or unreachable.
+- It compares each service's `GET /health` `commit` against the branch tip. A green status dot is not an answer.
+- The fleet is `services.json`. Add a service there, never to a second list.
+- `unknown` means that service's `/health` carries no `commit` yet. Contract and per-host wiring: `target-repo-kit/AGENTS.md`.
+- Sweep it; do not tight-poll. The answer changes a few times a day.
+
 ## Noctusoft platforms
 
 - **LLM Relay** — apps call `https://ai.noctusoft.com/v1` on litellm-vm (Azure `20.46.250.159`). Virtual key. Not noctusoft-relay on `ns`.

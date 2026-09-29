@@ -1,0 +1,45 @@
+{
+  "$comment": "The fleet registry: one list of what is deployed where, read by `npm run version-board`. Add a service here, not in a second list. `expect.branch` is the ref a healthy deploy should be sitting on; `graceSeconds` is how long a fresh merge may take to roll out before it counts as stale.",
+  "defaults": {
+    "graceSeconds": 900
+  },
+  "services": [
+    {
+      "name": "tailorfolio",
+      "env": "production",
+      "health": "https://tailorfolio.com/health",
+      "repo": "rvegajr/tailorfolio",
+      "expect": { "branch": "main" }
+    },
+    {
+      "name": "tailorfolio",
+      "env": "uat",
+      "health": "https://uat.tailorfolio.com/health",
+      "repo": "rvegajr/tailorfolio",
+      "expect": { "branch": "uat" }
+    },
+    {
+      "name": "tailorfolio",
+      "env": "dev",
+      "health": "https://dev.tailorfolio.com/health",
+      "repo": "rvegajr/tailorfolio",
+      "expect": { "branch": "develop" }
+    },
+    {
+      "name": "blessbox",
+      "env": "production",
+      "health": "https://www.blessbox.org/api/health",
+      "repo": "rvegajr/blessbox",
+      "expect": { "branch": "main" },
+      "note": "no commit in /health yet — Vercel CLI deploy, pass ${{ github.sha }} as a build env"
+    },
+    {
+      "name": "noctusoft-relay",
+      "env": "production",
+      "health": "https://api.sendgrid.noctusoft.com/health",
+      "repo": "rvegajr/noctusoft-relay",
+      "expect": { "branch": "main" },
+      "note": "no commit in /health yet — deploys by git pull on ns, so it can read git rev-parse HEAD at boot"
+    }
+  ]
+}

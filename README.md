@@ -410,6 +410,54 @@ logs and answers `@<bot> version` with the detail. The stamp has to travel as an
 environment variable because `railway up` honours `.gitignore` and a built image
 has no `.git`.
 
+### Is the latest deployed? (the fleet version board)
+
+`npm run stamp` answers that for *this* bot. The same question about every other
+product is a different one, and a status page cannot answer it: a green dot says
+the old build is up, not that the new one shipped.
+
+```bash
+npm run version-board              # the whole fleet
+npm run version-board -- --strict  # also fail when a service cannot answer
+npm run version-board -- --json    # for a scheduled sweep
+```
+
+```
+  SERVICE          ENV         DEPLOYED  EXPECTED  VERDICT  DETAIL
+  tailorfolio      production  4823ee2c  4823ee2c  current
+  tailorfolio      uat         3a0229f0  3a0229f0  current
+  tailorfolio      dev         47d8f4a5  47d8f4a5  current
+  blessbox         production  —         4f30f137  unknown
+  noctusoft-relay  production  —         34f17bac  unknown
+```
+
+Three facts make a verdict: the commit `GET /health` reports, the branch tip from
+`gh api` (no clone, one call), and a grace window so a merge still rolling out
+reads `deploying` rather than `stale`.
+
+| Verdict | Meaning |
+| --- | --- |
+| `current` | Running the expected commit. |
+| `deploying` | Behind, but the expected commit landed inside the grace window. |
+| `stale` | Behind, and has had long enough to catch up. **Exit 1.** |
+| `unknown` | Answered, but does not say which commit it is running. |
+| `unreachable` | Did not answer. **Exit 1.** |
+
+`unknown` is the useful part: it is the to-do list. A service lands there until
+its `/health` carries a `commit`, and the row prints what that service needs.
+The contract and the per-host wiring for `commit` are in
+`target-repo-kit/AGENTS.md` — Railway injects `RAILWAY_GIT_COMMIT_SHA` free, a
+`git pull` box can read its own `HEAD`, and a Vercel CLI deploy should pass
+`${{ github.sha }}` explicitly rather than trust the git vars.
+
+The fleet lives in `services.json`: name, env, health url, repo, expected
+branch. One list. Anything else that needs to know what is deployed reads that
+file rather than keeping its own copy.
+
+Exit 1 on stale or unreachable, so this works unattended — but run it on a
+sweep, not a tight poll. The answer changes a few times a day; a five-minute
+cron burns a meter for nothing.
+
 Releases are semver git tags with a `CHANGELOG.md` entry:
 
 ```bash
@@ -539,6 +587,7 @@ cloud-agents/
     06-build-app.ts              idea -> spec -> milestones loop -> release gate
     10-build-farm.ts             N idea files -> N Cursor VMs in a pool, dollar cap
     11-cost-board.ts             per-provider COST ledger and monthly outlook
+    13-version-board.ts          is each service running the commit it should be?
     07-slack-bot.ts              Bolt Socket Mode; @mention -> pipeline
     08-doctor.ts                 read-only preflight: every credential, scope, grant
     09-stamp-version.ts          stamp the commit into BUILD_INFO before a deploy
@@ -547,6 +596,8 @@ cloud-agents/
       jam.ts                     fetch jam.dev recordings into the prompt
       slack-cli.ts               mention CLI: usage, <project>, version, channel prefix
       slack-cli.test.ts
+      freshness.ts               /health commit vs branch tip -> current | stale
+      freshness.test.ts
       slack-fix.ts               startJob / continueJob
       slack-thread.ts            agent id in thread, allowlist, dedupe
       build-loop.ts              the loop: phases, stall/block detection, resumable state
