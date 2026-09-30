@@ -31,7 +31,7 @@
       "health": "https://www.blessbox.org/api/health",
       "repo": "rvegajr/blessbox",
       "expect": { "branch": "main" },
-      "note": "no commit in /health yet — Vercel CLI deploy, pass ${{ github.sha }} as a build env"
+      "note": "commit lands with blessbox#230; if commitSource comes back unknown, set BUILD_COMMIT_SHA as a runtime env in Vercel"
     },
     {
       "name": "noctusoft-relay",
@@ -39,7 +39,7 @@
       "health": "https://api.sendgrid.noctusoft.com/health",
       "repo": "rvegajr/noctusoft-relay",
       "expect": { "branch": "main" },
-      "note": "no commit in /health yet — deploys by git pull on ns, so it can read git rev-parse HEAD at boot"
+      "note": "commit lands with noctusoft-relay#78 on the next deploy.sh run; it reads HEAD from the checkout, nothing to stamp"
     }
   ]
 }
