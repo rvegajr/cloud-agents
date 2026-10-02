@@ -22,7 +22,8 @@ import {
   type CursorAppGrant,
 } from "./github.js";
 import { printStream, type StreamOptions } from "./stream.js";
-import { centsForMeter, closeJobCost, formatRunningCost, meterForEngine, projectFromRepo, type CostMeterId } from "./cost-ledger.js";
+import { appendCostEntry, centsForMeter, closeJobCost, defaultLedgerPath, formatRunningCost, meterForEngine, meterLabel, projectFromRepo, type CostEntry, type CostMeterId } from "./cost-ledger.js";
+import { drainDeciderSpend, type DeciderSpend } from "../../architect-crew-gate/src/decider.js";
 import { initialBlueprintState, runBlueprintLoop, type BlueprintState, type BlueprintStopReason } from "../../architect-crew-gate/src/blueprint-loop.js";
 import { browserFromEnv } from "../../architect-crew-gate/src/browser.js";
 import { makeRepoIO } from "../../architect-crew-gate/src/io.js";
@@ -76,6 +77,8 @@ export interface BuildRecord {
   loop?: BuildLoopKind;
   blueprint?: BlueprintState;
   polya?: PolyaState;
+  /** Cumulative decision-model spend per meter (the judgment gate rule), across resumes. */
+  deciderCents?: Record<string, number>;
 }
 
 export interface RunBuildAppOpts {
@@ -138,6 +141,32 @@ export function loadBuildRecord(agentId: string, stateDir = buildStateDir()): Bu
   const file = buildStateFile(agentId, stateDir);
   if (!existsSync(file)) throw new Error(`No saved state at ${file}. Resume needs a build started by this script.`);
   return JSON.parse(readFileSync(file, "utf8")) as BuildRecord;
+}
+
+/**
+ * The decision model behind the judgment rule is its own meter, never folded into the
+ * engine's. Ledger entries are cumulative per (meter, agent), like getUsage, so a resumed
+ * job writes its new total. Returns one COST line per meter that spent something.
+ */
+export function closeDeciderCost(
+  record: BuildRecord,
+  stateDir: string,
+  source: CostEntry["source"],
+  spent: DeciderSpend[] = drainDeciderSpend(),
+): string[] {
+  const lines: string[] = [];
+  for (const s of spent) {
+    const total = (record.deciderCents?.[s.meter] ?? 0) + s.cents;
+    record.deciderCents = { ...record.deciderCents, [s.meter]: total };
+    if (total <= 0) continue;
+    try {
+      appendCostEntry(defaultLedgerPath(stateDir), { project: projectFromRepo(record.repo), cents: total, meter: s.meter, source, agentId: record.agentId, repo: record.repo });
+    } catch {
+      /* ledger is optional */
+    }
+    if (s.cents > 0) lines.push(`COST decider: $${(s.cents / 100).toFixed(4)} this run, $${(total / 100).toFixed(4)} this job  ${meterLabel(s.meter)} (${s.inputTokens.toLocaleString("en-US")} input tokens, ${s.calls} calls)`);
+  }
+  return lines;
 }
 
 export function createGithubRepo(name: string): string {
@@ -457,6 +486,8 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
       } catch {
         /* ledger is optional */
       }
+      costClose = [costClose, ...closeDeciderCost(record, stateDir, opts.costSource ?? "build-app")].filter(Boolean).join("\n") || undefined;
+      saveBuildRecord(record, stateDir);
       return { agentId: record.agentId, repo: record.repo, ref: record.ref, engine: record.engine ?? engine, prUrl: lastPr ?? record.prUrl, stopReason: bp.stopReason, blueprint: bp, chargedCents: cents, costClose };
     }
 
@@ -528,6 +559,8 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
       } catch {
         /* ledger is optional */
       }
+      costClose = [costClose, ...closeDeciderCost(record, stateDir, opts.costSource ?? "build-app")].filter(Boolean).join("\n") || undefined;
+      saveBuildRecord(record, stateDir);
       return { agentId: record.agentId, repo: record.repo, ref: record.ref, engine: record.engine ?? engine, prUrl: lastPr ?? record.prUrl, stopReason: ps.stopReason, polya: ps, chargedCents: cents, costClose };
     }
 
@@ -569,6 +602,8 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
     } catch {
       /* ledger is optional */
     }
+    costClose = [costClose, ...closeDeciderCost(record, stateDir, opts.costSource ?? "build-app")].filter(Boolean).join("\n") || undefined;
+    saveBuildRecord(record, stateDir);
     return {
       agentId: record.agentId,
       repo: record.repo,

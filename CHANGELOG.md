@@ -17,6 +17,23 @@ npm run deploy                        # stamp the commit, then ship
 
 ### Added
 
+- **Judgment gate rule: a decision model reads each changed file's diff.**
+  `DECIDER=jev|d1|local` (default `off`) adds gate rule 7 after every
+  deterministic rule passes: one System One call per changed file with
+  literal yes/no questions about the defects the blind review kept finding in
+  local builds (a test that checks a stand-in instead of the project's code, a
+  test that asserts nothing, a silenced check, a DB opened at import time, a
+  swallowed error, a placeholder, a literal credential). A flag blocks a task's
+  first attempt with the gate's usual feedback; later attempts only advise, so
+  a probabilistic judge can never stop a build. Entry points are exempt from
+  the import-time question. Decisions go to `.runs/decider.jsonl` for
+  calibration; spend is its own meter. On the three reviewed snippet-vault
+  builds, Jev flagged exactly the hybrid build's two reviewer-listed defects
+  (`src/db.js` at import time, p=0.98; `test/server.test.js` testing its own
+  stand-in server, p=0.96) and nothing in the Claude or Cursor builds, in about
+  a second per build for $0.0036 total. Covers the blueprint and polya loops
+  and hybrid/local turns; the Cursor milestone loop and Slack have no gate yet.
+
 - **`@<bot> status` answers "where is it at?" in plain English.** In a job
   thread: the step (brief, plan, build, check), when it started and last moved,
   Cursor's summary, spend so far, and what you need to do next. Outside a

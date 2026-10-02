@@ -50,6 +50,7 @@ export function makeRepoIO(
         allowedFiles: ctx.allowedFiles,
         baseSha: ctx.baseSha,
         taskCommands: ctx.taskCommands,
+        attempt: ctx.attempt,
         exec,
         log: opts.log,
       }),

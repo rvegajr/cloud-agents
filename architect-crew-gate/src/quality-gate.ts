@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import type { ExecFn, LocalCommand } from "../../src/lib/engine-local.js";
 import { defaultExec } from "../../src/lib/engine-local.js";
 import { hygienePatternToRegex, parseQuality, type QualityContract } from "./blueprint.js";
+import { deciderConfigFromEnv, entryStemsOf, judgeDiff, JUDGMENT_QUESTIONS, logJudgment, type DeciderConfig, type FetchFn, type SleepFn } from "./decider.js";
 
 /**
  * Deterministic checks the orchestrator runs on a local model's turn, in its own
@@ -17,7 +18,7 @@ import { hygienePatternToRegex, parseQuality, type QualityContract } from "./blu
  * broken from a clean clone (clean-start).
  */
 
-export type GateRule = "ownership" | "quality-bar" | "hygiene" | "tamper" | "clean-start" | "vacuous-tests";
+export type GateRule = "ownership" | "quality-bar" | "hygiene" | "tamper" | "clean-start" | "vacuous-tests" | "judgment";
 
 export interface GateFinding {
   rule: GateRule;
@@ -43,6 +44,8 @@ export interface GateConfig {
   vacuous: "finish" | "every" | "";
   /** Run the clean-start rule every Nth iterate turn (always on finish). */
   startEvery: number;
+  /** The judgment rule's decision model (`decider.ts`); absent or `off` = the rule does not run. */
+  decider?: DeciderConfig;
 }
 
 export function gateConfigFromEnv(env: NodeJS.ProcessEnv = process.env): GateConfig {
@@ -58,6 +61,7 @@ export function gateConfigFromEnv(env: NodeJS.ProcessEnv = process.env): GateCon
     commandTimeoutMs: int("LOCAL_GATE_CMD_MIN", 10) * 60_000,
     vacuous: vacuousRaw === "every" ? "every" : vacuousRaw === "0" || vacuousRaw === "" ? "" : "finish",
     startEvery: int("LOCAL_GATE_START_EVERY", 3),
+    decider: deciderConfigFromEnv(env),
   };
 }
 
@@ -576,6 +580,14 @@ export interface RunGateOpts {
    * red by design until the last task, and only the finish gate runs it.
    */
   taskCommands?: string[];
+  /**
+   * 0-based attempt of this turn. A judgment flag blocks only attempt 0: a decision model is
+   * probabilistic, so a second flag on the same work is reported, never allowed to stop a build.
+   */
+  attempt?: number;
+  /** Test seams for the decision model's HTTP call and its backoff. */
+  fetchFn?: FetchFn;
+  sleepFn?: SleepFn;
   exec?: ExecFn;
   log?: (line: string) => void;
 }
@@ -646,8 +658,48 @@ export async function runQualityGate(
     skipped.push("vacuous-tests");
   }
 
+  // Last, and only on work that already passes every deterministic rule: the crew fixes what a
+  // command proved before it hears what a model suspects.
+  if (cfg.decider && cfg.decider.provider !== "off") {
+    if (findings.every((f) => f.ok)) findings.push(...(await judgmentFindings(cwd, cfg.decider, exec, kind, opts)));
+    else skipped.push("judgment");
+  }
+
   const passed = findings.every((f) => f.ok);
   return { passed, findings, seconds: Math.round((Date.now() - started) / 1000), skipped };
+}
+
+// ---------------------------------------------------------------------------
+// Rule 7: judgment — a decision model's yes/no questions about the turn's diff
+// ---------------------------------------------------------------------------
+
+export async function judgmentFindings(
+  cwd: string,
+  decider: DeciderConfig,
+  exec: ExecFn,
+  kind: "iterate" | "finish",
+  opts: Pick<RunGateOpts, "baseSha" | "attempt" | "fetchFn" | "sleepFn" | "log">,
+): Promise<GateFinding[]> {
+  if (decider.problem) return [{ rule: "judgment", ok: true, detail: `judgment skipped: ${decider.problem}` }];
+  const base = opts.baseSha ?? "HEAD~1";
+  const diff = await run(exec, cwd, gitCmd(["diff", "--no-color", "--no-ext-diff", "-U5", `${base}..HEAD`]), 60_000);
+  if (diff.code !== 0) return [{ rule: "judgment", ok: true, detail: `judgment skipped: git diff ${base}..HEAD exited ${diff.code}` }];
+  const attempt = opts.attempt ?? 0;
+  const blocking = attempt === 0;
+  const j = await judgeDiff(diff.stdout, decider, { fetchFn: opts.fetchFn, sleepFn: opts.sleepFn, entryStems: entryStemsOf(readPackageJson(cwd)) });
+  logJudgment(decider, j, { cwd, kind, attempt, base, blocking });
+  const tag = `${decider.provider}${j.model ? ` ${j.model}` : ""}`;
+  opts.log?.(`judgment (${tag}): ${j.decisions.length} decision(s) over ${new Set(j.decisions.map((d) => d.file)).size} file(s), ${j.decisions.filter((d) => d.flagged).length} flagged${j.errors.length ? `, ${j.errors.length} error(s)` : ""}`);
+  const out: GateFinding[] = [];
+  for (const d of j.decisions.filter((x) => x.flagged)) {
+    const why = `${d.file}: ${JUDGMENT_QUESTIONS.find((q) => q.id === d.question)?.feedback ?? d.question} [${d.question}, p=${d.p.toFixed(2)}, ${tag}]`;
+    out.push(blocking ? { rule: "judgment", ok: false, detail: why } : { rule: "judgment", ok: true, detail: `still flagged on attempt ${attempt + 1}, advisory only: ${why}` });
+  }
+  // An outage of the decision model never fails a turn; the deterministic rules already ran.
+  for (const e of j.errors) out.push({ rule: "judgment", ok: true, detail: `judgment unavailable: ${e}` });
+  if (!out.length) out.push({ rule: "judgment", ok: true, detail: `judgment: nothing flagged (${tag}, threshold ${decider.threshold})` });
+  if (j.truncated.length) out.push({ rule: "judgment", ok: true, detail: `judgment read only the first ${decider.maxStateChars} chars of: ${j.truncated.join(", ")}` });
+  return out;
 }
 
 export function gateFeedbackNote(attempt: number, result: GateResult): string {
