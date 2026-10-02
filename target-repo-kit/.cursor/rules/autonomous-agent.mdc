@@ -16,6 +16,10 @@ You may be running with no human watching. Behave accordingly.
   adjacent code.
 - Before declaring done, run `git status`. Uncommitted work and stray files mean
   you are not done.
+- Never print a secret, or any part of one, in output, logs, commits, PR bodies,
+  or tests. Read keys from the environment the run was given; prove one works
+  with a status code, not its value. A missing key goes in your final report as
+  "add `<NAME>` to the vault"; never invent, hardcode, or commit a value.
 - Your final message will be read by a program and a tired human. Lead with the
   outcome, then what changed, then what you verified, then what you deliberately
   did not do. **Last lines are COST.** Whatever AI ran, record that provider's
