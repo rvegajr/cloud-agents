@@ -23,7 +23,8 @@ import {
 } from "./github.js";
 import { printStream, type StreamOptions } from "./stream.js";
 import { appendCostEntry, centsForMeter, closeJobCost, defaultLedgerPath, formatRunningCost, meterForEngine, meterLabel, projectFromRepo, type CostEntry, type CostMeterId } from "./cost-ledger.js";
-import { drainDeciderSpend, type DeciderSpend } from "../../architect-crew-gate/src/decider.js";
+import { deciderConfigFromEnv, drainDeciderSpend, type DeciderSpend } from "../../architect-crew-gate/src/decider.js";
+import { githubReader, withJudgment } from "./cloud-judgment.js";
 import { initialBlueprintState, runBlueprintLoop, type BlueprintState, type BlueprintStopReason } from "../../architect-crew-gate/src/blueprint-loop.js";
 import { browserFromEnv } from "../../architect-crew-gate/src/browser.js";
 import { makeRepoIO } from "../../architect-crew-gate/src/io.js";
@@ -257,7 +258,8 @@ function cursorSend(agent: SDKAgent, stream: StreamOptions | undefined, log: (li
     }
     const pr = r.git?.branches.find((b) => b.prUrl)?.prUrl;
     if (pr) log(`PR: ${pr}`);
-    return { status: r.status, result: r.result, runId: run.id, prUrl: pr };
+    const pushed = r.git?.branches.find((b) => b.branch);
+    return { status: r.status, result: r.result, runId: run.id, prUrl: pr, repoUrl: pushed?.repoUrl, branch: pushed?.branch };
   };
 }
 
@@ -291,6 +293,15 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
           execFileSync(file, args, { encoding: "utf8" }),
         ),
       }));
+
+  // A Cursor agent's work lives on a branch, not in a clone the gate can read: judge it from GitHub.
+  const judged = (s: SendFn, baseRef: string): SendFn =>
+    withJudgment(s, {
+      decider: deciderConfigFromEnv(),
+      baseRef,
+      github: githubReader(resolveGithubToken(process.env, (file, args) => execFileSync(file, args, { encoding: "utf8" }))),
+      log,
+    });
 
   let record: BuildRecord;
   let send: SendFn;
@@ -346,7 +357,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
         close = async () => {
           await agent.close();
         };
-        send = wrapSend(cursorSend(agent, opts.stream, log));
+        send = wrapSend(judged(cursorSend(agent, opts.stream, log), record.ref));
         usage = () => usageCents(agent, meter);
       }
     } else {
@@ -436,7 +447,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
         };
         saveBuildRecord(record, stateDir);
         meter = meterForEngine(record.engine ?? engine);
-        send = wrapSend(cursorSend(agent, opts.stream, log));
+        send = wrapSend(judged(cursorSend(agent, opts.stream, log), ref));
         usage = () => usageCents(agent, meter);
       }
       log(`agent:  ${record.agentId}`);

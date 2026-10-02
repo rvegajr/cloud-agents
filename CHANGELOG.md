@@ -32,7 +32,16 @@ npm run deploy                        # stamp the commit, then ship
   (`src/db.js` at import time, p=0.98; `test/server.test.js` testing its own
   stand-in server, p=0.96) and nothing in the Claude or Cursor builds, in about
   a second per build for $0.0036 total. Covers the blueprint and polya loops
-  and hybrid/local turns; the Cursor milestone loop and Slack have no gate yet.
+  and hybrid/local turns. Locally, Ollama 0.35's `nimble` matched Jev on the
+  same builds at no cost; `tev1` cannot read a whole source file (2k tokens).
+
+- **Cursor and Slack get the judgment rule too.** A Cursor cloud agent has no
+  clone for the gate, so `withJudgment` (`src/lib/cloud-judgment.ts`) reads each
+  turn's new commits from the GitHub compare API, asks the same questions, and
+  on a flag sends the same agent one fix turn naming each finding. The turn's own
+  report is what the loop parses; the fix turn is never judged as blocking.
+  Wired into the `--engine cursor` milestone loop and the Slack pipeline's
+  implement and verify turns; Slack's COST close gains a `decider:` line.
 
 - **`@<bot> status` answers "where is it at?" in plain English.** In a job
   thread: the step (brief, plan, build, check), when it started and last moved,
