@@ -138,6 +138,8 @@ test("`status` and plain status questions are their own command, never a follow-
     assert.equal(cli.kind, "status", ask);
     assert.equal(cli.request, "");
   }
+  const viaCursor = parseMentionCli("<@U0C0L30LZC0|CloudAgents> status\n*Sent using* <@U0BUDHVFQA3|Cursor>", { projects });
+  assert.equal(viaCursor.kind, "status", "Cursor's connector trailer must not turn status into a paid follow-up");
   const named = parseMentionCli("<@U1> api status", { projects });
   assert.equal(named.kind, "status");
   assert.equal(named.project?.name, "api");
