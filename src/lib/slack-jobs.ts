@@ -25,6 +25,13 @@ import {
   type RepoTarget,
 } from "./slack-thread.js";
 import { formatVersion, formatVersionBlock } from "./version.js";
+import {
+  LiveJobs,
+  formatChannelStatus,
+  formatJobStatus,
+  progressFromThread,
+  type AgentSnapshot,
+} from "./slack-status.js";
 import { printStream } from "./stream.js";
 import type { JobRecord, JobStore, JobsBody } from "./jobs-http.js";
 import { mentionText } from "./jobs-http.js";
@@ -41,7 +48,7 @@ export interface SlackClient {
     remove: (args: { channel: string; timestamp: string; name: string }) => Promise<unknown>;
   };
   conversations: {
-    replies: (args: { channel: string; ts: string; limit: number }) => Promise<{ messages?: Array<{ user?: string; text?: string | null }> }>;
+    replies: (args: { channel: string; ts: string; limit: number }) => Promise<{ messages?: Array<{ user?: string; text?: string | null; ts?: string }> }>;
     info?: (args: { channel: string }) => Promise<{ channel?: { name?: string } }>;
   };
 }
@@ -75,6 +82,19 @@ export interface SlackJobsConfig {
   store: JobStore;
   /** Slack user ids allowed to spend the owner's Claude Max plan. Empty = Cursor for everyone. */
   claudeUserIds: string[];
+  /** Cursor's view of a bc- agent for `status`. Defaults to `Agent.get`. */
+  agentInfo?: (agentId: string) => Promise<AgentSnapshot | undefined>;
+}
+
+async function cursorAgentInfo(agentId: string, creds: { apiKey?: string }): Promise<AgentSnapshot | undefined> {
+  if (!agentId.startsWith("bc-")) return undefined;
+  const timeout = new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 5000).unref());
+  try {
+    const info = await Promise.race([Agent.get(agentId, creds), timeout]);
+    return info ? { status: info.status, summary: info.summary, lastModified: info.lastModified } : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function wrap(agent: SDKAgent): AgentHandle {
@@ -117,6 +137,8 @@ export function createSlackJobs(cfg: SlackJobsConfig) {
   const deduper = new Deduper();
   const gate = new ConcurrencyGate(cfg.maxConcurrent);
   const inflightThreads = new Set<string>();
+  const live = new LiveJobs();
+  const agentInfo = cfg.agentInfo ?? ((id: string) => cursorAgentInfo(id, cfg.creds));
 
   function usageFor(
     bot: string,
@@ -157,6 +179,7 @@ export function createSlackJobs(cfg: SlackJobsConfig) {
     const inflightKey = threadTs ?? jobId ?? args.eventId;
 
     const post = async (text: string) => {
+      live.post(inflightKey, text);
       if (jobId) cfg.store.appendPost(jobId, text);
       if (!channel) return;
       const posted = await args.client.chat.postMessage({
@@ -206,6 +229,21 @@ export function createSlackJobs(cfg: SlackJobsConfig) {
       return;
     }
 
+    if (cli.kind === "status") {
+      if (args.overlayOnly) return;
+      if (!inThread || !threadTs) {
+        await post(formatChannelStatus({ jobs: live.list(), channel }));
+      } else {
+        const replies = await args.client.conversations.replies({ channel, ts: threadTs, limit: 200 });
+        const progress = progressFromThread(replies.messages ?? []);
+        const job = live.get(threadTs);
+        const agent = progress.agentId ? await agentInfo(progress.agentId) : undefined;
+        await post(formatJobStatus({ progress, running: Boolean(job), startedAt: job?.startedAt, agent }));
+      }
+      if (jobId) cfg.store.patch(jobId, { status: "usage", kind: "status" });
+      return;
+    }
+
     if (isUsage) {
       if (args.overlayOnly && inThread && !cli.explicitHelp && cli.kind === "usage") return;
       const note = args.overlayOnly
@@ -246,6 +284,7 @@ export function createSlackJobs(cfg: SlackJobsConfig) {
       return;
     }
     inflightThreads.add(inflightKey);
+    live.start({ key: inflightKey, channel, request, repo });
     if (jobId) cfg.store.patch(jobId, { status: "running" });
 
     let closer: (() => Promise<void>) | undefined;
@@ -390,6 +429,7 @@ export function createSlackJobs(cfg: SlackJobsConfig) {
         console.error("agent close failed", err);
       }
       inflightThreads.delete(inflightKey);
+      live.finish(inflightKey);
       gate.release();
     }
   }

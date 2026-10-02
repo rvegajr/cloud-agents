@@ -19,7 +19,7 @@ export interface MentionOptions {
   model?: string;
 }
 
-export type CliKind = "usage" | "project-usage" | "run" | "version";
+export type CliKind = "usage" | "project-usage" | "run" | "version" | "status";
 
 export interface MentionCli {
   kind: CliKind;
@@ -33,6 +33,12 @@ export interface MentionCli {
 
 const HELP_TOKENS = new Set(["", "help", "--help", "-h", "-?", "?", "-", "usage", "commands", "options"]);
 const VERSION_TOKENS = new Set(["version", "--version", "-v"]);
+/**
+ * Whole-message only: in a job thread any other text resumes the agent, so a
+ * bare "where are we?" must not become a paid follow-up.
+ */
+const STATUS_RE =
+  /^(?:status|--status|progress|update|any update|eta|where are (?:we|you|things)(?: at)?(?: on this)?|where(?:'s| is) it(?: at)?|what(?:'s| is) the (?:status|progress)|how(?:'s| is) it going)$/;
 
 /** Official Cursor Slack commands — we stay silent so Cursor can answer. */
 const CURSOR_NATIVE = /^(help|settings|list|agent)\b/i;
@@ -42,6 +48,16 @@ const OPTION_RE = /\b(branch|autopr|repo|model)=(?:"([^"]*)"|'([^']*)'|(\S+))/gi
 
 export function isVersionToken(text: string): boolean {
   return VERSION_TOKENS.has(text.trim().toLowerCase());
+}
+
+export function isStatusToken(text: string): boolean {
+  const t = text
+    .trim()
+    .toLowerCase()
+    .replace(/[’]/g, "'")
+    .replace(/[?.!\s]+$/, "")
+    .replace(/\s+/g, " ");
+  return STATUS_RE.test(t);
 }
 
 export function isHelpToken(text: string): boolean {
@@ -194,6 +210,10 @@ export function parseMentionCli(
     return { kind: "version", project: ctx.channelProject, request: "", options, explicitHelp: true };
   }
 
+  if (isStatusToken(text)) {
+    return { kind: "status", project: ctx.channelProject, request: "", options, explicitHelp: true };
+  }
+
   const space = text.search(/\s/);
   const first = (space === -1 ? text : text.slice(0, space)).toLowerCase();
   const rest = space === -1 ? "" : text.slice(space).trim();
@@ -202,6 +222,9 @@ export function parseMentionCli(
   if (named) {
     if (isVersionToken(rest)) {
       return { kind: "version", project: named, request: "", options, explicitHelp: true };
+    }
+    if (isStatusToken(rest)) {
+      return { kind: "status", project: named, request: "", options, explicitHelp: true };
     }
     if (isHelpToken(rest)) {
       return { kind: "project-usage", project: named, request: "", options, explicitHelp: rest !== "" };
@@ -299,6 +322,8 @@ export function formatGlobalUsage(opts: {
   lines.push(`${bot}                 this usage`);
   lines.push(`${bot} <project>       options for that project`);
   lines.push(`${bot} <project> -     same`);
+  lines.push(`${bot} status          in a job thread: where that job is, in plain English`);
+  lines.push(`                       outside a thread: what's running in this channel`);
   lines.push(`${bot} version         which build of the bot is answering`);
   lines.push("");
   lines.push("deploys happen when a PR merges, not from here.");

@@ -306,8 +306,17 @@ usage: @CloudAgents [<project>] [options] <request>
 @CloudAgents                 this usage
 @CloudAgents <project>       options for that project
 @CloudAgents <project> -     same
+@CloudAgents status          in a job thread: where that job is, in plain English
 @CloudAgents version         which build of the bot is answering
 ```
+
+`@CloudAgents status` in a job's thread answers "where is it at?" in a few
+sentences: the step it is on (brief, plan, build, check), how long ago it
+started and last moved, Cursor's one-line summary, spend so far, and what you
+need to do next, if anything. Outside a thread it lists what is running in that
+channel. "where are we?", "any update?", and "how's it going?" mean the same.
+It is a fixed template over what the bot already knows, not a model call, so it
+costs nothing and never resumes the agent.
 
 The first line is the build. Locally it comes from `git describe`; on a server
 it comes from the stamp `npm run deploy` sets, which is the only way a container

@@ -349,8 +349,15 @@ The mention is a small CLI:
 @<bot> <project> -              same
 @<bot> <project> <request>      start a job
 @<bot> <request>                start a job on this channel's project
+@<bot> status                   in a job thread: where that job is, in plain English
+                                outside a thread: what's running in this channel
 @<bot> version                  which build of the bot is answering
 ```
+
+`status` (also "where are we?", "any update?", "how's it going?") reads the
+thread's own posts, the jobs the bot is running right now, and Cursor's summary
+of the agent. It makes no model call, so asking costs nothing and never resumes
+the agent.
 
 A channel whose name starts with a project (`#api-bugs`, `#web-agent-test`,
 any suffix) selects that project, so you can omit the name.

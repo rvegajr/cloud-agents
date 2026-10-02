@@ -17,6 +17,13 @@ npm run deploy                        # stamp the commit, then ship
 
 ### Added
 
+- **`@<bot> status` answers "where is it at?" in plain English.** In a job
+  thread: the step (brief, plan, build, check), when it started and last moved,
+  Cursor's summary, spend so far, and what you need to do next. Outside a
+  thread: what is running in that channel. "where are we?" and "any update?"
+  count too, so a status question never resumes the agent as a paid follow-up.
+  No model call.
+
 - **`polya-craft/`: a fresh problem-solving loop on Pólya's four steps.**
   Understand ends with the done-checks (`D1` is the answer in use); Devise is
   judged by whether every unit passes the stranger test; Carry out is one unit
