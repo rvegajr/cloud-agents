@@ -28,6 +28,15 @@ npm run deploy                        # stamp the commit, then ship
 
 ### Added
 
+- **`ARTICLE-DECIDER-RESULTS.md`: what decision models did for the code.**
+  Jev and nimble flagged exactly the 19/35 hybrid build's two reviewer-listed
+  defects and nothing in the 29/35 and 28/35 builds. In a 20-run polya A/B
+  (off vs Jev) completion did not move (4/10 vs 3/10); the rule caught one real
+  swallowed save error, repaired it, and that pair scored 34 vs 32 blind. Jev
+  cost $0.002 for the A/B. The test-quality questions were asked once each,
+  because in polya the Solver writes the tests; Cursor, where agents write
+  their own, is the next A/B.
+
 - **Judgment gate rule: a decision model reads each changed file's diff.**
   `DECIDER=jev|d1|local` (default `off`) adds gate rule 7 after every
   deterministic rule passes: one System One call per changed file with
