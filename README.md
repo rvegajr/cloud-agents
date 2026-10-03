@@ -336,6 +336,49 @@ Grok 4.7, and $3.53 on GPT-5.6 Sol. Composer stays the default.
 [ARTICLE-FRONTIER-VALUE.md](ARTICLE-FRONTIER-VALUE.md). Slack stays on
 Cursor.
 
+### Decision models as a second reviewer (the judgment rule)
+
+A decision model (TypeSafe's Jev, Liquid's d1, or a local Ollama ≥ 0.35 model
+such as `nimble`) never writes code. It reads each changed file's diff and
+answers literal yes/no questions:
+- Does a test check its own stand-in instead of the project's code?
+- Does a test assert nothing?
+- Was a check silenced?
+- Is a resource opened at import time?
+- Is an error swallowed?
+- Is a placeholder left in place of real logic?
+- Is a credential hardcoded?
+
+It runs as gate rule 7, after every deterministic rule passes. A flag sends
+the task back once; after that it only advises, so it can never stop a build.
+For a Cursor agent, the same check reads the pushed branch from GitHub and
+asks for one fix turn.
+
+```bash
+# .env (keys come from the 1Password vault, never from chat)
+DECIDER=jev            # off | jev (TYPESAFE_API_KEY) | d1 (LIQUID_API_KEY) | local (DECIDER_MODEL, DECIDER_URL)
+DECIDER_THRESHOLD=0.9
+GITHUB_TOKEN=…         # Cursor/Slack only: read the agent's private branch
+```
+
+Every decision is logged to `.runs/decider.jsonl`. Spend is its own COST meter
+(`typesafe:billed`), never folded into Cursor or Max.
+
+**What it did, measured 2–3 October 2026:**
+
+| | Result |
+| --- | --- |
+| Spot test on the three blind-reviewed snippet-vault builds | Jev and nimble flagged exactly the 19/35 hybrid build's two reviewer-listed defects (an import-time DB; a test of its own stand-in server) and nothing in the 29/35 and 28/35 builds. d1 flagged the same two plus two borderline files. tev1 cannot read a whole file. |
+| 20-run polya A/B, off vs Jev | Completion did not move: 4/10 vs 3/10. The rule changed nothing in the request where the arms differed. |
+| Real defects caught | 1: a swallowed `localStorage` save error, repaired. Blind score 34 vs 32 for that pair. No false alarms in 196 decisions. |
+| Cost | $0.002 of Jev for the whole A/B, against $82.79 Max API-equivalent for the builds. Jev takes about 1 s per build. |
+
+The rule is a cheap safety net, not the lever for completion rate; the
+orchestrator is. In polya the Solver writes the tests, so the test questions
+barely fired. Cursor agents write their own tests, which makes Cursor the next
+A/B. Full write-up:
+[ARTICLE-DECIDER-RESULTS.md](ARTICLE-DECIDER-RESULTS.md).
+
 ### Step 8: trigger from Slack
 
 ```bash
