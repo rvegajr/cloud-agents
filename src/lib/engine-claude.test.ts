@@ -265,3 +265,33 @@ test("makeClaudeSend gives a browser turn the Playwright MCP server and its tool
     else delete process.env.QA_BROWSER;
   }
 });
+
+test("makeClaudeSend: an SDK throw after an error result is a failed turn, not a crash", async () => {
+  const saved = process.env.ANTHROPIC_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+  try {
+    const send = makeClaudeSend({
+      cwd: "/tmp",
+      queryFn: async function* () {
+        yield { type: "system", subtype: "init", session_id: "sess-mt", apiKeySource: "none" } as never;
+        yield { type: "result", subtype: "error_max_turns", total_cost_usd: 1.5 } as never;
+        throw new Error("Claude Code returned an error result: Reached maximum number of turns (80)");
+      },
+    });
+    const t = await send("devise");
+    assert.equal(t.status, "error");
+    assert.equal(t.result, undefined);
+    assert.equal(t.runId, "sess-mt");
+
+    const early = makeClaudeSend({
+      cwd: "/tmp",
+      queryFn: async function* () {
+        yield { type: "system", subtype: "init", session_id: "sess-x", apiKeySource: "none" } as never;
+        throw new Error("spawn claude ENOENT");
+      },
+    });
+    await assert.rejects(() => early("hi"), /ENOENT/, "a failure before any result is still an error the caller sees");
+  } finally {
+    if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
+  }
+});

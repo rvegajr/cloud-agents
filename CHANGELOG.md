@@ -15,6 +15,17 @@ npm run deploy                        # stamp the commit, then ship
 
 ## [Unreleased]
 
+### Fixed
+
+- **Two orchestrator crashes from the decider A/B corpus run.**
+  (1) A done-check probe left `mktemp` scratch in the repo root, one file
+  deliberately unreadable, and the orchestrator's `git add -A` threw, killing
+  the run at startup. Its commits now go through `stageAll`: probe scratch
+  (`/tmp.??????` etc.) is excluded in `.git/info/exclude`, and a file git cannot
+  index is skipped and named. (2) After an error result (max turns, budget) the
+  Agent SDK re-throws the CLI's exit as "Claude Code returned an error result";
+  that is now a failed turn the loop stops on and can resume, not a crash.
+
 ### Added
 
 - **Judgment gate rule: a decision model reads each changed file's diff.**
