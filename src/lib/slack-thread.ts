@@ -108,9 +108,14 @@ export function resolveTarget(
   return findRoute(channelId, channelName, routes) ?? fallback;
 }
 
-/** Strip Slack user mentions (`<@U123>` / `<@U123|name>`) so the rest is the request. */
+/**
+ * Strip Slack user mentions (`<@U123>` / `<@U123|name>`) so the rest is the request.
+ * Also drops the `*Sent using* <@Cursor>` trailer that Cursor's Slack connector
+ * appends, so a posted `@bot status` is still exactly `status`.
+ */
 export function stripMention(text: string): string {
   return text
+    .replace(/\s*[_*]*Sent using[_*]*\s*<@[A-Z0-9]+(?:\|[^>]+)?>\s*$/i, "")
     .replace(/<@[A-Z0-9]+(?:\|[^>]+)?>/gi, "")
     .replace(/\s+/g, " ")
     .trim();

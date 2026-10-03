@@ -132,6 +132,23 @@ test("one-word requests are still jobs", () => {
   assert.equal(cli.request, "login");
 });
 
+test("`status` and plain status questions are their own command, never a follow-up", () => {
+  for (const ask of ["status", "Status?", "where are we?", "where’s it at", "what's the status?", "how is it going", "any update?"]) {
+    const cli = parseMentionCli(`<@U1> ${ask}`, { projects, channelProject: projects.get("web") });
+    assert.equal(cli.kind, "status", ask);
+    assert.equal(cli.request, "");
+  }
+  const viaCursor = parseMentionCli("<@U0C0L30LZC0|CloudAgents> status\n*Sent using* <@U0BUDHVFQA3|Cursor>", { projects });
+  assert.equal(viaCursor.kind, "status", "Cursor's connector trailer must not turn status into a paid follow-up");
+  const named = parseMentionCli("<@U1> api status", { projects });
+  assert.equal(named.kind, "status");
+  assert.equal(named.project?.name, "api");
+  for (const work of ["status page 500s after logout", "update the README", "where are we storing sessions?"]) {
+    assert.equal(parseMentionCli(`<@U1> ${work}`, { projects, channelProject: projects.get("web") }).kind, "run", work);
+  }
+  assert.match(formatGlobalUsage({ bot: "@Shipper", projects: [] }), /@Shipper status {10}in a job thread/);
+});
+
 test("Cursor native commands are detected so we stay silent", () => {
   assert.equal(isCursorNativeCommand("<@U0> help"), true);
   assert.equal(isCursorNativeCommand("<@U0> settings"), true);

@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { SendFn, SendOpts, TurnResult } from "./build-loop.js";
 import {
@@ -271,9 +271,46 @@ export function executorNote(model: string): string {
   );
 }
 
+/** `mktemp` scratch a done-check probe leaves in the repo root (checks write temp files under $PWD for Colima). */
+export const PROBE_SCRATCH_EXCLUDES = ["/tmp.??????", "/tmp.????????", "/tmp.??????????"];
+
+/**
+ * `git add -A` for the orchestrator's own commits. Probe scratch is excluded (in `.git/info/exclude`, never the
+ * product's .gitignore), and a file git cannot index, such as a check's deliberately unreadable fixture, is
+ * skipped and named instead of crashing the run.
+ */
+export function stageAll(cwd: string, log?: (l: string) => void): string[] {
+  try {
+    const exclude = resolve(cwd, execFileSync("git", ["rev-parse", "--git-path", "info/exclude"], { cwd, encoding: "utf8" }).trim());
+    const have = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
+    const missing = PROBE_SCRATCH_EXCLUDES.filter((p) => !have.split("\n").includes(p));
+    if (missing.length) {
+      mkdirSync(dirname(exclude), { recursive: true });
+      writeFileSync(exclude, `${have}${have && !have.endsWith("\n") ? "\n" : ""}${missing.join("\n")}\n`);
+    }
+  } catch {
+    /* not fatal: at worst probe scratch is staged */
+  }
+  try {
+    execFileSync("git", ["add", "-A"], { cwd, stdio: "pipe" });
+    return [];
+  } catch (err) {
+    const stderr = String((err as { stderr?: Buffer | string }).stderr ?? "");
+    const skipped = [...stderr.matchAll(/unable to index file '([^']+)'/g)].map((m) => m[1]!);
+    try {
+      execFileSync("git", ["add", "-A", "--ignore-errors"], { cwd, stdio: "pipe" });
+    } catch {
+      /* exits non-zero by design when something was skipped; the rest is staged */
+    }
+    log?.(`git add: skipped what git cannot index: ${skipped.join(", ") || stderr.trim().split("\n")[0]}`);
+    return skipped;
+  }
+}
+
 function orchestratorCommit(cwd: string, message: string, log?: (l: string) => void): boolean {
   if (!git(cwd, ["status", "--porcelain"])) return false;
-  execFileSync("git", ["add", "-A"], { cwd, stdio: "ignore" });
+  stageAll(cwd, log);
+  if (!git(cwd, ["diff", "--cached", "--name-only"])) return false;
   execFileSync("git", ["-c", "user.name=cloud-agents", "-c", "user.email=cloud-agents@localhost", "commit", "-q", "-m", message], {
     cwd,
     stdio: "ignore",
@@ -338,7 +375,7 @@ export function seedRepoKit(cwd: string, log?: (l: string) => void): boolean {
     writeFileSync(gitignorePath, `${existing.trim() ? `${existing.trim()}\n` : ""}${missing.join("\n")}\n`);
   }
 
-  execFileSync("git", ["add", "-A"], { cwd, stdio: "ignore" });
+  stageAll(cwd, log);
   execFileSync(
     "git",
     ["-c", "user.name=cloud-agents", "-c", "user.email=cloud-agents@localhost", "commit", "-q", "-m", "chore: seed agent kit"],
@@ -477,6 +514,7 @@ export async function createHybridHandle(args: HybridHandleArgs): Promise<AgentH
       captureGateBaseline();
       const gate = await runQualityGate(rec.cwd, gateCfg, kind === "finish" ? "finish" : "iterate", {
         scriptsBaseline: rec.gateScriptsBaseline,
+        attempt,
         exec: args.gateExec ?? defaultExec,
         log,
       });

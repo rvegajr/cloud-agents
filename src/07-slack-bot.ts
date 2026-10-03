@@ -25,7 +25,7 @@ import {
   mentionsUser,
   parseProjects,
 } from "./lib/slack-cli.js";
-import { formatVersion } from "./lib/version.js";
+import { formatVersion, versionHealthFields } from "./lib/version.js";
 import { selectModel } from "./lib/model.js";
 import { parseClaudeUserIds } from "./lib/engine-claude.js";
 import {
@@ -260,8 +260,9 @@ try {
         store,
         health: () => ({
           ok: true,
+          service: "cloud-agents",
           bot: botHandle,
-          version: formatVersion(),
+          ...versionHealthFields(),
           jobs: store.list().length,
         }),
         projects: () => listedProjects(projects).map((p) => ({ name: p.name, repo: p.repo, ref: p.ref })),

@@ -12,6 +12,9 @@ export interface TurnResult {
   result?: string;
   runId?: string;
   prUrl?: string;
+  /** The repo and branch a cloud engine pushed to, for the judgment rule (`cloud-judgment.ts`). */
+  repoUrl?: string;
+  branch?: string;
   gate?: import("../../architect-crew-gate/src/quality-gate.js").GateResult;
 }
 

@@ -150,6 +150,7 @@ export function makePolyaIO(
         allowedFiles: ctx.allowedFiles,
         baseSha: ctx.baseSha,
         taskCommands: ctx.taskCommands,
+        attempt: ctx.attempt,
         // `null` stops the gate from picking up a stale QUALITY.md left by an ACG run in the same repo.
         quality: unitContract ?? null,
         exec,

@@ -21,6 +21,8 @@ export interface PipelineTurn {
   result?: string;
   runId?: string;
   prUrl?: string;
+  repoUrl?: string;
+  branch?: string;
   gate?: import("../../architect-crew-gate/src/quality-gate.js").GateResult;
 }
 

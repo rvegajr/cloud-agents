@@ -261,29 +261,37 @@ export function makeClaudeSend(opts: {
       maxBudgetUsd: opts.maxBudgetUsd ?? 20,
       env: scrubbedEnv(),
     };
-    for await (const m of run({ prompt, options })) {
-      if (m.type === "system" && "subtype" in m && m.subtype === "init") {
-        // A fresh session is one-off: it must not become the handle's resumable session.
-        if (!fresh) {
-          sessionId = m.session_id;
-          opts.onSession?.(sessionId);
+    let sawResult = false;
+    try {
+      for await (const m of run({ prompt, options })) {
+        if (m.type === "system" && "subtype" in m && m.subtype === "init") {
+          // A fresh session is one-off: it must not become the handle's resumable session.
+          if (!fresh) {
+            sessionId = m.session_id;
+            opts.onSession?.(sessionId);
+          }
+          if (m.apiKeySource !== "none") {
+            throw new Error(`refusing to run: apiKeySource=${m.apiKeySource}; this would bill the API`);
+          }
         }
-        if (m.apiKeySource !== "none") {
-          throw new Error(`refusing to run: apiKeySource=${m.apiKeySource}; this would bill the API`);
+        if (m.type === "rate_limit_event") {
+          const info = m.rate_limit_info;
+          for (const u of rateLimitSamples(info)) onRateLimit(u);
+          if (info.errorCode === "credits_required" || info.status === "rejected" || info.isUsingOverage || info.overageInUse) {
+            throw new MaxExhausted(info.resetsAt);
+          }
+        }
+        if (m.type === "result") {
+          sawResult = true;
+          status = m.subtype === "success" ? "finished" : "error";
+          result = m.subtype === "success" ? m.result : undefined;
+          opts.onCost?.(m.total_cost_usd);
         }
       }
-      if (m.type === "rate_limit_event") {
-        const info = m.rate_limit_info;
-        for (const u of rateLimitSamples(info)) onRateLimit(u);
-        if (info.errorCode === "credits_required" || info.status === "rejected" || info.isUsingOverage || info.overageInUse) {
-          throw new MaxExhausted(info.resetsAt);
-        }
-      }
-      if (m.type === "result") {
-        status = m.subtype === "success" ? "finished" : "error";
-        result = m.subtype === "success" ? m.result : undefined;
-        opts.onCost?.(m.total_cost_usd);
-      }
+    } catch (err) {
+      // After an error result (max turns, budget) the SDK re-throws the CLI's exit as "Claude Code returned
+      // an error result". That is a failed turn, which the loop stops on and can resume, not a crash.
+      if (err instanceof MaxExhausted || !sawResult) throw err;
     }
     return { status, result, runId: fresh ? "fresh" : sessionId };
   };
