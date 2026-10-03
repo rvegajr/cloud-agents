@@ -26,6 +26,7 @@ export interface JobProgress {
   note?: string;
   prUrl?: string;
   prReady?: boolean;
+  autoMerge?: boolean;
   questions?: number;
   /** e.g. `$0.42 Cursor billed`, from the latest `COST running` or COST close. */
   spend?: string;
@@ -94,6 +95,8 @@ export function applyPost(progress: JobProgress, text: string | null | undefined
       set({ stage: "not-done", note: "the checker did not send back a readable report" });
     } else if (/^PR marked ready for review/.test(line)) {
       set({ prReady: true });
+    } else if (/^Auto-merge (?:is on|was already on)/.test(line)) {
+      set({ autoMerge: true });
     } else if (FAILED_RE.test(line)) {
       set({ stage: "failed", note: line.replace(/\.$/, "") });
     }
@@ -201,8 +204,8 @@ export function formatJobStatus(opts: {
       `${STATUS_PREFIX} it's done. The checks passed${p.prReady ? " and the PR is marked ready for review" : ""}.`,
     );
     if (p.prUrl) out.push(`PR: ${p.prUrl}`);
-    next = p.prReady
-      ? "If the repo has auto-merge on, it merges by itself. Mention me here if you want changes."
+    next = p.autoMerge
+      ? "Auto-merge is on, so it merges by itself when the required checks pass. Mention me here if you want changes."
       : "Review and merge the PR. Mention me here if you want changes.";
   } else if (stage === "not-done") {
     out.push(

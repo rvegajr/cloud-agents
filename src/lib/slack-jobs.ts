@@ -2,7 +2,7 @@
  * One mention → one job. Slack events and the HTTP API both call `handleMention`.
  */
 import { Agent, type SDKAgent } from "@cursor/sdk";
-import { markPullRequestReady } from "./github.js";
+import { armAutoMerge, markPullRequestReady } from "./github.js";
 import { extractJamIds } from "./jam.js";
 import { continueJob, startJob, type AgentHandle, type JobRuntime } from "./slack-fix.js";
 import {
@@ -392,6 +392,11 @@ export function createSlackJobs(cfg: SlackJobsConfig) {
               markPrReady: async (prUrl: string) => {
                 const result = await markPullRequestReady(prUrl, cfg.githubToken);
                 console.log(`pr ${prUrl} ${result}`);
+                return result;
+              },
+              armAutoMerge: async (prUrl: string) => {
+                const result = await armAutoMerge(prUrl, cfg.githubToken);
+                console.log(`pr ${prUrl} auto-merge ${result}`);
                 return result;
               },
             }

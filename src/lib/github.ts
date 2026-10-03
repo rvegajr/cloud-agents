@@ -84,6 +84,92 @@ export async function markPullRequestReady(
   return "marked";
 }
 
+export type ArmAutoMergeResult =
+  | "armed"
+  | "already-armed"
+  /** The repo has its own workflow that arms auto-merge; its gate decides. */
+  | "repo-managed"
+  /** "Allow auto-merge" is off in the repo settings. */
+  | "not-allowed"
+  /** No required checks on the base branch, so there is nothing to wait for; a person merges. */
+  | "no-required-checks";
+
+const ARMS_AUTO_MERGE_RE = /merge\s+--auto|enablePullRequestAutoMerge/;
+
+async function repoArmsItsOwnAutoMerge(ref: PullRequestRef, token: string, fetchImpl: typeof fetch): Promise<boolean> {
+  const headers = { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "cloud-agents-slack-bot" };
+  const base = `https://api.github.com/repos/${ref.owner}/${ref.repo}/contents/.github/workflows`;
+  const list = await fetchImpl(base, { headers });
+  if (!list.ok) return false;
+  const files = (await list.json()) as Array<{ name: string; path: string }>;
+  for (const f of Array.isArray(files) ? files : []) {
+    if (!/\.ya?ml$/.test(f.name)) continue;
+    const res = await fetchImpl(`https://api.github.com/repos/${ref.owner}/${ref.repo}/contents/${f.path}`, {
+      headers: { ...headers, accept: "application/vnd.github.raw+json" },
+    });
+    if (res.ok && ARMS_AUTO_MERGE_RE.test(await res.text())) return true;
+  }
+  return false;
+}
+
+/**
+ * Arm GitHub auto-merge on a ready PR so it lands when the base branch's
+ * required checks pass. Armed with a user token, the merge is a normal push,
+ * so CI and deploys run on the merge commit (an Actions GITHUB_TOKEN would not).
+ * Never merges directly: no required checks means a person merges.
+ */
+export async function armAutoMerge(
+  prUrl: string,
+  token: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ArmAutoMergeResult> {
+  const ref = parsePullRequestUrl(prUrl);
+  if (!ref) throw new Error(`Not a github.com pull request URL: ${prUrl}`);
+
+  const lookup = await graphql<{
+    repository: {
+      autoMergeAllowed: boolean;
+      squashMergeAllowed: boolean;
+      mergeCommitAllowed: boolean;
+      pullRequest: { id: string; autoMergeRequest: { enabledAt: string } | null } | null;
+    } | null;
+  }>(
+    token,
+    `query($owner: String!, $repo: String!, $number: Int!) {
+       repository(owner: $owner, name: $repo) {
+         autoMergeAllowed squashMergeAllowed mergeCommitAllowed
+         pullRequest(number: $number) { id autoMergeRequest { enabledAt } }
+       }
+     }`,
+    { owner: ref.owner, repo: ref.repo, number: ref.number },
+    fetchImpl,
+  );
+  const repo = lookup.repository;
+  const pr = repo?.pullRequest;
+  if (!repo || !pr) throw new Error(`PR not found: ${prUrl}`);
+  if (pr.autoMergeRequest) return "already-armed";
+  if (await repoArmsItsOwnAutoMerge(ref, token, fetchImpl)) return "repo-managed";
+  if (!repo.autoMergeAllowed) return "not-allowed";
+
+  const mergeMethod = repo.squashMergeAllowed ? "SQUASH" : repo.mergeCommitAllowed ? "MERGE" : "REBASE";
+  try {
+    await graphql(
+      token,
+      `mutation($id: ID!, $method: PullRequestMergeMethod!) {
+         enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: $method }) { clientMutationId }
+       }`,
+      { id: pr.id, method: mergeMethod },
+      fetchImpl,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/clean status|protected branch rules not configured/i.test(msg)) return "no-required-checks";
+    if (/auto.?merge is not allowed|not enabled for this repository/i.test(msg)) return "not-allowed";
+    throw err;
+  }
+  return "armed";
+}
+
 export interface GithubRepoRef {
   owner: string;
   repo: string;

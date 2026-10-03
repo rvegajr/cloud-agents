@@ -50,13 +50,15 @@ test("done with a ready PR, spend from the COST close", () => {
     ...startOfJob,
     { text: "Verifying...", ts: ts(3) },
     { text: "PR: https://github.com/you/web/pull/7\nVerifier: done\nFixed it.\n  PASS npm test", ts: ts(2) },
-    { text: "PR marked ready for review (verifier passed); the repo's auto-merge takes it from here.", ts: ts(2) },
+    { text: "PR marked ready for review (verifier passed).", ts: ts(2) },
+    { text: "Auto-merge is on: it merges by itself when the required checks pass.", ts: ts(2) },
     { text: "COST\n  this run:     $0.52  Cursor billed\n  today:        $3.10  Cursor billed", ts: ts(1) },
   ]);
   assert.equal(p.closed, true);
   const text = formatJobStatus({ progress: p, running: false, now });
   assert.ok(text.startsWith(`${STATUS_PREFIX} it's done. The checks passed and the PR is marked ready for review.`));
   assert.match(text, /PR: https:\/\/github\.com\/you\/web\/pull\/7/);
+  assert.match(text, /Auto-merge is on, so it merges by itself when the required checks pass\./);
   assert.match(text, /Last update 1 minute ago\./);
   assert.match(text, /Spent so far: \$0\.52 Cursor billed\./);
 });
