@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  armAutoMerge,
   cursorAppGrantBlocksCreate,
   cursorAppSlugs,
   formatCursorAppGrant,
@@ -43,6 +44,60 @@ test("markPullRequestReady: looks up the node id, then runs the mutation", async
   assert.equal(calls.length, 2);
   assert.deepEqual(calls[0]?.variables, { owner: "acme", repo: "web", number: 14 });
   assert.deepEqual(calls[1]?.variables, { id: "PR_1" });
+});
+
+function armFetch(opts: { allowed?: boolean; armed?: boolean; workflow?: string; mutationError?: string }) {
+  const mutations: Array<Record<string, unknown>> = [];
+  const fetchImpl: typeof fetch = async (url, init) => {
+    const u = String(url);
+    if (u.endsWith("/contents/.github/workflows")) {
+      return opts.workflow === undefined
+        ? new Response("[]")
+        : new Response(JSON.stringify([{ name: "auto.yml", path: ".github/workflows/auto.yml" }]));
+    }
+    if (u.includes("/contents/.github/workflows/")) return new Response(opts.workflow ?? "");
+    const body = JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> };
+    if (body.query.includes("enablePullRequestAutoMerge")) {
+      mutations.push(body.variables);
+      return new Response(
+        JSON.stringify(opts.mutationError ? { errors: [{ message: opts.mutationError }] } : { data: { enablePullRequestAutoMerge: {} } }),
+      );
+    }
+    return new Response(
+      JSON.stringify({
+        data: {
+          repository: {
+            autoMergeAllowed: opts.allowed ?? true,
+            squashMergeAllowed: true,
+            mergeCommitAllowed: true,
+            pullRequest: { id: "PR_1", autoMergeRequest: opts.armed ? { enabledAt: "2026-10-03" } : null },
+          },
+        },
+      }),
+    );
+  };
+  return { fetchImpl, mutations };
+}
+
+const PR = "https://github.com/acme/web/pull/14";
+
+test("armAutoMerge: arms squash auto-merge when the repo allows it", async () => {
+  const { fetchImpl, mutations } = armFetch({});
+  assert.equal(await armAutoMerge(PR, "ghp_x", fetchImpl), "armed");
+  assert.deepEqual(mutations, [{ id: "PR_1", method: "SQUASH" }]);
+});
+
+test("armAutoMerge: leaves a repo's own auto-merge gate in charge", async () => {
+  const { fetchImpl, mutations } = armFetch({ workflow: "run: gh pr merge --auto --squash \"$PR\"" });
+  assert.equal(await armAutoMerge(PR, "ghp_x", fetchImpl), "repo-managed");
+  assert.equal(mutations.length, 0);
+});
+
+test("armAutoMerge: never merges a PR with nothing to wait for", async () => {
+  assert.equal(await armAutoMerge(PR, "ghp_x", armFetch({ allowed: false }).fetchImpl), "not-allowed");
+  assert.equal(await armAutoMerge(PR, "ghp_x", armFetch({ armed: true }).fetchImpl), "already-armed");
+  const clean = armFetch({ mutationError: "Pull request Pull request is in clean status" });
+  assert.equal(await armAutoMerge(PR, "ghp_x", clean.fetchImpl), "no-required-checks");
 });
 
 test("markPullRequestReady: already-ready PR is a no-op", async () => {

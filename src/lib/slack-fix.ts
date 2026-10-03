@@ -8,6 +8,7 @@ import {
   type VerifyReport,
 } from "./pipeline.js";
 import { buildStateDir } from "./build-app.js";
+import type { ArmAutoMergeResult } from "./github.js";
 import { deciderConfigFromEnv, drainDeciderSpend } from "../../architect-crew-gate/src/decider.js";
 import { githubReader, withJudgment } from "./cloud-judgment.js";
 import { resolveGithubToken } from "./github.js";
@@ -42,6 +43,41 @@ export interface JobRuntime {
    * done and a PR exists. Absent = leave drafts alone (no GITHUB_TOKEN).
    */
   markPrReady?: (prUrl: string) => Promise<"marked" | "already-ready">;
+  /** Arm auto-merge on a ready PR so it lands when required checks pass. */
+  armAutoMerge?: (prUrl: string) => Promise<ArmAutoMergeResult>;
+}
+
+const ARM_LINES: Record<ArmAutoMergeResult, string> = {
+  armed: "Auto-merge is on: it merges by itself when the required checks pass.",
+  "already-armed": "Auto-merge was already on for this PR.",
+  "repo-managed": "This repo's own auto-merge workflow decides whether it merges.",
+  "not-allowed": "Auto-merge is off in this repo's settings, so a person merges it.",
+  "no-required-checks": "The base branch has no required checks, so a person merges it.",
+};
+
+/** After a verifier report: ready + auto-merge when done, otherwise say why it stays a draft. */
+async function promotePr(runtime: JobRuntime, prUrl: string | undefined, done: boolean): Promise<void> {
+  if (!prUrl) return;
+  if (!done) {
+    await runtime.post("PR left as draft: the verifier did not report done, so it is not auto-merge eligible.");
+    return;
+  }
+  if (!runtime.markPrReady) return;
+  try {
+    const marked = await runtime.markPrReady(prUrl);
+    if (marked === "marked") await runtime.post("PR marked ready for review (verifier passed).");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await runtime.post(`PR left as draft: could not mark ready (${msg}). A human needs to click "Ready for review".`);
+    return;
+  }
+  if (!runtime.armAutoMerge) return;
+  try {
+    await runtime.post(ARM_LINES[await runtime.armAutoMerge(prUrl)]);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await runtime.post(`Could not turn on auto-merge (${msg}), so a person merges it.`);
+  }
 }
 
 export interface TriageReport {
@@ -243,6 +279,7 @@ export async function continueJob(
   if (isVerifyReport(json)) {
     const prUrl = turn.prUrl;
     await runtime.post(formatVerifyReport(json, prUrl));
+    await promotePr(runtime, prUrl, json.done);
     const line = await postCostClose(runtime, handle, input.repo);
     await record(handle, {
       repo: input.repo,
@@ -330,17 +367,7 @@ async function runAndReport(
 
   if (out.report) await runtime.post(formatVerifyReport(out.report, out.prUrl));
   else await runtime.post(out.prUrl ? `PR: ${out.prUrl}\nVerifier did not return a parseable JSON block.` : "Verifier did not return a parseable JSON block.");
-  if (out.done && out.prUrl && runtime.markPrReady) {
-    try {
-      const marked = await runtime.markPrReady(out.prUrl);
-      if (marked === "marked") await runtime.post("PR marked ready for review (verifier passed); the repo's auto-merge takes it from here.");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await runtime.post(`PR left as draft: could not mark ready (${msg}). A human needs to click "Ready for review".`);
-    }
-  } else if (out.prUrl && !out.done) {
-    await runtime.post("PR left as draft: the verifier did not report done, so it is not auto-merge eligible.");
-  }
+  await promotePr(runtime, out.prUrl, out.done);
   await record(handle, {
     repo,
     brief,
