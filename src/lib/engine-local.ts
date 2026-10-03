@@ -477,6 +477,7 @@ export async function createHybridHandle(args: HybridHandleArgs): Promise<AgentH
       captureGateBaseline();
       const gate = await runQualityGate(rec.cwd, gateCfg, kind === "finish" ? "finish" : "iterate", {
         scriptsBaseline: rec.gateScriptsBaseline,
+        attempt,
         exec: args.gateExec ?? defaultExec,
         log,
       });

@@ -573,6 +573,7 @@ findings. It has two profiles: `task` (after each crew turn) and `finish`.
 | clean-start | finish (+ every Nth task) | `git clone . scratch` → `install` → `start` → `probe` succeeds within `timeout_s` | `QUALITY.md.start` |
 | vacuous-suite | finish | with every source file replaced by a throw, the suite must fail | layout in `DESIGN.md` |
 | traceability | before stage 2, finish | every `R` has a test, a task, a QA scenario | the five documents |
+| judgment (optional) | task, finish, after every rule above passes | a decision model answers literal yes/no questions per changed file (test skips the project's code, asserts nothing, check silenced, resource opened at import time outside an entry point, error swallowed, placeholder, literal credential); a flag ≥ threshold blocks the first attempt only, later attempts are advisory, an outage passes | `DECIDER` (`src/decider.ts`), `.runs/decider.jsonl` |
 
 **Feedback format** (what the crew sees on retry):
 

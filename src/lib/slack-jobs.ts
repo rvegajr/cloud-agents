@@ -105,11 +105,14 @@ function wrap(agent: SDKAgent): AgentHandle {
       console.log(`agent=${agent.agentId} run=${run.id}`);
       await printStream(run, { text: true, tools: true });
       const result = await run.wait();
+      const pushed = result.git?.branches.find((b) => b.branch);
       return {
         status: result.status,
         result: result.result,
         runId: run.id,
         prUrl: result.git?.branches.find((b) => b.prUrl)?.prUrl,
+        repoUrl: pushed?.repoUrl,
+        branch: pushed?.branch,
       };
     },
     getUsage: async () => {
