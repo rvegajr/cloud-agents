@@ -256,7 +256,8 @@ export function makeClaudeSend(opts: {
       ...(opts.tools?.disallowed?.length ? { disallowedTools: opts.tools.disallowed } : {}),
       ...(browser ? { mcpServers: { playwright: { type: "stdio" as const, command: browser.command, args: browser.args, ...(browser.env ? { env: browser.env } : {}) } } } : {}),
       settingSources: ["project"],
-      maxTurns: 80,
+      // A big blueprint (one red test per requirement) can outrun the default; raise it per-job with CLAUDE_MAX_TURNS.
+      maxTurns: Number(process.env.CLAUDE_MAX_TURNS?.trim()) || 80,
       maxBudgetUsd: opts.maxBudgetUsd ?? 20,
       env: scrubbedEnv(),
     };
