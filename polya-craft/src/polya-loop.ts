@@ -402,7 +402,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
         prompt = `${gateFeedbackNote(attempt + 1, gate)}${base}`;
         continue;
       }
-      gate = await io.gate("task", { allowedFiles: unit.touches, baseSha, taskCommands });
+      gate = await io.gate("task", { allowedFiles: unit.touches, baseSha, taskCommands, attempt });
       record.failing = failingRules(gate);
       log(`gate ${unit.id}: ${gate.passed ? "PASS" : `FAIL (${record.failing.join(", ")})`} attempt ${attempt + 1}`);
       if (gate.passed) {
@@ -776,7 +776,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     // fresh clone for the same reason; this is that same step for the workspace itself.
     if (problem.bar.install) await io.runCommand(problem.bar.install);
     log("look back (a): checks from a clean state");
-    let gate = await io.gate("finish", { allowedFiles: finishAllowed(), baseSha: state.baselineSha });
+    let gate = await io.gate("finish", { allowedFiles: finishAllowed(), baseSha: state.baselineSha, attempt: 0 });
     if (!gate.passed) {
       const what = gate.findings.filter((f) => !f.ok).map((f) => `- [${f.rule}] ${f.detail}${f.command ? ` (\`${f.command}\`)` : ""}${f.output ? `\n  ${tail(f.output, 30).replace(/\n/g, "\n  ")}` : ""}`).join("\n");
       log(`finish check failed: ${failingRules(gate).join(", ")}; the Solver devises a repair`);
@@ -785,7 +785,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
         state.finish = { passed: false, failing: failingRules(gate) };
         return stop(stopped.reason, stopped.detail);
       }
-      gate = await io.gate("finish", { allowedFiles: finishAllowed(), baseSha: state.baselineSha });
+      gate = await io.gate("finish", { allowedFiles: finishAllowed(), baseSha: state.baselineSha, attempt: 1 });
     }
     state.finish = { passed: gate.passed, failing: failingRules(gate) };
     await persist();

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseMentionCli, isVersionToken, parseProjects } from "./slack-cli.js";
-import { formatVersion, formatVersionBlock, stampEnvPair, STAMP_ENV, versionInfo, type VersionInfo } from "./version.js";
+import { formatVersion, formatVersionBlock, stampEnvPair, STAMP_ENV, versionHealthFields, versionInfo, type VersionInfo } from "./version.js";
 
 const projects = parseProjects("api=https://github.com/you/api@develop", "main");
 
@@ -72,4 +72,24 @@ test("versionInfo reads this checkout and is cached", () => {
   assert.match(info.version, /^\d+\.\d+\.\d+/);
   assert.ok(["version.json", "git", "package.json"].includes(info.source));
   assert.equal(versionInfo(), info);
+});
+
+test("versionHealthFields carries the commit a checker compares, not just the human line", () => {
+  const fields = versionHealthFields(stamped);
+  assert.equal(fields.commit, "abc123def456");
+  assert.equal(fields.version, "v0.2.0 (abc123def456 on main)");
+  assert.equal(fields.commitSource, "version.json");
+});
+
+test("versionHealthFields omits commit rather than sending an empty one", () => {
+  // A payload carrying `commit: null` invites a reader to treat empty as equal.
+  // Absent says "I do not know", which is the truth and is checkable.
+  const fields = versionHealthFields({ version: "0.2.0", source: "package.json" });
+  assert.ok(!("commit" in fields));
+  assert.equal(fields.commitSource, "package.json");
+});
+
+test("versionHealthFields reports the source, so a local run cannot pose as a deploy", () => {
+  assert.equal(versionHealthFields({ ...stamped, source: "git" }).commitSource, "git");
+  assert.equal(versionHealthFields({ ...stamped, source: "BUILD_INFO" }).commitSource, "BUILD_INFO");
 });

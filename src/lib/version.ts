@@ -121,6 +121,28 @@ export function stampEnvPair(info: VersionInfo): string {
   return `${STAMP_ENV}=${JSON.stringify(rest)}`;
 }
 
+/**
+ * The `/health` contract fields, for a service that answers over HTTP.
+ *
+ * `version` is the line a human reads; `commit` is the field a checker reads —
+ * cloud-agents' own `npm run version-board` compares it against the branch tip.
+ * `commit` is omitted rather than null when unknown, because a health payload
+ * that carries the key with no value invites a reader to treat empty as equal.
+ * `commitSource` says which of the four sources answered, so a local checkout
+ * can never pass itself off as a deployed build.
+ */
+export function versionHealthFields(info: VersionInfo = versionInfo()): {
+  version: string;
+  commit?: string;
+  commitSource: VersionInfo["source"];
+} {
+  return {
+    version: formatVersion(info),
+    ...(info.commit ? { commit: info.commit } : {}),
+    commitSource: info.source,
+  };
+}
+
 /** One line for a log or a Slack reply: `v0.2.0 (abc123def456 on main, dirty)`. */
 export function formatVersion(info: VersionInfo = versionInfo()): string {
   const bits: string[] = [];

@@ -43,7 +43,7 @@ export interface BlueprintIO {
   headSha(): string;
   /** Commit whatever the crew left uncommitted. Returns true if a commit was made. */
   commit(message: string): boolean;
-  gate(kind: "task" | "finish", ctx: { allowedFiles?: string[]; baseSha?: string; taskCommands?: string[] }): Promise<GateResult>;
+  gate(kind: "task" | "finish", ctx: { allowedFiles?: string[]; baseSha?: string; taskCommands?: string[]; attempt?: number }): Promise<GateResult>;
   runCommand(command: string, cwd?: string): Promise<{ code: number; output: string }>;
   /** A clone of the current branch the crew never touched; QA runs there. */
   freshClone(): Promise<string>;
@@ -451,7 +451,7 @@ export async function runBlueprintLoop(
         // This task's commands plus every already-passed task's: earlier green tests must stay green,
         // but the whole suite is red by design until the last task, so the bar's `test` waits for the finish gate.
         const taskCommands = unionFiles(...state.taskRecords.filter((r) => r.gatePassed).map((r) => state.tasks.find((k) => k.id === r.id)?.commands ?? []), task.commands);
-        const gate = await io.gate("task", { allowedFiles: task.files, baseSha, taskCommands });
+        const gate = await io.gate("task", { allowedFiles: task.files, baseSha, taskCommands, attempt });
         record.failing = gate.findings.filter((f) => !f.ok).map((f) => f.rule);
         log(`gate ${task.id}: ${gate.passed ? "PASS" : `FAIL (${[...new Set(record.failing)].join(", ")})`} attempt ${attempt + 1}`);
         if (gate.passed) {
@@ -474,7 +474,7 @@ export async function runBlueprintLoop(
   // ---- Stage 3: finish gate ------------------------------------------------
   if (state.phase === "finish") {
     log("stage 3: finish gate");
-    let gate = await io.gate("finish", { allowedFiles: allTaskFiles, baseSha: state.baselineSha });
+    let gate = await io.gate("finish", { allowedFiles: allTaskFiles, baseSha: state.baselineSha, attempt: 0 });
     if (!gate.passed) {
       const findingsText = gate.findings.filter((f) => !f.ok).map((f) => `- [${f.rule}] ${f.detail}${f.command ? ` (\`${f.command}\`)` : ""}${f.output ? `\n  ${tail(f.output, 30).replace(/\n/g, "\n  ")}` : ""}`).join("\n");
       log(`finish gate failed: ${[...new Set(gate.findings.filter((f) => !f.ok).map((f) => f.rule))].join(", ")}; one crew fix turn`);
@@ -482,7 +482,7 @@ export async function runBlueprintLoop(
       track(t);
       if (t.status !== "finished") return stop("run-failed", "finish fix turn did not finish");
       io.commit("crew: finish-gate fixes");
-      gate = await io.gate("finish", { allowedFiles: allTaskFiles, baseSha: state.baselineSha });
+      gate = await io.gate("finish", { allowedFiles: allTaskFiles, baseSha: state.baselineSha, attempt: 1 });
     }
     state.finishGate = { passed: gate.passed, failing: [...new Set(gate.findings.filter((f) => !f.ok).map((f) => f.rule))] };
     await persist();

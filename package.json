@@ -25,7 +25,8 @@
     "slack": "tsx src/07-slack-bot.ts",
     "start": "tsx src/07-slack-bot.ts",
     "max-usage": "tsx tools/max-usage.mts",
-    "quality-review": "tsx src/12-quality-review.ts"
+    "quality-review": "tsx src/12-quality-review.ts",
+    "version-board": "tsx src/13-version-board.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.273",

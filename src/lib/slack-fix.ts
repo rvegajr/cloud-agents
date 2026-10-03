@@ -8,7 +8,10 @@ import {
   type VerifyReport,
 } from "./pipeline.js";
 import { buildStateDir } from "./build-app.js";
-import { centsForMeter, closeJobCost, formatRunningCost, meterFromAgentId, meterLabel, projectFromRepo, usdFromCents } from "./cost-ledger.js";
+import { deciderConfigFromEnv, drainDeciderSpend } from "../../architect-crew-gate/src/decider.js";
+import { githubReader, withJudgment } from "./cloud-judgment.js";
+import { resolveGithubToken } from "./github.js";
+import { appendCostEntry, centsForMeter, closeJobCost, defaultLedgerPath, formatRunningCost, meterFromAgentId, meterLabel, projectFromRepo, usdFromCents } from "./cost-ledger.js";
 
 /**
  * Turn a Slack request into a cloud-agent job. Slack-agnostic aside from the
@@ -102,6 +105,16 @@ async function postCostClose(runtime: JobRuntime, handle: AgentHandle, repo?: st
         : `COST\n  this run:     ${usdFromCents(cents)}  ${meterLabel(meter)}`;
   }
   if (tokens) close += `\n  tokens:      ${tokens.toLocaleString()}`;
+  // The decision model behind the judgment rule is its own meter, never folded into the agent's.
+  for (const s of drainDeciderSpend()) {
+    if (s.cents <= 0) continue;
+    try {
+      appendCostEntry(defaultLedgerPath(buildStateDir()), { project: projectFromRepo(repo), cents: s.cents, meter: s.meter, source: "slack", repo });
+    } catch {
+      /* ledger is optional */
+    }
+    close += `\n  decider:      $${(s.cents / 100).toFixed(4)}  ${meterLabel(s.meter)} (${s.inputTokens.toLocaleString("en-US")} input tokens, ${s.calls} calls)`;
+  }
   await runtime.post(close);
   return close;
 }
@@ -274,7 +287,17 @@ async function runAndReport(
     implement: "Implementing...",
     verify: "Verifying...",
   };
-  const out = await runPipeline(handle.send, brief, {
+  // A cloud agent (no local clone) has no gate; judge its pushed branch instead. Engines with a clone
+  // already run the judgment rule inside their gate.
+  const send = handle.workspace
+    ? handle.send
+    : withJudgment(handle.send, {
+        decider: deciderConfigFromEnv(),
+        baseRef: ref,
+        github: githubReader(resolveGithubToken(process.env)),
+        log: (line) => console.log(line),
+      });
+  const out = await runPipeline(send, brief, {
     ref,
     onPhase: async (phase) => {
       const meter = meterFromAgentId(handle.agentId);

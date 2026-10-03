@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { defaultExec, type ExecFn } from "../../src/lib/engine-local.js";
+import { defaultExec, stageAll, type ExecFn } from "../../src/lib/engine-local.js";
 import type { BlueprintIO } from "./blueprint-loop.js";
 import { gateConfigFromEnv, runQualityGate, subprocessEnv, type GateConfig } from "./quality-gate.js";
 
@@ -40,7 +40,8 @@ export function makeRepoIO(
     headSha: () => git(["rev-parse", "HEAD"]),
     commit: (message) => {
       if (!git(["status", "--porcelain"])) return false;
-      execFileSync("git", ["add", "-A"], { cwd, stdio: "ignore" });
+      stageAll(cwd, opts.log);
+      if (!git(["diff", "--cached", "--name-only"])) return false;
       execFileSync("git", ["-c", "user.name=cloud-agents", "-c", "user.email=cloud-agents@localhost", "commit", "-q", "-m", message], { cwd, stdio: "ignore" });
       opts.log?.(`committed: ${message}`);
       return true;
@@ -50,6 +51,7 @@ export function makeRepoIO(
         allowedFiles: ctx.allowedFiles,
         baseSha: ctx.baseSha,
         taskCommands: ctx.taskCommands,
+        attempt: ctx.attempt,
         exec,
         log: opts.log,
       }),
