@@ -16,6 +16,8 @@ walkthrough, with a jam.dev recording as the preferred bug report.
 `ARTICLE-CLAUDE-MAX-RESULTS.md` is the snippet-vault A/B that measured it.
 `ARTICLE-FRONTIER-VALUE.md` prices GPT-5.6 Sol, Opus 5.5, and Grok 4.7 on that
 same vault and keeps Composer, Fast off, as the default.
+`ARTICLE-DECIDER-RESULTS.md` measures decision models (Jev, d1, nimble, tev1)
+as gate rule 7: one real bug caught for $0.002, no change in completion rate.
 `architect-crew-gate/` is the pattern that A/B led to, in its own folder:
 `THEORY.md` (two pages; hand it to any AI with a job and it can act on it),
 `ARTICLE.md` (what the A/B found wrong with the hybrid engine's output and the
@@ -567,6 +569,7 @@ cloud-agents/
   ARTICLE-CLAUDE-MAX.md          move the build loop onto a Max plan
   ARTICLE-CLAUDE-MAX-RESULTS.md  snippet-vault A/B: Cursor $1.20 vs Max $6.65 API-eq
   ARTICLE-FRONTIER-VALUE.md      Sol / Opus 5.5 / Grok 4.7 on that vault; Composer stays default
+  ARTICLE-DECIDER-RESULTS.md     decision models as a gate rule: spot test, 20-run A/B, blind scores
   IMPLEMENTATION-GUIDE.md        agent-executable recipe: credentials, phases, human gates
   CHANGELOG.md                   what changed between tags
   slack-app-manifest.json        paste at api.slack.com/apps
