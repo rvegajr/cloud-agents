@@ -127,6 +127,20 @@
       "expect": { "branch": "develop" }
     },
     {
+      "name": "scholarmancy-api",
+      "env": "production",
+      "health": "https://api.scholarmancy.com/api/health",
+      "repo": "YOLOVibeCode/scholaracle",
+      "expect": { "branch": "main" }
+    },
+    {
+      "name": "scholarmancy-web",
+      "env": "production",
+      "health": "https://scholarmancy.com/api/health",
+      "repo": "YOLOVibeCode/scholaracle",
+      "expect": { "branch": "main" }
+    },
+    {
       "name": "cloud-agents-slack",
       "env": "production",
       "health": "https://slack-production-5120.up.railway.app/health",
