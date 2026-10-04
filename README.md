@@ -10,7 +10,8 @@ bot you host yourself. Nothing in `src/` is itself a Cursor agent; it is the
 orchestrator that creates, prompts, and resumes them.
 
 Read this file top to bottom once. Then run the numbered scripts in order.
-`ARTICLE.md` is the idea-to-app walkthrough; `ARTICLE-SLACK.md` is the Slack
+`PLAYBOOK.md` is the day-to-day order of work: which door, which meter, the fix
+loop, the new-app loop, shipping, and the COST close. `ARTICLE.md` is the idea-to-app walkthrough; `ARTICLE-SLACK.md` is the Slack
 walkthrough, with a jam.dev recording as the preferred bug report.
 `ARTICLE-CLAUDE-MAX.md` is how the build loop moves onto a Claude Max plan;
 `ARTICLE-CLAUDE-MAX-RESULTS.md` is the snippet-vault A/B that measured it.
