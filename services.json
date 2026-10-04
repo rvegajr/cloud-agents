@@ -40,6 +40,107 @@
       "repo": "rvegajr/noctusoft-relay",
       "expect": { "branch": "main" },
       "note": "commit lands with noctusoft-relay#78 on the next deploy.sh run; it reads HEAD from the checkout, nothing to stamp"
+    },
+    {
+      "name": "emberlead-web",
+      "env": "production",
+      "health": "https://www.tankroom.pro/health",
+      "repo": "YOLOVibeCode/emberlead",
+      "expect": { "branch": "main" },
+      "note": "Railway waits for CI before deploying web; a cancelled or failed CI run leaves web behind api and workers"
+    },
+    {
+      "name": "emberlead-api",
+      "env": "production",
+      "health": "https://api.emberlead.pro/health",
+      "repo": "YOLOVibeCode/emberlead",
+      "expect": { "branch": "main" }
+    },
+    {
+      "name": "emberlead-workers",
+      "env": "production",
+      "health": "https://workers.emberlead.pro/health",
+      "repo": "YOLOVibeCode/emberlead",
+      "expect": { "branch": "main" }
+    },
+    {
+      "name": "emberlead-web",
+      "env": "uat",
+      "health": "https://uat.emberlead.pro/health",
+      "repo": "YOLOVibeCode/emberlead",
+      "expect": { "branch": "develop" }
+    },
+    {
+      "name": "emberlead-api",
+      "env": "uat",
+      "health": "https://uat-api.emberlead.pro/health",
+      "repo": "YOLOVibeCode/emberlead",
+      "expect": { "branch": "develop" }
+    },
+    {
+      "name": "emberlead-workers",
+      "env": "uat",
+      "health": "https://workers-uat.up.railway.app/health",
+      "repo": "YOLOVibeCode/emberlead",
+      "expect": { "branch": "develop" }
+    },
+    {
+      "name": "emberlead-web",
+      "env": "dev",
+      "health": "https://dev.emberlead.pro/health",
+      "repo": "YOLOVibeCode/emberlead",
+      "expect": { "branch": "develop" }
+    },
+    {
+      "name": "emberlead-api",
+      "env": "dev",
+      "health": "https://dev-api.emberlead.pro/health",
+      "repo": "YOLOVibeCode/emberlead",
+      "expect": { "branch": "develop" }
+    },
+    {
+      "name": "emberlead-workers",
+      "env": "dev",
+      "health": "https://workers-dev-351d.up.railway.app/health",
+      "repo": "YOLOVibeCode/emberlead",
+      "expect": { "branch": "develop" }
+    },
+    {
+      "name": "flight-deck",
+      "env": "production",
+      "health": "https://myflightdeck.app/api/health",
+      "repo": "rvegajr/sji-flight-deck-platform",
+      "expect": { "branch": "main" }
+    },
+    {
+      "name": "flight-deck",
+      "env": "uat",
+      "health": "https://uat.myflightdeck.app/api/health",
+      "repo": "rvegajr/sji-flight-deck-platform",
+      "expect": { "branch": "uat" }
+    },
+    {
+      "name": "flight-deck",
+      "env": "develop",
+      "health": "https://develop.myflightdeck.app/api/health",
+      "repo": "rvegajr/sji-flight-deck-platform",
+      "expect": { "branch": "develop" }
+    },
+    {
+      "name": "cloud-agents-slack",
+      "env": "production",
+      "health": "https://slack-production-5120.up.railway.app/health",
+      "repo": "rvegajr/cloud-agents",
+      "expect": { "branch": "main" },
+      "note": "deployed with railway up, not on merge; behind means a merge has not been shipped to the bot"
+    },
+    {
+      "name": "cloud-agents-slack-whm",
+      "env": "production",
+      "health": "https://slack-whm-production.up.railway.app/health",
+      "repo": "rvegajr/cloud-agents",
+      "expect": { "branch": "main" },
+      "note": "deployed with railway up, not on merge; behind means a merge has not been shipped to the bot"
     }
   ]
 }

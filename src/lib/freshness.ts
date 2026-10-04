@@ -92,7 +92,8 @@ const COMMIT_KEYS = ["commit", "commitSha", "commit_sha", "sha", "gitCommit", "g
 /**
  * Pull the commit out of whatever shape a service calls its health payload.
  *
- * Explicit fields win. Failing that, we read a formatted version string —
+ * Explicit fields win, then the same fields one level down under `git` or
+ * `build` (Flight Deck reports `git.commit`). Failing that, we read a formatted version string —
  * this kit's own bot reports `v0.2.0 (abc123def456 on main)` — but only accept
  * a hex run that contains a letter, so a build number like `1234567` is not
  * mistaken for a short sha.
@@ -100,9 +101,19 @@ const COMMIT_KEYS = ["commit", "commitSha", "commit_sha", "sha", "gitCommit", "g
 export function commitFromHealth(payload: unknown): string | undefined {
   if (!payload || typeof payload !== "object") return undefined;
   const obj = payload as Record<string, unknown>;
-  for (const key of COMMIT_KEYS) {
+  const explicit = (o: Record<string, unknown>): string | undefined => {
+    for (const key of COMMIT_KEYS) {
+      const v = o[key];
+      if (typeof v === "string" && /^[0-9a-f]{7,40}$/i.test(v.trim())) return v.trim().toLowerCase();
+    }
+    return undefined;
+  };
+  const top = explicit(obj);
+  if (top) return top;
+  for (const key of ["git", "build", "buildInfo", "version"]) {
     const v = obj[key];
-    if (typeof v === "string" && /^[0-9a-f]{7,40}$/i.test(v.trim())) return v.trim().toLowerCase();
+    const nested = v && typeof v === "object" && !Array.isArray(v) ? explicit(v as Record<string, unknown>) : undefined;
+    if (nested) return nested;
   }
   for (const key of ["version", "build", "buildInfo"]) {
     const v = obj[key];
