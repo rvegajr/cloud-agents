@@ -18,6 +18,7 @@ import { resolveApiKey } from "./lib/auth.js";
 import { reportStartupFailure } from "./lib/report.js";
 import { ensureJamBin } from "./lib/jam.js";
 import { JobStore, jobsListenPort, listenJobsHttp, mentionText } from "./lib/jobs-http.js";
+import { HeartbeatMonitor, relayTextSender } from "./lib/heartbeat.js";
 import { createSlackJobs, postDriverMention, type SlackClient } from "./lib/slack-jobs.js";
 import {
   isCursorNativeCommand,
@@ -251,6 +252,34 @@ try {
     jobs.usageCatalog(botHandle).replace(/```\n?/g, "").trim(),
   );
 
+  // Dead-man switch for claude-rc on the Mac: it POSTs /v1/heartbeat every watch run; silence
+  // past HEARTBEAT_STALE_MIN texts HEARTBEAT_ALERT_TO once through the Noctusoft relay.
+  const heartbeatToken = process.env.HEARTBEAT_TOKEN?.trim() ?? "";
+  let heartbeat: { token: string; monitor: HeartbeatMonitor; now: () => number } | undefined;
+  let heartbeatTimer: NodeJS.Timeout | undefined;
+  if (heartbeatToken) {
+    const staleMin = Number(process.env.HEARTBEAT_STALE_MIN) || 30;
+    const sources = (process.env.HEARTBEAT_SOURCES ?? "claude-rc").split(",").map((x) => x.trim()).filter(Boolean);
+    const monitor = new HeartbeatMonitor({ staleMs: staleMin * 60_000, expected: sources, startedAt: Date.now() });
+    heartbeat = { token: heartbeatToken, monitor, now: () => Date.now() };
+    const alertTo = process.env.HEARTBEAT_ALERT_TO?.trim() ?? "";
+    const relayKey = process.env.NOCTUSOFT_API_KEY?.trim() ?? "";
+    const sendText = relayKey ? relayTextSender({ apiKey: relayKey }) : undefined;
+    heartbeatTimer = setInterval(() => {
+      for (const alert of monitor.check(Date.now())) {
+        console.log(`  heartbeat: ${alert.text}`);
+        if (!sendText || !alertTo) continue;
+        sendText(alertTo, alert.text).catch((err) => console.error(`  heartbeat SMS failed: ${err instanceof Error ? err.message : err}`));
+      }
+    }, 60_000);
+    heartbeatTimer.unref();
+    console.log(
+      sendText && alertTo
+        ? `  heartbeat: watching ${sources.join(", ")}; texts after ${staleMin} min of silence`
+        : `  heartbeat: watching ${sources.join(", ")}; logs only (set NOCTUSOFT_API_KEY and HEARTBEAT_ALERT_TO to text)`,
+    );
+  }
+
   const port = jobsListenPort();
   if (port) {
     const slackClient = asSlackClient(app.client);
@@ -287,6 +316,7 @@ try {
           if (!body.channel) throw new Error("channel is required");
           return postDriverMention({ token: driverToken, channel: body.channel, botUserId, body });
         },
+        heartbeat,
       },
       port,
     );
@@ -298,6 +328,7 @@ try {
   }
 
   const stop = async () => {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
     await app.stop();
     process.exit(0);
   };
