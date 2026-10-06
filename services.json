@@ -40,6 +40,22 @@
       "repo": "rvegajr/noctusoft-relay",
       "expect": { "branch": "main" },
       "note": "commit lands with noctusoft-relay#78 on the next deploy.sh run; it reads HEAD from the checkout, nothing to stamp"
+    },
+    {
+      "name": "escalating-reminders",
+      "env": "dev",
+      "health": "https://api-dev-03d7.up.railway.app/health",
+      "repo": "YOLOVibeCode/escalating-reminders",
+      "expect": { "branch": "develop" },
+      "note": "Railway-generated domain until custom domains exist"
+    },
+    {
+      "name": "escalating-reminders",
+      "env": "uat",
+      "health": "https://api-uat-a875.up.railway.app/health",
+      "repo": "YOLOVibeCode/escalating-reminders",
+      "expect": { "branch": "uat" },
+      "note": "Railway-generated domain until custom domains exist; production not provisioned yet"
     }
   ]
 }
