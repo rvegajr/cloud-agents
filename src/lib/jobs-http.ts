@@ -5,6 +5,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer, type Server } from "node:http";
 import { randomBytes } from "node:crypto";
+import { parseBeat, type HeartbeatMonitor } from "./heartbeat.js";
 
 export interface JobsBody {
   project?: string;
@@ -129,6 +130,8 @@ export interface JobsHttpHandlers {
   projects: () => unknown;
   startJob: (body: JobsBody, job: JobRecord) => Promise<void>;
   postMention: (body: JobsBody) => Promise<{ ts?: string; channel: string }>;
+  /** Dead-man switch. POST takes only its own token, so a heartbeat credential cannot start jobs. */
+  heartbeat?: { token: string; monitor: HeartbeatMonitor; now: () => number };
 }
 
 function send(res: ServerResponse, status: number, body: unknown): void {
@@ -162,12 +165,49 @@ export async function handleJobsHttp(
       "GET /v1/jobs/:id",
       "POST /v1/jobs",
       "POST /v1/mentions",
+      "POST /v1/heartbeat",
+      "GET /v1/heartbeat",
     ] });
+    return;
+  }
+
+  if (method === "POST" && path === "/v1/heartbeat") {
+    const hb = handlers.heartbeat;
+    if (!hb) {
+      send(res, 404, { ok: false, error: "heartbeat is not configured (HEARTBEAT_TOKEN)" });
+      return;
+    }
+    if (!authorize(req.headers.authorization, hb.token)) {
+      send(res, 401, { ok: false, error: "Authorization: Bearer $HEARTBEAT_TOKEN required" });
+      return;
+    }
+    let parsed: ReturnType<typeof parseBeat>;
+    try {
+      parsed = parseBeat(await readJson(req));
+    } catch {
+      send(res, 400, { ok: false, error: "invalid JSON" });
+      return;
+    }
+    if (!parsed.ok) {
+      send(res, 400, { ok: false, error: parsed.error });
+      return;
+    }
+    hb.monitor.beat(parsed.source, parsed.beat, hb.now());
+    send(res, 200, { ok: true });
     return;
   }
 
   if (!authorize(req.headers.authorization, handlers.token)) {
     send(res, 401, { ok: false, error: "Authorization: Bearer $JOBS_API_TOKEN required" });
+    return;
+  }
+
+  if (method === "GET" && path === "/v1/heartbeat") {
+    if (!handlers.heartbeat) {
+      send(res, 404, { ok: false, error: "heartbeat is not configured (HEARTBEAT_TOKEN)" });
+      return;
+    }
+    send(res, 200, { ok: true, sources: handlers.heartbeat.monitor.status(handlers.heartbeat.now()) });
     return;
   }
 
