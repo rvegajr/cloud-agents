@@ -28,6 +28,14 @@ npm run deploy                        # stamp the commit, then ship
 
 ### Added
 
+- **The version board covers 19 services, up from 5.** `services.json` adds
+  emberlead web, api, and workers in production, uat, and dev; Flight Deck in
+  production, uat, and develop; and both Slack bots. `commitFromHealth` now also
+  reads `git.commit` and `build.commit`, which is where Flight Deck reports it.
+  The first run caught emberlead web production two commits behind its own api
+  and workers: Railway waits for CI there, and a CI run that hung for six hours
+  was cancelled, so web never deployed.
+
 - **`ARTICLE-DECIDER-RESULTS.md`: what decision models did for the code.**
   Jev and nimble flagged exactly the 19/35 hybrid build's two reviewer-listed
   defects and nothing in the 29/35 and 28/35 builds. In a 20-run polya A/B

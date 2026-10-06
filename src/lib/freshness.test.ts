@@ -52,6 +52,18 @@ test("commitFromHealth reads the contract field", () => {
   assert.equal(commitFromHealth(real), "d6e2af5d4c30c2ca3fbbf76d0f924a16b2277593");
 });
 
+test("commitFromHealth reads a commit nested under git or build", () => {
+  // Flight Deck's real shape: build carries no sha, git does.
+  const flightDeck = {
+    status: "ok",
+    version: "V0.7.26.27E1",
+    build: { id: "0", timestamp: "2026-10-04T00:00:00Z", environment: "production" },
+    git: { commit: "80323e825abcdef0123456789abcdef012345678", shortCommit: "80323e82", branch: "main" },
+  };
+  assert.equal(commitFromHealth(flightDeck), "80323e825abcdef0123456789abcdef012345678");
+  assert.equal(commitFromHealth({ commit: "abc123def456", git: { commit: "fff000fff000" } }), "abc123def456");
+});
+
 test("commitFromHealth falls back to a formatted version string", () => {
   // This kit's own bot reports `formatVersion()`, not a commit field.
   assert.equal(commitFromHealth({ version: "v0.2.0 (abc123def456 on main)" }), "abc123def456");
