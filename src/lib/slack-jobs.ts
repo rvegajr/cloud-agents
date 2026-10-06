@@ -105,6 +105,9 @@ function wrap(agent: SDKAgent): AgentHandle {
       console.log(`agent=${agent.agentId} run=${run.id}`);
       await printStream(run, { text: true, tools: true });
       const result = await run.wait();
+      if (result.status !== "finished") {
+        console.log(`run ${run.id} ${result.status}${result.error?.message ? `: ${result.error.message}` : ""}${result.error?.code ? ` (${result.error.code})` : ""}`);
+      }
       const pushed = result.git?.branches.find((b) => b.branch);
       return {
         status: result.status,

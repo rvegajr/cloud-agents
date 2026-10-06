@@ -7,7 +7,7 @@ import {
   type DeciderConfig,
   type FetchFn,
 } from "../../architect-crew-gate/src/decider.js";
-import { parseGithubRepoUrl, type GithubRepoRef } from "./github.js";
+import { parseGithubRepoUrl, parsePullRequestUrl, type GithubRepoRef } from "./github.js";
 
 /**
  * The judgment rule for engines that own no clone: a Cursor cloud agent pushes to a
@@ -33,6 +33,8 @@ export interface GithubReader {
   sha(repo: GithubRepoRef, ref: string): Promise<string | undefined>;
   /** A file's text at a ref. */
   file(repo: GithubRepoRef, path: string, ref: string): Promise<string | undefined>;
+  /** The head branch of a pull request. */
+  prHead(repo: GithubRepoRef, number: number): Promise<string | undefined>;
 }
 
 type HttpFetch = (url: string, init: { headers: Record<string, string>; signal?: AbortSignal }) => Promise<{ ok: boolean; text(): Promise<string> }>;
@@ -53,6 +55,14 @@ export function githubReader(token: string | undefined, fetchFn: HttpFetch = fet
     diff: (r, base, head) => get(`${repoPath(r)}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`, "application/vnd.github.diff"),
     sha: async (r, ref) => (await get(`${repoPath(r)}/commits/${encodeURIComponent(ref)}`, "application/vnd.github.sha"))?.trim() || undefined,
     file: (r, path, ref) => get(`${repoPath(r)}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(ref)}`, "application/vnd.github.raw+json"),
+    prHead: async (r, number) => {
+      const raw = await get(`${repoPath(r)}/pulls/${number}`, "application/vnd.github+json");
+      try {
+        return raw ? ((JSON.parse(raw) as { head?: { ref?: string } }).head?.ref ?? undefined) : undefined;
+      } catch {
+        return undefined;
+      }
+    },
   };
 }
 
@@ -97,16 +107,28 @@ export function withJudgment<O extends { mode?: "agent" | "plan" }, T extends Br
   const log = o.log ?? (() => {});
   return async (prompt, opts) => {
     const turn = await send(prompt, opts);
-    if (turn.status !== "finished" || opts?.mode === "plan" || !turn.branch || !turn.repoUrl) return turn;
-    const repo = parseGithubRepoUrl(turn.repoUrl);
-    if (!repo) return turn;
-    const key = `${turn.repoUrl}#${turn.branch}`;
-    const head = await o.github.sha(repo, turn.branch);
+    if (turn.status !== "finished" || opts?.mode === "plan") return turn;
+    // Cursor's run result may name the PR without the branch (`branch` is optional in the SDK): fall back to the PR's head.
+    let branch = turn.branch;
+    let repoUrl = turn.repoUrl;
+    const pr = turn.prUrl ? parsePullRequestUrl(turn.prUrl) : undefined;
+    if ((!branch || !repoUrl) && pr) {
+      repoUrl = `https://github.com/${pr.owner}/${pr.repo}`;
+      branch = await o.github.prHead({ owner: pr.owner, repo: pr.repo }, pr.number);
+    }
+    const repo = repoUrl ? parseGithubRepoUrl(repoUrl) : undefined;
+    if (!branch || !repo) {
+      // Never silent: a skipped judgment is a line in the log.
+      log(`judgment skipped: the turn reported no pushed branch${turn.prUrl ? ` (PR ${turn.prUrl} head unreadable)` : " or PR"}`);
+      return turn;
+    }
+    const key = `${repoUrl}#${branch}`;
+    const head = await o.github.sha(repo, branch);
     if (!head || head === judged.get(key)) return turn;
     const base = judged.get(key) ?? o.baseRef;
     const diff = await o.github.diff(repo, base, head);
     if (diff === undefined) {
-      log(`judgment unavailable: GitHub gave no diff for ${base}...${turn.branch}`);
+      log(`judgment unavailable: GitHub gave no diff for ${base}...${branch}`);
       return turn;
     }
     let entryStems: Set<string> | undefined;
@@ -124,10 +146,10 @@ export function withJudgment<O extends { mode?: "agent" | "plan" }, T extends Br
     log(`judgment (${tag}): ${j.decisions.length} decision(s) over ${new Set(j.decisions.map((d) => d.file)).size} file(s), ${flagged.length} flagged${j.errors.length ? `, ${j.errors.length} error(s)` : ""}`);
     if (!flagged.length) return turn;
     for (const d of flagged) log(`  flagged ${d.file}: ${d.question} p=${d.p.toFixed(2)}`);
-    const fix = await send(judgmentFixPrompt(turn.branch, flagged), { mode: "agent" } as O);
+    const fix = await send(judgmentFixPrompt(branch, flagged), { mode: "agent" } as O);
     log(`judgment fix turn: ${fix.status}`);
     // The fix is advisory from here on: mark its commits judged so the next turn's diff starts after it.
-    const after = await o.github.sha(repo, turn.branch);
+    const after = await o.github.sha(repo, branch);
     if (after) judged.set(key, after);
     return { ...turn, prUrl: fix.prUrl ?? turn.prUrl };
   };
