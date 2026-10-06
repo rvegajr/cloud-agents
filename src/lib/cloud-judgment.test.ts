@@ -36,6 +36,10 @@ function fakeGithub(heads: string[], diffs: Record<string, string>, pkg?: string
       calls.push(`file ${path}@${ref}`);
       return pkg;
     },
+    prHead: async (r, n) => {
+      calls.push(`prHead ${r.owner}/${r.repo}#${n}`);
+      return "cursor/from-pr";
+    },
   };
   return { gh, calls };
 }
@@ -144,4 +148,22 @@ test("judgmentFixPrompt names the branch and each finding, and tells the agent n
   assert.match(p, /`cursor\/x`/);
   assert.match(p, /test\/a\.test\.ts: a test asserts nothing about behavior/);
   assert.match(p, /do not edit tests or config to hide a finding/);
+});
+
+test("a turn that reports only its PR is judged on the PR's head branch; one with neither logs a skip", async () => {
+  const { send, prompts } = fakeAgent([{ status: "finished", prUrl: "https://github.com/me/app/pull/11" }]);
+  const { gh, calls } = fakeGithub(["c1"], { "main...c1": DIFF("src/db.ts") });
+  const lines: string[] = [];
+  await withJudgment(send, { decider: decider(), baseRef: "main", github: gh, fetchFn: judge(["src/db.ts"]), log: (l) => lines.push(l) })("implement", { mode: "agent" });
+  assert.equal(calls[0], "prHead me/app#11");
+  assert.ok(calls.includes("sha cursor/from-pr"), calls.join("\n"));
+  assert.ok(calls.includes("diff main...c1"));
+  assert.equal(prompts.length, 2, "the flag still gets its fix turn");
+  assert.match(prompts[1]!.prompt, /`cursor\/from-pr`/);
+
+  const quiet: string[] = [];
+  const bare = fakeAgent([{ status: "finished" }]);
+  await withJudgment(bare.send, { decider: decider(), baseRef: "main", github: gh, log: (l) => quiet.push(l) })("implement", { mode: "agent" });
+  assert.match(quiet[0]!, /judgment skipped: the turn reported no pushed branch or PR/);
+  drainDeciderSpend();
 });
