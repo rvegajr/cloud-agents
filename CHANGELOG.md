@@ -276,6 +276,14 @@ npm run deploy                        # stamp the commit, then ship
 
 ### Changed
 
+- **Local-model guidance re-measured (4 October 2026).** The README now says to
+  set `OLLAMA_CONTEXT_LENGTH=131072` on the Ollama server. The engine never sets `num_ctx`. At 32K, 79% of hybrid prompts were
+  over 24K tokens, and context was shifted 119 times in a week. The README has
+  a new speed table, measured on an M4 Max with 128 GB.
+  `qwen3.6:35b-coding` is now the recommended `LOCAL_MODEL`: 90 tok/s decode
+  and 398 tok/s on a 78K-token prompt. `qwen3-coder:30b` (129 tok/s) is
+  superseded. `qwen3-coder-next` stays the code default.
+
 - **Composer Fast is off.** Every `Agent.create` / `Agent.prompt` now sends
   `params: [{ id: "fast", value: "false" }]` so Composer 2.5 (and Grok) use
   the regular rate card. Cursor's product default is Fast.

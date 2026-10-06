@@ -215,6 +215,20 @@ npm run build-app -- --resume cc-xxxx                       # Claude handle from
 
 `--engine hybrid` keeps the same clone, ids, and PR, but only the **plan** turn runs on Max. A local Ollama model (`LOCAL_MODEL`, driven by the qwen-code CLI or aider inside the clone) does the implement and verify turns, and Max comes back for one rescue turn only if the local verifier does not report `done`. Before every Max turn the engine reads the last utilization the Agent SDK reported (`.runs/max-usage.json`); at or above `MAX_UTILIZATION_CEILING` (85%) the turn is diverted to `LOCAL_PLANNER_MODEL` or the job stops, never buying extra usage. `--engine local` is Ollama only. The measured basis for this split is in `~/Dev/local-coding-evals/results/2026-09-17/RESULTS.md`: with a plan written the way `prompts/01-plan.md` now asks for it, every local model tested passed every check; without one, most did not.
 
+**Give Ollama a 128K context.** The engine never sets `num_ctx` (qwen-code talks to Ollama's `/v1` endpoint, which cannot), so the server's `OLLAMA_CONTEXT_LENGTH` is the window every local turn gets. Hybrid prompts are large: the qwen-code system prompt, the plan, and the last three turns replayed. With the window unset they reached about 107K tokens. Between 28 September and 4 October 2026, with the window at 32K, 1,566 of 1,982 local prompts were over 24K tokens, and Ollama shifted context (dropped the start of the conversation) 119 times. Set `OLLAMA_CONTEXT_LENGTH=131072`. For the Homebrew service, put it under `EnvironmentVariables` in `~/Library/LaunchAgents/sh.brew.ollama.plist` and reload the agent with `launchctl bootout` then `bootstrap`. Do not use `brew services restart`: it regenerates the plist and drops the variable, and so can `brew upgrade ollama`. The models below have hybrid attention or sliding windows, so 128K adds only a few GB per loaded model.
+
+Measured on 4 October 2026 on an M4 Max with 128 GB, idle, Ollama 0.34.4 at 128K. "Long prompt" is a 74–78K-token prompt. Every model passed the tool-call and coding checks and found a fact hidden in the long prompt.
+
+| Model | Size | Decode tok/s | Long-prompt prefill tok/s | Use |
+| --- | --- | --- | --- | --- |
+| `qwen3.6:35b-coding` | 23 GB | 90 | 398 | Fastest; executor (`LOCAL_MODEL`) |
+| `qwen3-coder-next` | 52 GB | 37 | 348 | Code default; strong, but large |
+| `gpt-oss:120b` | 65 GB | 33 | 269 | Planner (`LOCAL_PLANNER_MODEL`); fills enum-typed tool arguments with free text |
+| `qwen3-coder:30b` | 18 GB | 48 | 129 | Superseded by `qwen3.6:35b-coding` |
+| `qwen3.8:27b-mlx` | 18 GB | 13.5 | 115 | Dense; best published scores, too slow to read prompts for volume |
+
+On 128 GB, `qwen3-coder-next` and `gpt-oss:120b` (117 GB together) cannot both stay loaded, so Ollama swaps them on every plan/implement handoff. `qwen3.6:35b-coding` with `gpt-oss:120b` fits.
+
 `--loop blueprint` (or `BUILD_LOOP=blueprint`) swaps the milestone loop for the
 architect–crew–gate loop on any of these engines: Max writes requirements, the
 standard, and a blueprint with red tests; the local crew fills one task per
@@ -223,9 +237,9 @@ clone with a headless browser (Playwright MCP, `QA_BROWSER`); one fresh
 read-only review turn certifies. See `architect-crew-gate/`.
 
 ```bash
-ollama pull qwen3-coder-next            # 52 GB; or qwen3.6:35b-coding (23 GB)
+ollama pull qwen3.6:35b-coding          # 23 GB, fastest measured; or qwen3-coder-next (52 GB)
 npm i -g @qwen-code/qwen-code           # the local executor's harness (or: pipx install aider-chat, LOCAL_RUNNER=aider)
-ENGINE=hybrid LOCAL_MODEL=qwen3-coder-next npm run doctor -- --phase A
+ENGINE=hybrid LOCAL_MODEL=qwen3.6:35b-coding npm run doctor -- --phase A
 npm run max-usage                        # 5-hour and 7-day windows; seeds the routing sample
 npm run pipeline -- --engine hybrid --brief example-health-endpoint --repo https://github.com/you/repo
 ```
