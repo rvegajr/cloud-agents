@@ -27,6 +27,7 @@ import { formatVerifyReport, runPipeline, type PipelineSend } from "./lib/pipeli
 import { printStream } from "./lib/stream.js";
 import { isLocalWorkspaceEngine, parseEngine } from "./lib/engine-claude.js";
 import { createEngineHandle } from "./lib/engine-local.js";
+import { waitForRun } from "./lib/run-wait.js";
 
 loadEnv();
 const args = flags();
@@ -75,7 +76,7 @@ try {
       const run = await agent.send(prompt, opts?.mode ? { mode: opts.mode } : {});
       console.log(`run: ${run.id}\n`);
       await printStream(run);
-      const result = await run.wait();
+      const result = await waitForRun(run, { log: (l) => console.log(l) });
       return {
         status: result.status,
         result: result.result,

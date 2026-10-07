@@ -15,6 +15,7 @@ import { resolveApiKey } from "./lib/auth.js";
 import { buildPrompt, loadBrief } from "./lib/prompts.js";
 import { extractJsonBlock, reportResult, reportStartupFailure, saveRunRecord } from "./lib/report.js";
 import { printStream } from "./lib/stream.js";
+import { waitForRun } from "./lib/run-wait.js";
 
 loadEnv();
 const args = flags();
@@ -48,7 +49,7 @@ try {
   console.log(`run:    ${run.id}\n`);
 
   await printStream(run);
-  const result = await run.wait();
+  const result = await waitForRun(run, { log: (l) => console.log(l) });
 
   const report = extractJsonBlock<{ done: boolean; summary: string }>(result.result);
   if (report) console.log(`\nagent report: done=${report.done} - ${report.summary}`);

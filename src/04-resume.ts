@@ -14,6 +14,7 @@ import { loadEnv, flags } from "./lib/env.js";
 import { resolveApiKey } from "./lib/auth.js";
 import { reportResult, reportStartupFailure } from "./lib/report.js";
 import { printStream } from "./lib/stream.js";
+import { waitForRun } from "./lib/run-wait.js";
 
 loadEnv();
 const args = flags();
@@ -36,7 +37,7 @@ try {
   const run = await agent.send(message, mode ? { mode } : {});
   console.log(`run:    ${run.id}\n`);
   await printStream(run);
-  const result = await run.wait();
+  const result = await waitForRun(run, { log: (l) => console.log(l) });
   console.log(`\n${result.result ?? ""}`);
   process.exit(reportResult("resume", result));
 } catch (err) {
