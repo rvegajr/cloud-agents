@@ -31,6 +31,7 @@ import { makeRepoIO } from "../../architect-crew-gate/src/io.js";
 import { makePolyaIO } from "../../polya-craft/src/io.js";
 import { fileLessonsStore } from "../../polya-craft/src/lessons.js";
 import { initialPolyaState, polyaResumePhase, runPolyaLoop, type PolyaState, type PolyaStopReason } from "../../polya-craft/src/polya-loop.js";
+import { waitForRun } from "./run-wait.js";
 
 export type BuildLoopKind = "milestone" | "blueprint" | "polya";
 
@@ -252,7 +253,7 @@ function cursorSend(agent: SDKAgent, stream: StreamOptions | undefined, log: (li
     const run = await agent.send(prompt, opts?.mode ? { mode: opts.mode } : {});
     log(`run: ${run.id}`);
     await printStream(run, stream ?? { text: true, tools: true });
-    const r = await run.wait();
+    const r = await waitForRun(run, { log });
     if (r.status !== "finished") {
       log(`run ${run.id} ${r.status}${r.error?.message ? `: ${r.error.message}` : ""}${r.error?.code ? ` (${r.error.code})` : ""}`);
     }
