@@ -370,8 +370,9 @@ railway ssh keys add -k ~/.ssh/id_ed25519.pub -n "laptop"
 railway ssh                     # then: env | grep BUILD_INFO, logs, etc.
 ```
 
-[railway.json](railway.json) installs the Jam CLI if missing, runs
-`npm run slack`, and restarts on failure. `tsx` is a runtime dependency on
+[.railway/railway.ts](.railway/railway.ts) (Railway infrastructure as code) gives both bots the
+start command: install the Jam CLI if missing, then `npm run slack`; Railway restarts it on
+failure. Review drift with `railway config plan` (node >= 22.6). `tsx` is a runtime dependency on
 purpose, so `NODE_ENV=production` cannot skip it.
 
 **Verify:** `npm run doctor -- --phase E` (which also compares the stamp against
