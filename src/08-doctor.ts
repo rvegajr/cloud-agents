@@ -561,10 +561,12 @@ async function checkAgents(): Promise<void> {
 // Phase E — the host that keeps the websocket open
 
 async function checkHost(): Promise<void> {
-  if (!existsSync("railway.json")) {
-    add("E", "host", "railway.json", "warn", "not found", "any host that keeps one Node process alive works; this kit ships a Railway config");
+  if (existsSync(".railway/railway.ts")) {
+    add("E", "host", ".railway/railway.ts", "pass", "Railway IaC: both bots start with `npm run slack` (check drift: railway config plan)");
+  } else if (existsSync("railway.json")) {
+    add("E", "host", "railway.json", "warn", "Config as Code is read only until 2026-12-01", "migrate to .railway/railway.ts (railway config migrate)");
   } else {
-    add("E", "host", "railway.json", "pass", "start command runs `npm run slack` and restarts on failure");
+    add("E", "host", "railway config", "warn", "not found", "any host that keeps one Node process alive works; this kit ships a Railway config");
   }
 
   const cli = await run("railway", ["--version"], 10_000);

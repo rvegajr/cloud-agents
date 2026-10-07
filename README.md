@@ -459,7 +459,7 @@ railway variables --set SLACK_BOT_TOKEN=... --set SLACK_APP_TOKEN=... --set JAM_
 npm run deploy       # stamps the git commit into BUILD_INFO, then railway up
 ```
 
-`railway.json` installs the Jam CLI if needed, then starts `npm run slack`.
+`.railway/railway.ts` (Railway infrastructure as code) installs the Jam CLI if needed, then starts `npm run slack`.
 Socket Mode dials out; no domain needed.
 
 Walkthrough: `ARTICLE-SLACK.md`.
@@ -631,7 +631,7 @@ cloud-agents/
   IMPLEMENTATION-GUIDE.md        agent-executable recipe: credentials, phases, human gates
   CHANGELOG.md                   what changed between tags
   slack-app-manifest.json        paste at api.slack.com/apps
-  railway.json                   start command for npm run slack
+  .railway/railway.ts            Railway IaC: both bots, start command, preserved variables
   .env.example                   credentials + target repo + Slack tokens
   polya-craft/                   fresh loop on Pólya's four steps; any problem
     WALKTHROUGH.md THEORY.md PATTERN.md ARTICLE.md ROADMAP.md LESSONS.md
