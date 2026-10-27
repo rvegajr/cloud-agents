@@ -213,7 +213,7 @@ npm run build-app -- --resume cc-xxxx                       # Claude handle from
 
 `--engine cursor` (default) is a Cursor Cloud Agent: a hosted VM, a `bc-…` id, billed per token. `--engine claude` clones onto **this machine** (or `WORK_ROOT`), runs the Anthropic Agent SDK against your Max plan, and opens a `claude/…` draft PR. Resume ids are `cc-…`. Doctor fails if `ANTHROPIC_API_KEY` is set or if `claude auth status` is anything but `apiKeySource=none`.
 
-`--engine hybrid` keeps the same clone, ids, and PR, but only the **plan** turn runs on Max. A local Ollama model (`LOCAL_MODEL`, driven by the qwen-code CLI or aider inside the clone) does the implement and verify turns, and Max comes back for one rescue turn only if the local verifier does not report `done`. Before every Max turn the engine reads the last utilization the Agent SDK reported (`.runs/max-usage.json`); at or above `MAX_UTILIZATION_CEILING` (85%) the turn is diverted to `LOCAL_PLANNER_MODEL` or the job stops, never buying extra usage. `--engine local` is Ollama only. The measured basis for this split is in `~/Dev/local-coding-evals/results/2026-09-17/RESULTS.md`: with a plan written the way `prompts/01-plan.md` now asks for it, every local model tested passed every check; without one, most did not.
+`--engine hybrid` keeps the same clone, ids, and PR, but only the **plan** turn runs on Max. A local model (`LOCAL_MODEL` on Ollama, or on any OpenAI-compatible server such as oMLX; driven by the qwen-code CLI or aider inside the clone) does the implement and verify turns, and Max comes back for one rescue turn only if the local verifier does not report `done`. Before every Max turn the engine reads the last utilization the Agent SDK reported (`.runs/max-usage.json`); at or above `MAX_UTILIZATION_CEILING` (85%) the turn is diverted to `LOCAL_PLANNER_MODEL` or the job stops, never buying extra usage. `--engine local` is Ollama only. The measured basis for this split is in `~/Dev/local-coding-evals/results/2026-09-17/RESULTS.md`: with a plan written the way `prompts/01-plan.md` now asks for it, every local model tested passed every check; without one, most did not.
 
 **Give Ollama a 128K context.** The engine never sets `num_ctx` (qwen-code talks to Ollama's `/v1` endpoint, which cannot), so the server's `OLLAMA_CONTEXT_LENGTH` is the window every local turn gets. Hybrid prompts are large: the qwen-code system prompt, the plan, and the last three turns replayed. With the window unset they reached about 107K tokens. Between 28 September and 4 October 2026, with the window at 32K, 1,566 of 1,982 local prompts were over 24K tokens, and Ollama shifted context (dropped the start of the conversation) 119 times. Set `OLLAMA_CONTEXT_LENGTH=131072`. For the Homebrew service, put it under `EnvironmentVariables` in `~/Library/LaunchAgents/sh.brew.ollama.plist` and reload the agent with `launchctl bootout` then `bootstrap`. Do not use `brew services restart`: it regenerates the plist and drops the variable, and so can `brew upgrade ollama`. The models below have hybrid attention or sliding windows, so 128K adds only a few GB per loaded model.
 
@@ -223,11 +223,20 @@ Measured on 4 October 2026 on an M4 Max with 128 GB, idle, Ollama 0.34.4 at 128K
 | --- | --- | --- | --- | --- |
 | `qwen3.6:35b-coding` | 23 GB | 90 | 398 | Fastest; executor (`LOCAL_MODEL`) |
 | `qwen3-coder-next` | 52 GB | 37 | 348 | Code default; strong, but large |
-| `gpt-oss:120b` | 65 GB | 33 | 269 | Planner (`LOCAL_PLANNER_MODEL`); fills enum-typed tool arguments with free text |
-| `qwen3-coder:30b` | 18 GB | 48 | 129 | Superseded by `qwen3.6:35b-coding` |
+| `gpt-oss:120b` | 65 GB | 33 | 269 | Deleted 2026-10-27: fills enum-typed tool arguments with free text, unused for three months |
+| `qwen3-coder:30b` | 18 GB | 48 | 129 | Deleted 2026-10-04; superseded by `qwen3.6:35b-coding` |
 | `qwen3.8:27b-mlx` | 18 GB | 13.5 | 115 | Dense; best published scores, too slow to read prompts for volume |
 
-On 128 GB, `qwen3-coder-next` and `gpt-oss:120b` (117 GB together) cannot both stay loaded, so Ollama swaps them on every plan/implement handoff. `qwen3.6:35b-coding` with `gpt-oss:120b` fits.
+`LOCAL_PLANNER_MODEL` defaults to `LOCAL_MODEL`. A local planner is only used when Max is over the ceiling; a local-only architect could not write a lawful `TASKS.md` (2026-09-18), so keep plan turns on Max.
+
+**oMLX instead of Ollama.** Set `LOCAL_BASE_URL` to any OpenAI-compatible server's `/v1` base and `LOCAL_MODEL` to an id its `/v1/models` lists (`LOCAL_API_KEY` if it was started with `--api-key`). Unset, the engine uses Ollama at `OLLAMA_HOST` exactly as before; doctor checks whichever is configured. Measured 13 October 2026, oMLX 0.7.0 with `mlx-community/Qwen3-Coder-Next-4bit` (42 GB) against Ollama's `qwen3-coder-next` Q4_K_M (51 GB): decode at 24–31K-token agent prompts 31 → 69 tok/s, warm follow-up turns 6.8–8.9 s → 4.7–5.4 s, one qwen-code task end to end 72 s → 40 s with 7/7 checks on both, and its SSD prefix cache starts a 30K-token turn in 3.6 s after a restart. The MLX 4-bit quant is not Ollama's Q4_K_M, so it stays opt-in until it matches on factory-size work.
+
+```bash
+brew install jundot/omlx/omlx            # once; if brew locks on openssl, `brew install openssl@3 openssl@4` first
+xcodebuild -downloadComponent MetalToolchain   # its kernels need this even with Xcode installed
+omlx serve --port 8000                    # models are the folders under ~/.omlx/models
+ENGINE=hybrid LOCAL_BASE_URL=http://127.0.0.1:8000/v1 LOCAL_MODEL=Qwen3-Coder-Next-4bit npm run doctor -- --phase A
+```
 
 `--loop blueprint` (or `BUILD_LOOP=blueprint`) swaps the milestone loop for the
 architect–crew–gate loop on any of these engines: Max writes requirements, the

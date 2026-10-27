@@ -5,6 +5,7 @@ import {
   continuationNote,
   executorNote,
   localConfigFromEnv,
+  localModels,
   makeLocalSend,
   modelIsPulled,
   transcriptContext,
@@ -13,22 +14,62 @@ import {
   type LocalConfig,
 } from "./engine-local.js";
 
-const cfg: LocalConfig = { host: "http://localhost:11434", model: "qwen3-coder-next", plannerModel: "gpt-oss:120b", runner: "qwen", timeoutMs: 1000, continuations: 2 };
+const cfg: LocalConfig = {
+  host: "http://localhost:11434",
+  backend: "ollama",
+  baseUrl: "http://localhost:11434/v1",
+  model: "qwen3-coder-next",
+  plannerModel: "qwen3.6:35b-coding",
+  runner: "qwen",
+  timeoutMs: 1000,
+  continuations: 2,
+};
+const omlx: LocalConfig = { ...cfg, backend: "openai", baseUrl: "http://127.0.0.1:8000/v1", apiKey: "omlx-key", model: "Qwen3-Coder-Next-4bit" };
 
 test("localConfigFromEnv defaults and normalisation", () => {
   const d = localConfigFromEnv({});
   assert.equal(d.host, "http://localhost:11434");
+  assert.equal(d.backend, "ollama");
+  assert.equal(d.baseUrl, "http://localhost:11434/v1");
+  assert.equal(d.apiKey, undefined);
   assert.equal(d.model, "qwen3-coder-next");
   assert.equal(d.plannerModel, "qwen3-coder-next");
   assert.equal(d.runner, "qwen");
   assert.equal(d.timeoutMs, 30 * 60_000);
   assert.equal(d.continuations, 2);
   assert.equal(localConfigFromEnv({ LOCAL_TURN_CONTINUATIONS: "0" }).continuations, 0);
-  const c = localConfigFromEnv({ OLLAMA_HOST: "box.tail:11434/", LOCAL_MODEL: "qwen3.6:35b-coding", LOCAL_RUNNER: "Aider", LOCAL_PLANNER_MODEL: "gpt-oss:120b", LOCAL_TURN_TIMEOUT_MIN: "5" });
+  const c = localConfigFromEnv({ OLLAMA_HOST: "box.tail:11434/", LOCAL_MODEL: "qwen3.6:35b-coding", LOCAL_RUNNER: "Aider", LOCAL_PLANNER_MODEL: "qwen3-coder-next", LOCAL_TURN_TIMEOUT_MIN: "5" });
   assert.equal(c.host, "http://box.tail:11434");
+  assert.equal(c.baseUrl, "http://box.tail:11434/v1");
   assert.equal(c.runner, "aider");
-  assert.equal(c.plannerModel, "gpt-oss:120b");
+  assert.equal(c.plannerModel, "qwen3-coder-next");
   assert.equal(c.timeoutMs, 300_000);
+});
+
+test("LOCAL_BASE_URL selects an OpenAI-compatible server (oMLX) instead of Ollama", () => {
+  const o = localConfigFromEnv({ LOCAL_BASE_URL: "127.0.0.1:8000/v1/", LOCAL_API_KEY: " k ", LOCAL_MODEL: "Qwen3-Coder-Next-4bit" });
+  assert.equal(o.backend, "openai");
+  assert.equal(o.baseUrl, "http://127.0.0.1:8000/v1");
+  assert.equal(o.apiKey, "k");
+  assert.equal(o.model, "Qwen3-Coder-Next-4bit");
+  assert.equal(localConfigFromEnv({ LOCAL_BASE_URL: "  " }).backend, "ollama");
+});
+
+test("localModels asks Ollama's /api/tags or the server's /v1/models, with the key only when set", async () => {
+  const seen: { url: string; auth?: string }[] = [];
+  const fake = (async (url: string, init?: RequestInit) => {
+    seen.push({ url, auth: (init?.headers as Record<string, string> | undefined)?.Authorization });
+    const body = url.endsWith("/api/tags") ? { models: [{ name: "qwen3-coder-next:latest" }] } : { data: [{ id: "Qwen3-Coder-Next-4bit" }, { id: "" }] };
+    return new Response(JSON.stringify(body), { status: 200 });
+  }) as typeof fetch;
+  assert.deepEqual(await localModels(cfg, fake), ["qwen3-coder-next:latest"]);
+  assert.deepEqual(await localModels(omlx, fake), ["Qwen3-Coder-Next-4bit"]);
+  assert.deepEqual(seen, [
+    { url: "http://localhost:11434/api/tags", auth: undefined },
+    { url: "http://127.0.0.1:8000/v1/models", auth: "Bearer omlx-key" },
+  ]);
+  const down = (async () => new Response("no", { status: 401 })) as typeof fetch;
+  await assert.rejects(localModels(omlx, down), /v1\/models -> HTTP 401/);
 });
 
 test("modelIsPulled treats an untagged name as :latest", () => {
@@ -57,6 +98,14 @@ test("qwen-code command is headless and reaches Ollama through the OpenAI endpoi
   }
 });
 
+test("qwen-code against oMLX gets the server's base URL, model id and key", () => {
+  const cmd = buildLocalCommand(omlx, omlx.model, "do it");
+  assert.equal(cmd.env.OPENAI_BASE_URL, "http://127.0.0.1:8000/v1");
+  assert.equal(cmd.env.OPENAI_API_KEY, "omlx-key");
+  assert.equal(cmd.env.OPENAI_MODEL, "Qwen3-Coder-Next-4bit");
+  assert.equal(buildLocalCommand({ ...omlx, apiKey: undefined }, omlx.model, "x").env.OPENAI_API_KEY, "ollama");
+});
+
 test("aider command never auto-commits (the orchestrator commits)", () => {
   const cmd = buildLocalCommand({ ...cfg, runner: "aider" }, "qwen3-coder:30b", "do it");
   assert.equal(cmd.file, "aider");
@@ -64,6 +113,12 @@ test("aider command never auto-commits (the orchestrator commits)", () => {
   assert.ok(cmd.args.includes("--yes-always"));
   assert.equal(cmd.args[cmd.args.indexOf("--model") + 1], "ollama_chat/qwen3-coder:30b");
   assert.equal(cmd.env.OLLAMA_API_BASE, "http://localhost:11434");
+
+  const o = buildLocalCommand({ ...omlx, runner: "aider" }, omlx.model, "do it");
+  assert.equal(o.args[o.args.indexOf("--model") + 1], "openai/Qwen3-Coder-Next-4bit");
+  assert.equal(o.env.OPENAI_API_BASE, "http://127.0.0.1:8000/v1");
+  assert.equal(o.env.OPENAI_API_KEY, "omlx-key");
+  assert.equal(o.env.OLLAMA_API_BASE, undefined);
 });
 
 test("makeLocalSend maps exit codes to turn status and reports timing", async () => {
