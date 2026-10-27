@@ -38,6 +38,7 @@ import { mentionText } from "./jobs-http.js";
 import { selectModel } from "./model.js";
 import { parseEngine, slackUsesClaude } from "./engine-claude.js";
 import { createEngineHandle, engineOfRecord } from "./engine-local.js";
+import { waitForRun } from "./run-wait.js";
 
 export interface SlackClient {
   chat: {
@@ -104,7 +105,7 @@ function wrap(agent: SDKAgent): AgentHandle {
       const run = await agent.send(prompt, opts?.mode ? { mode: opts.mode } : {});
       console.log(`agent=${agent.agentId} run=${run.id}`);
       await printStream(run, { text: true, tools: true });
-      const result = await run.wait();
+      const result = await waitForRun(run, { log: (l) => console.log(l) });
       if (result.status !== "finished") {
         console.log(`run ${run.id} ${result.status}${result.error?.message ? `: ${result.error.message}` : ""}${result.error?.code ? ` (${result.error.code})` : ""}`);
       }
