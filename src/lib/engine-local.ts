@@ -53,10 +53,18 @@ import type { AgentHandle } from "./slack-fix.js";
 
 export type LocalRunner = "qwen" | "aider";
 
+/** Ollama (`OLLAMA_HOST`), or any OpenAI-compatible server such as oMLX (`LOCAL_BASE_URL`). */
+export type LocalBackend = "ollama" | "openai";
+
 export interface LocalConfig {
   /** Ollama base URL, no trailing slash. */
   host: string;
-  /** Executor model tag as `ollama list` prints it. */
+  backend: LocalBackend;
+  /** The OpenAI-compatible base the runners call, ending in /v1. For Ollama it is `${host}/v1`. */
+  baseUrl: string;
+  /** Bearer for a server started with an API key (oMLX `--api-key`); Ollama needs none. */
+  apiKey?: string;
+  /** Executor model tag as `ollama list` prints it, or the id the server's `/v1/models` lists. */
   model: string;
   /** Model for turns the policy diverts from Claude (plans over the ceiling, ENGINE=local). */
   plannerModel: string;
@@ -66,14 +74,20 @@ export interface LocalConfig {
   continuations: number;
 }
 
+const withScheme = (url: string): string => (/^https?:\/\//.test(url) ? url : `http://${url}`);
+
 export function localConfigFromEnv(env: NodeJS.ProcessEnv = process.env): LocalConfig {
-  const host = (env.OLLAMA_HOST?.trim() || "http://localhost:11434").replace(/\/+$/, "");
+  const host = withScheme((env.OLLAMA_HOST?.trim() || "http://localhost:11434").replace(/\/+$/, ""));
+  const openaiBase = env.LOCAL_BASE_URL?.trim().replace(/\/+$/, "");
   const model = env.LOCAL_MODEL?.trim() || "qwen3-coder-next";
   const runnerRaw = env.LOCAL_RUNNER?.trim().toLowerCase();
   const minutes = Number(env.LOCAL_TURN_TIMEOUT_MIN);
   const cont = Number(env.LOCAL_TURN_CONTINUATIONS);
   return {
-    host: /^https?:\/\//.test(host) ? host : `http://${host}`,
+    host,
+    backend: openaiBase ? "openai" : "ollama",
+    baseUrl: openaiBase ? withScheme(openaiBase) : `${host}/v1`,
+    apiKey: env.LOCAL_API_KEY?.trim() || undefined,
     model,
     plannerModel: env.LOCAL_PLANNER_MODEL?.trim() || model,
     runner: runnerRaw === "aider" ? "aider" : "qwen",
@@ -106,6 +120,18 @@ export async function ollamaModels(host: string, fetchFn: typeof fetch = fetch):
   return (body.models ?? []).map((m) => m.name ?? "").filter(Boolean);
 }
 
+/** Model ids the configured server can run: Ollama's `/api/tags`, or `/models` on an OpenAI-compatible server. */
+export async function localModels(cfg: Pick<LocalConfig, "backend" | "host" | "baseUrl" | "apiKey">, fetchFn: typeof fetch = fetch): Promise<string[]> {
+  if (cfg.backend === "ollama") return ollamaModels(cfg.host, fetchFn);
+  const res = await fetchFn(`${cfg.baseUrl}/models`, {
+    headers: cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {},
+    signal: AbortSignal.timeout(3000),
+  });
+  if (!res.ok) throw new Error(`${cfg.baseUrl}/models -> HTTP ${res.status}`);
+  const body = (await res.json()) as { data?: { id?: string }[] };
+  return (body.data ?? []).map((m) => m.id ?? "").filter(Boolean);
+}
+
 /** `qwen3-coder-next` matches `qwen3-coder-next:latest`; an explicit tag must match exactly. */
 export function modelIsPulled(model: string, pulled: string[]): boolean {
   if (pulled.includes(model)) return true;
@@ -119,7 +145,7 @@ export interface LocalCommand {
 }
 
 /**
- * The subprocess sees the login-scrubbed env plus only what the runner needs to reach Ollama.
+ * The subprocess sees the login-scrubbed env plus only what the runner needs to reach the local server.
  * `mcpServers` (qwen-code only) are handed over on the command line for this turn: the QA
  * analyst's browser, never persisted in the checkout.
  */
@@ -129,11 +155,12 @@ export function buildLocalCommand(cfg: LocalConfig, model: string, prompt: strin
   delete base.OPENAI_BASE_URL;
   delete base.CLAUDE_CODE_OAUTH_TOKEN;
   if (cfg.runner === "aider") {
+    const openai = cfg.backend === "openai";
     return {
       file: "aider",
       args: [
         "--model",
-        `ollama_chat/${model}`,
+        openai ? `openai/${model}` : `ollama_chat/${model}`,
         "--message",
         prompt,
         "--yes-always",
@@ -142,7 +169,7 @@ export function buildLocalCommand(cfg: LocalConfig, model: string, prompt: strin
         "--no-show-model-warnings",
         "--no-gitignore",
       ],
-      env: { ...base, OLLAMA_API_BASE: cfg.host },
+      env: openai ? { ...base, OPENAI_API_BASE: cfg.baseUrl, OPENAI_API_KEY: cfg.apiKey ?? "local" } : { ...base, OLLAMA_API_BASE: cfg.host },
     };
   }
   const mcp = extra.mcpServers && Object.keys(extra.mcpServers).length ? ["--mcp-config", qwenMcpConfigArg(extra.mcpServers)] : [];
@@ -154,8 +181,8 @@ export function buildLocalCommand(cfg: LocalConfig, model: string, prompt: strin
     args: ["--auth-type", "openai", "--yolo", "--model", model, "--output-format", "text", ...LOCAL_EXCLUDED_TOOLS.flatMap((t) => ["--exclude-tools", t]), ...mcp, "-p", prompt],
     env: {
       ...base,
-      OPENAI_API_KEY: "ollama",
-      OPENAI_BASE_URL: `${cfg.host}/v1`,
+      OPENAI_API_KEY: cfg.apiKey ?? "ollama",
+      OPENAI_BASE_URL: cfg.baseUrl,
       OPENAI_MODEL: model,
       QWEN_CODE_SUPPRESS_YOLO_WARNING: "1",
     },

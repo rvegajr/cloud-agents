@@ -31,7 +31,7 @@ import {
 } from "./lib/engine-claude.js";
 import { parseAllowlist, parseBotIds, parseChannelRepos } from "./lib/slack-thread.js";
 import { formatVersion, versionInfo } from "./lib/version.js";
-import { localConfigFromEnv, modelIsPulled, ollamaModels } from "./lib/engine-local.js";
+import { localConfigFromEnv, localModels, modelIsPulled } from "./lib/engine-local.js";
 import { formatMaxUsage, loadMaxUsage, policyFromEnv, usageIsCurrent } from "./lib/routing.js";
 import {
   classifyGitHubToken,
@@ -168,7 +168,7 @@ async function checkCursor(): Promise<void> {
   }
 }
 
-/** ENGINE=hybrid|local: the Ollama executor and the Max ceiling it protects. */
+/** ENGINE=hybrid|local: the local executor (Ollama or an OpenAI-compatible server) and the Max ceiling it protects. */
 async function checkLocalEngine(): Promise<void> {
   const engine = parseEngine();
   const wantsLocal = engine === "hybrid" || engine === "local" || Boolean(envVar("LOCAL_MODEL"));
@@ -177,18 +177,30 @@ async function checkLocalEngine(): Promise<void> {
     return;
   }
   const cfg = localConfigFromEnv();
+  const ollama = cfg.backend === "ollama";
+  const where = ollama ? cfg.host : cfg.baseUrl;
   let pulled: string[] | undefined;
   try {
-    pulled = await ollamaModels(cfg.host);
-    add("A", "local", "ollama", "pass", `${cfg.host} (${pulled.length} models)`);
+    pulled = await localModels(cfg);
+    add("A", "local", cfg.backend, "pass", `${where} (${pulled.length} models)`);
   } catch (err) {
-    add("A", "local", "ollama", "fail", `${cfg.host}: ${msg(err)}`, "start it: `ollama serve` (or brew services start ollama); set OLLAMA_HOST for a remote box");
+    add(
+      "A",
+      "local",
+      cfg.backend,
+      "fail",
+      `${where}: ${msg(err)}`,
+      ollama
+        ? "start it: `ollama serve` (or brew services start ollama); set OLLAMA_HOST for a remote box"
+        : "start the server LOCAL_BASE_URL names (oMLX: `omlx serve`); set LOCAL_API_KEY if it was started with --api-key",
+    );
   }
   if (pulled) {
     for (const [label, model] of [["LOCAL_MODEL", cfg.model], ["LOCAL_PLANNER_MODEL", cfg.plannerModel]] as const) {
       if (label === "LOCAL_PLANNER_MODEL" && model === cfg.model) continue;
       if (modelIsPulled(model, pulled)) add("A", "local", label, "pass", model);
-      else add("A", "local", label, "fail", `${model} not pulled`, `ollama pull ${model}`);
+      else if (ollama) add("A", "local", label, "fail", `${model} not pulled`, `ollama pull ${model}`);
+      else add("A", "local", label, "fail", `${model} not served by ${where} (it lists: ${pulled.slice(0, 5).join(", ") || "none"})`, "use an id from GET /v1/models (oMLX: the folder name under ~/.omlx/models)");
     }
   }
   const bin = cfg.runner === "aider" ? "aider" : "qwen";
