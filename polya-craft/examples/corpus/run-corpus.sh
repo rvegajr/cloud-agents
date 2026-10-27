@@ -12,17 +12,21 @@ export WORK_ROOT="${WORK_ROOT:-$HOME/.cache/cloud-agents-work}"
 # check that mounts a file it made must create it under $PWD (the understand prompt says so).
 export TMPDIR="$WORK_ROOT/tmp"; mkdir -p "$TMPDIR"
 export POLYA_ORACLE=1
-SUMMARY=.runs/corpus/summary.tsv
+# A rerun names its own manifest, summary and log folder so it never reads an earlier pass's summary as done.
+MANIFEST="${CORPUS_MANIFEST:-polya-craft/examples/corpus/manifest.json}"
+LOGDIR="${CORPUS_LOGDIR:-.runs/corpus}"; mkdir -p "$LOGDIR"
+SUMMARY="${CORPUS_SUMMARY:-$LOGDIR/summary.tsv}"
 [ -f "$SUMMARY" ] || printf 'name\tstarted\tresult\tagent\tcost\n' > "$SUMMARY"
-python3 -c 'import json;[print(e["name"], e["file"], e.get("create","-"), e.get("repo","-"), e.get("ref","-")) for e in json.load(open("polya-craft/examples/corpus/manifest.json"))]' |
+# Initialised before the pipeline: placed after the `|` it became the pipe's reader and the loop got no input.
 name= file= create= repo= ref=
+python3 -c 'import json;[print(e["name"], e["file"], e.get("create","-"), e.get("repo","-"), e.get("ref","-")) for e in json.load(open("'"$MANIFEST"'"))]' |
 while read -r name file create repo ref; do
   if grep -q "^$name$(printf '\t')" "$SUMMARY"; then echo "skip $name (already in summary)"; continue; fi
   util=$(python3 -c 'import json;print(json.load(open(".runs/max-usage.json")).get("utilization",0))' 2>/dev/null || echo 0)
   if python3 -c "import sys; sys.exit(0 if float('$util') >= 0.75 else 1)"; then
     echo "stop: Max at $util, above the 75 % rule; not starting $name"; printf '%s\t%s\tnot-started (Max %s)\t\t\n' "$name" "$(date -u +%FT%TZ)" "$util" >> "$SUMMARY"; break
   fi
-  LOG=.runs/corpus/$name.log
+  LOG=$LOGDIR/$name.log
   echo "== $name  (Max $util)  $(date -u +%FT%TZ) =="
   if [ "$create" != "-" ]; then
     npm run build-app -- --loop polya --engine hybrid --idea-file "polya-craft/examples/corpus/$file" --create-repo "$create" > "$LOG" 2>&1
