@@ -501,6 +501,10 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     }
     const units = fresh();
     for (const u of units) {
+      // A unit revised in place may be green already: its old Check leaned on a later unit's file, and the Hand's work
+      // meets the narrowed one (iso-week corpus rerun, 2026-10-27). It runs again and its gate decides; a new unit's
+      // Check must start red.
+      if (u.id === revise?.id) continue;
       if (u.command && (await io.runCommand(u.command)).code === 0) return { reason: stopFor, detail: `repair ${u.id}'s Check already passes; it measures nothing` };
     }
     if (revise) {
