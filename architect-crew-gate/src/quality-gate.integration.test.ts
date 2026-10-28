@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -114,6 +114,48 @@ test("runQualityGate reads QUALITY.md: a failing contract test command fails the
     // QUALITY.md itself was modified this turn: that is an ownership violation by design, so filter it out to check the bar
     assert.equal(ok.findings.find((f) => f.rule === "quality-bar")?.ok, true, JSON.stringify(ok.findings));
     assert.ok(ok.findings.some((f) => f.rule === "ownership" && !f.ok), "editing QUALITY.md is architect-only");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runQualityGate vacuous-suite probe stubs a Python src/, and skips a src/ it cannot stub instead of failing it", async () => {
+  // dedupe-py corpus rerun, 2026-10-27: a Python src/ stubbed 0 files, pytest passed, and the finish check failed.
+  const dir = mkdtempSync(join(tmpdir(), "gate-fixture-py-"));
+  const git = (args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "ignore" });
+  const commit = (m: string) => git(["-c", "user.email=fixture@test", "-c", "user.name=fixture", "commit", "-q", "--allow-empty", "-m", m]);
+  const quality = (test: string) => writeFileSync(join(dir, "QUALITY.md"), `\`\`\`json quality\n{ "bar": { "test": "${test}" }, "hygiene_never_tracked": ["__pycache__/"] }\n\`\`\`\n`);
+  try {
+    mkdirSync(join(dir, "src"), { recursive: true });
+    mkdirSync(join(dir, "tests"), { recursive: true });
+    const greet = `def greet(name):\n    return f"hello, {name}"\n`;
+    writeFileSync(join(dir, "src", "greet.py"), greet);
+    writeFileSync(
+      join(dir, "tests", "test_greet.py"),
+      `import os, sys, unittest\nsys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))\nfrom greet import greet\n\nclass T(unittest.TestCase):\n    def test_greet(self):\n        self.assertEqual(greet("world"), "hello, world")\n`,
+    );
+    quality("python3 -m unittest discover -s tests -q");
+    writeFileSync(join(dir, ".gitignore"), "__pycache__/\n");
+    git(["init", "-q", "-b", "main"]);
+    git(["add", "-A"]);
+    commit("initial");
+    commit("crew: no-op turn");
+    const cfg = { ...gateConfigFromEnv({}), startEvery: 0, vacuous: "every" as const };
+    const py = await runQualityGate(dir, cfg, "finish", { exec: defaultExec });
+    const probe = py.findings.find((f) => f.rule === "vacuous-tests");
+    assert.ok(probe?.ok && /correctly fails/.test(probe.detail), JSON.stringify(py.findings, null, 2));
+    assert.equal(readFileSync(join(dir, "src", "greet.py"), "utf8"), greet, "the probe restores what it stubbed");
+
+    // A src/ with nothing the probe can stub is skipped, not failed.
+    rmSync(join(dir, "src", "greet.py"));
+    writeFileSync(join(dir, "src", "greet.rb"), `def greet(name) = "hello, #{name}"\n`);
+    quality("true");
+    git(["add", "-A"]);
+    commit("ruby");
+    commit("crew: no-op turn");
+    const rb = await runQualityGate(dir, cfg, "finish", { exec: defaultExec });
+    const skipped = rb.findings.find((f) => f.rule === "vacuous-tests");
+    assert.ok(skipped?.ok && /skipped/.test(skipped.detail), JSON.stringify(rb.findings, null, 2));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
