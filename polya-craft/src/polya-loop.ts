@@ -462,17 +462,19 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     });
     log(`repair (${stage}): asking the Solver for units from ${nextId}`);
     const beforeSha = io.headSha();
+    // A repair that stops leaves nothing in the repo: PLAN.md lives under the ignored .polya/, and what the Solver ran
+    // or wrote for a repair that never runs is scratch. Left committed, it fails ownership at the next finish check
+    // (dedupe-py corpus rerun, 2026-10-27: an unworkable repair's red test did, on the resume after).
+    const discard = (r: { reason: PolyaStopReason; detail: string }) => {
+      if (io.headSha() !== beforeSha && io.resetTo) io.resetTo(beforeSha);
+      return r;
+    };
     let t = await send(prompt, { mode: "agent" });
     track(t);
-    if (t.status !== "finished") return { reason: "run-failed", detail: "repair turn did not finish" };
+    if (t.status !== "finished") return discard({ reason: "run-failed", detail: "repair turn did not finish" });
     io.commit("repair: PLAN.md");
     const report = lenientJson<{ check_wrong?: boolean; notes?: string }>(t.result);
-    if (report?.check_wrong) {
-      // Nothing of this turn belongs in the repo: PLAN.md lives under the ignored .polya/, and what the Solver ran to
-      // reach its verdict is scratch. Left committed, it fails ownership at the next finish check.
-      if (io.headSha() !== beforeSha && io.resetTo) io.resetTo(beforeSha);
-      return { reason: stopFor, detail: `the Solver says the check is wrong, not the product: ${report.notes ?? ""}`.trim() };
-    }
+    if (report?.check_wrong) return discard({ reason: stopFor, detail: `the Solver says the check is wrong, not the product: ${report.notes ?? ""}`.trim() });
     const accepted = state.units.map((u) => u.id);
     const fresh = () => (readPlan()?.units ?? []).filter((u) => !accepted.includes(u.id) || (revise && u.id === revise.id));
     const gapsOf = (): string[] => {
@@ -494,10 +496,10 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       log(`repair not workable; asking the Solver once more:\n${gaps.join("\n")}`);
       t = await send(`## Repair not workable\n\nFix only these in the repair units, commit, then reply with the same JSON block.\n\n${gaps.join("\n")}\n\n---\n\n${prompt}`, { mode: "agent" });
       track(t);
-      if (t.status !== "finished") return { reason: "run-failed", detail: "repair retry did not finish" };
+      if (t.status !== "finished") return discard({ reason: "run-failed", detail: "repair retry did not finish" });
       io.commit("repair: gap fixes");
       gaps = gapsOf();
-      if (gaps.length) return { reason: stopFor, detail: `repair not workable: ${gaps.join("; ")}` };
+      if (gaps.length) return discard({ reason: stopFor, detail: `repair not workable: ${gaps.join("; ")}` });
     }
     const units = fresh();
     for (const u of units) {
@@ -505,7 +507,7 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       // meets the narrowed one (iso-week corpus rerun, 2026-10-27). It runs again and its gate decides; a new unit's
       // Check must start red.
       if (u.id === revise?.id) continue;
-      if (u.command && (await io.runCommand(u.command)).code === 0) return { reason: stopFor, detail: `repair ${u.id}'s Check already passes; it measures nothing` };
+      if (u.command && (await io.runCommand(u.command)).code === 0) return discard({ reason: stopFor, detail: `repair ${u.id}'s Check already passes; it measures nothing` });
     }
     if (revise) {
       // A revised unit replaces the one that could not pass; it is carried out again below.

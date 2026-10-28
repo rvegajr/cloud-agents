@@ -930,6 +930,33 @@ test("look back (c): what a review turn leaves in the repo is discarded; a repai
   void calls; void calls2;
 });
 
+test("a repair that stops as not workable leaves nothing behind either (dedupe-py corpus rerun: its red test failed ownership on the next resume)", async () => {
+  const failing = () => json({ results: [{ step: 2, d: "D2", passed: false, evidence: "nope" }] });
+  const { io } = makeIO();
+  const resets: string[] = [];
+  io.resetTo = (sha) => resets.push(sha);
+  let beforeRepair = "";
+  const { send } = makeSend({
+    walk: failing,
+    devise: (p) => {
+      if (!/^# Devise a repair/m.test(p)) return defaultDevise(p);
+      if (!beforeRepair) {
+        // The first repair turn writes a red test and the engine commits it; the retry carries the same prompt.
+        beforeRepair = io.headSha();
+        currentIO!.writeFile("tests/test_positive.py", "def test_red(): assert False\n");
+        currentIO!.commit("hybrid: devise turn");
+      }
+      const plan = currentIO!.readFile(".polya/PLAN.md")!.split("\n\n## Repairs")[0];
+      currentIO!.writeFile(".polya/PLAN.md", `${plan}\n\n## Repairs\n\n## U3: repair\nServes:   D2\nProduces: x\nGiven:    y\nDo:       1. Choose the best fix.\nTouches:  src/app.js\nCheck:    \`node --test test/notfound.test.js\`\nDepends:  none\nNot:      z\n`);
+      return json({ units: ["U3"] });
+    },
+  });
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "verify-failed");
+  assert.match(out.stopDetail!, /repair not workable/);
+  assert.deepEqual(resets, [beforeRepair]);
+});
+
 test("understand: a mechanical done-check that cannot run is a gap, not an unmet check (live snippet-vault-export, D8)", async () => {
   const { io } = makeIO({ commands: { "node --test test/notfound.test.js": 127 } });
   const { send, sent } = makeSend({});
