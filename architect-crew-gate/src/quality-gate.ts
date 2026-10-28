@@ -514,15 +514,19 @@ async function runVacuousProbe(
   const srcRoot = join(cwd, "src");
   if (!existsSync(srcRoot)) return [{ rule: "vacuous-tests", ok: true, detail: "no src/ directory; skipped" }];
 
+  const files = listFilesRecursive(srcRoot).filter((f) => /\.(js|ts|mjs|cjs|py)$/.test(f));
+  // Nothing stubbed proves nothing: a src/ in another language is skipped, not failed (dedupe-py corpus rerun,
+  // 2026-10-27: before Python was stubbed, 0 files were, pytest passed, and the finish check called the suite vacuous).
+  if (!files.length) return [{ rule: "vacuous-tests", ok: true, detail: "no JS, TS or Python file under src/; skipped" }];
   const backup = mkdtempSync(join(tmpdir(), "gate-src-backup-"));
-  const files = listFilesRecursive(srcRoot).filter((f) => /\.(js|ts|mjs|cjs)$/.test(f));
   try {
     for (const f of files) {
       const rel = relative(srcRoot, f);
       const dest = join(backup, rel);
       mkdirSync(dirname(dest), { recursive: true });
       copyFileSync(f, dest);
-      writeFileSync(f, `throw new Error("gate-stub: ${rel} stubbed by the vacuous-tests probe");\n`);
+      const stub = f.endsWith(".py") ? `raise RuntimeError("gate-stub: ${rel} stubbed by the vacuous-tests probe")` : `throw new Error("gate-stub: ${rel} stubbed by the vacuous-tests probe");`;
+      writeFileSync(f, `${stub}\n`);
     }
     log?.(`gate: vacuous-suite probe (${files.length} files stubbed): ${testCmd}`);
     const out = await run(exec, cwd, shCmd(testCmd), Math.max(30_000, cfg.commandTimeoutMs / 2));

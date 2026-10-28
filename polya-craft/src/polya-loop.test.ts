@@ -810,6 +810,27 @@ test("a unit that cannot pass its own Check goes back to the Solver once, and th
   assert.deepEqual(calls.gate.find((g) => g.allowed?.includes("public/index.html"))!.allowed, ["src/app.js", "public/index.html"]);
 });
 
+test("a unit revised in place whose narrowed Check is already green runs again; it does not stop as measuring nothing", async () => {
+  // iso-week corpus rerun, 2026-10-27: U1's Check also ran a later unit's README test, so the Hand's code passed its own
+  // test but never the gate; the Solver narrowed U1's Check to that test, which was green on the work already done.
+  const failing = PLAN_MD.replace("Check:    `node --test test/notfound.test.js`", "Check:    `node --test test/impossible.test.js`");
+  const { io } = makeIO({ files: { ".polya/PLAN.md": failing, "test/impossible.test.js": "test('red', ...)" }, gates: [fail("quality-bar"), fail("quality-bar"), fail("ownership")] });
+  const original = io.runCommand;
+  io.runCommand = async (command, cwd) => (command.includes("impossible") ? { code: 1, output: "1 failing: README names npm ci" } : original(command, cwd));
+  const { send, sent } = makeSend({
+    devise: (p) => {
+      if (!/^# Devise a repair/m.test(p)) return defaultDevise(p);
+      currentIO!.writeFile(".polya/PLAN.md", PLAN_MD);
+      return json({ units: ["U1"] });
+    },
+  });
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null });
+  assert.equal(out.stopReason, "complete", out.stopDetail);
+  assert.deepEqual(out.replanned, ["U1"]);
+  assert.equal(out.unitRecords.find((r) => r.id === "U1")!.passed, true);
+  assert.equal(sent.filter((s) => /# Carry out: unit U1/.test(s.prompt)).length, 4);
+});
+
 test("request: the understand prompt carries the requester's J/W/M lines, and a PROBLEM.md without dispositions gets the targeted retry", async () => {
   const request = "# Request: 404\n\n## I will judge it by\n- I curl /nope and see 404.\n\n## Must not change\n- `src/config.js`\n";
   const { io } = makeIO();
