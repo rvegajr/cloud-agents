@@ -23,21 +23,21 @@ Tags:     stage:devise
 When:     a check already exists for a level (an inspection, a CI job, a rubric)
 Lesson:   adopt it verbatim as the level check and name the units that close it; do not write a parallel one
 Evidence: polya-craft design; the county inspection schedule in examples/house.md
-Status:   confirmed(5)
+Status:   confirmed(6)
 
 ## L-2026-09-19-01
 Tags:     kind:repair domain:software stage:understand routing http
 When:     the problem is about which paths an HTTP app answers, and the done-checks curl the paths the requester named
 Lesson:   add a done-check for malformed paths (`//`, `%2f`, a 2 KB path, a wrong method): the app must answer, never exit; a request that kills the process is the defect the requester did not name
 Evidence: polya-live-404, both loops' fixes passed every check and review; a blind reviewer sent GET // and the process died on `new URL(req.url, …)`, a line neither loop touched
-Status:   confirmed(16)
+Status:   confirmed(21)
 
 ## L-2026-09-19-02
 Tags:     kind:build stage:devise runtime:node
 When:     a build declares a minimum Node engine version and then uses a `node:` core module that stabilized (dropped its experimental CLI flag) partway through that major version's release line
 Lesson:   Pin `engines.node` to the exact version where the used core module works unflagged, not the version where the module first appeared behind a flag, and verify by actually installing that minimum version rather than trusting whatever Node happens to be on the build/CI machine.
 Evidence: package.json engines >=22.5.0 and README both cite 22.5 as sufficient for `node:sqlite`, but the flag requirement wasn't dropped until later in the 22.x/23.x line; every check in this build (including the orchestrator's own gate) ran on Node 26.7 and so never exercised the stated minimum.
-Status:   confirmed(9)
+Status:   confirmed(10)
 
 ## L-2026-09-19-03
 Tags:     kind:build stage:devise stage:carry-out check
@@ -58,7 +58,7 @@ Tags:     kind:build stage:devise
 When:     A Condition names page failure states (a stale response, a failed save) and the page wires them in one start() function.
 Lesson:   Test start() in Node against a fake window whose fetch the test controls, and prove the test by mutating the guard, because tests of exported helpers stay green when the wiring breaks.
 Evidence: Deleting `if (!latest.isLatest(ticket)) return;` from public/app.js, or replacing the save-error display with resetForm(), left npm test at 60 of 60 passing. Only the Verifier's walk and a CDP run at look back exercised those paths.
-Status:   confirmed(4)
+Status:   confirmed(6)
 
 ## L-2026-09-19-06
 Tags:     kind:build stage:understand
@@ -72,21 +72,21 @@ Tags:     kind:build stage:understand done-check
 When:     the request's example names the command the requester will type (`npm run dev`, a CLI invocation)
 Lesson:   put that exact command in a done-check or an outer-test step; a sibling command that shares its code path (`npm start`) does not prove it
 Evidence: snippet-vault (Fable): the idea says "I run `npm run dev`"; every D and outer step used `npm start`; `npm run dev` was first run at the review.
-Status:   confirmed(10)
+Status:   confirmed(16)
 
 ## L-2026-09-19-09
 Tags:     kind:build stage:devise storage
 When:     a plan rejects an option because its side files would not be ignored by git
 Lesson:   check the option it keeps the same way: SQLite's default journal writes `<db>-journal` beside the file, which a `*.db` ignore rule does not match
 Evidence: snippet-vault (Fable): PLAN.md rejected WAL for its -wal and -shm files; the default journal mode left snippets.db-journal unignored.
-Status:   confirmed(5)
+Status:   confirmed(6)
 
 ## L-2026-09-19-09
 Tags:     kind:build stage:carry-out
 When:     a repair unit's Check needs a new test file to reproduce a bug that has no existing test
 Lesson:   Widen a repair unit's Touches to allow one new test file when no existing test reproduces the defect; do not let an ownership/scope gate's 'out of scope' flag on that new file trigger deleting the regression test in favor of an inline, unpersisted script.
 Evidence: commit 9cb4510 dropped a devised U8 that would have deleted test/app-save-network-failure.test.js (added by U7) solely because the finish check's ownership gate did not have that path pre-listed; the file survived only because an operator intervened.
-Status:   confirmed(5)
+Status:   confirmed(6)
 
 ## L-2026-09-19-10
 Tags:     kind:build stage:devise
@@ -107,28 +107,28 @@ Tags:     kind:build stage:verify
 When:     a done-check is marked outer:false (requires browser/UI observation, not just an HTTP check)
 Lesson:   Record verifier evidence that is specific to what that check actually requires observing in a browser; never let one check's evidence text double as another's, even when both happen to pass.
 Evidence: D1's walk text ('POST ... GET ... PUT ... DELETE ... 404') is D2's CRUD-API check verbatim, not a description of live-narrowing search or a Copy-button click, even though D8/D9 in the same walk do cite distinct browser-observed detail.
-Status:   confirmed(5)
+Status:   confirmed(10)
 
 ## L-2026-09-20-03
 Tags:     kind:build stage:verify
 When:     a done-check's Check names an exact version/config to pin and test (e.g. engines.node minimum via nvm)
 Lesson:   Actually execute under the pinned version and record that run's output as evidence; do not substitute a check that the build machine's version merely satisfies the declared range.
 Evidence: D5 was marked met using only Node 26.7.0 (the build machine); pinning to the declared minimum (24.0.0) via Docker had never been run until this review, though it did pass once actually tried.
-Status:   confirmed(6)
+Status:   confirmed(10)
 
 ## L-2026-09-20-04
 Tags:     kind:build stage:verify
 When:     a done-check's shell command changes directory (cd) away from the project root before invoking the built command
 Lesson:   Execute the check's cd verbatim from a genuinely clean state (no leftover npx/package caches) before recording it met — do not approximate by running the underlying command from the project root instead.
 Evidence: D3 was reported 'met' with the correct single-line stderr message; run with its own `cd "$d"` honored and npx cache cleared, it produces an 8-line npm E404 block instead.
-Status:   confirmed(3)
+Status:   confirmed(4)
 
 ## L-2026-09-20-05
 Tags:     kind:build stage:devise
 When:     a CLI's bin/script name must be invocable via `npx <name>` from any working directory, not just from inside its own repo
 Lesson:   Treat 'installable with npm ci' and 'resolvable by npx from an arbitrary cwd' as two different requirements — the latter needs an explicit global link/install step, since npm only self-recognizes a package's own bin when cwd is inside that package.
 Evidence: npx jsoncount succeeds from the project root (npm's cwd-scoped self-recognition) but 404s against the registry from any other directory, exactly the case D3's check and the problem's external-Makefile Given both depend on.
-Status:   retired — pointed at a global link, which the reviewer rightly refused; the rule is the reverse: a check invokes an unpublished CLI from the repo root after the bar's install (prompts/understand.md)
+Status:   retired
 
 ## L-2026-09-20-06
 Tags:     kind:build stage:verify domain:cli-packaging
@@ -149,7 +149,7 @@ Tags:     kind:build stage:verify
 When:     a verify/look-back turn runs ad-hoc shell check commands (redirecting to o1.txt/e1.txt-style files) directly in the repo working directory
 Lesson:   Redirect check-command stdout/stderr scratch files to a dedicated scratch/tmp directory outside the repo, never to the repo root, so a forgotten `rm` cannot leave stray files for git to pick up.
 Evidence: commit d895288 added e1.txt, e2.txt, err.log, err.txt, o1.txt, o2.txt to the repo root during a look-back turn; commit 53e8dba (orchestrator) had to revert them as a Touches violation.
-Status:   retired — answered in the loop: a review turn's leftovers are discarded, never committed (2026-09-20)
+Status:   retired
 
 ## L-2026-09-20-09
 Tags:     kind:build stage:devise domain:recursion
@@ -163,14 +163,14 @@ Tags:     kind:build stage:devise
 When:     a Condition states an output invariant unconditionally (e.g. 'output is ASCII-only, never a leading/trailing/doubled hyphen') and the CLI has more than one argument that can shape the final output
 Lesson:   Write at least one done-check that exercises every argument capable of contributing to output (here, --suffix with an empty, non-ASCII, or hyphen-laden value), not only the title path, before trusting that the invariant holds everywhere.
 Evidence: D1-D8 only ever pass --suffix the clean value '2026-09'; `npx slugify --suffix '' 'Hello'` yields 'hello-' and `--suffix 'Café!' 'Hello'` yields 'hello-Café!', both exit 0, both violating the stated Condition, and both invisible to every existing done-check.
-Status:   confirmed(2)
+Status:   confirmed(3)
 
 ## L-2026-09-21-01
 Tags:     kind:build stage:devise source:hand-question
 When:     cron-next
 Lesson:   Unit U2 was not workable; the Hand asked: U1's Check (`npm ci && npm run build && ! npm test`) was written to prove a transient red state at U1's own turn, not a lasting invariant — but the orchestrator's quality gate re-runs it against the final repo state, after U2 correctly makes the suite green. A working implementation and a passing `! npm test` are mutually exclusive by construction; nothing in index.ts (U2's only Touches) can satisfy both. Should U1's Check be retired/rescoped in PLAN.md now that U2 has landed, since its job (proving redness before implementation) is already done and recorded?. Decide it in the unit next time.
 Evidence: cron-next, U2
-Status:   retired — answered by plan-lint: a Check that asserts the suite is red is rejected at Devise (2026-09-21)
+Status:   retired
 
 ## L-2026-09-21-02
 Tags:     kind:build stage:devise
@@ -191,7 +191,7 @@ Tags:     kind:repair stage:understand
 When:     2026-09-20
 Lesson:   When a done-check counts test results (e.g. `pass N`), never hardcode the exact current total if the same problem's Given/lessons call for adding a new test under an unlocked file — use `fail 0` plus a presence check for the new assertion instead, or the check itself forecloses the coverage it was meant to invite.
 Evidence: D3's check text `grep -q "pass 11"` combined with the Given note's invitation to add a deep-nesting test to test/count.test.js (via L-2026-09-19-09) are mutually exclusive; the carry-out satisfied D3 literally and left the depth-recursion fix with no CI-enforced regression test.
-Status:   candidate
+Status:   confirmed(1)
 
 ## L-2026-09-21-05
 Tags:     kind:build stage:devise topic:keyboard-ui
@@ -233,7 +233,7 @@ Tags:     kind:build stage:devise
 When:     a Devise turn writes new test files to serve as a cycle's done-checks
 Lesson:   Wire every newly-written test file into the project's actual Test command (the one named in the Quality bar) in the same cycle, and verify by grepping npm test's own output for the new tests' names — not just its exit code — since a stale test script exits 0 whether or not the new files ran.
 Evidence: test/db-import.test.ts, test/export-import.test.ts, test/export-import-ui.test.ts (12 tests, including the D7 stub test Lesson L-2026-09-19-10 required) exist, pass when run directly, and are absent from package.json's `test` script; `npm test` reports 5/5 pass having never touched export/import code.
-Status:   confirmed(1) — promoted to prompts/devise.md as a rule, 2026-09-21
+Status:   confirmed(1)
 
 ## L-2026-09-21-11
 Tags:     kind:build stage:carry-out
@@ -261,4 +261,88 @@ Tags:     kind:build stage:devise area:keyboard
 When:     a done-check's own text says 'never leak, whichever order', but a global keydown router has N guarded branches
 Lesson:   enumerate every branch's guard explicitly in the Check text and test each key individually against 'input already focused', not just the one or two orderings the sample walkthrough happens to use.
 Evidence: D10 tested Arrow-before-click-into-input and Space/Delete-while-focused, but never plain Arrow-while-focused; that gap let app.js ship with isTypingInInput present on 4 of 5 relevant branches and missing on the 5th (plain ArrowUp/ArrowDown), reproduced live as a focus-stealing, keystroke-dropping bug.
+Status:   candidate
+
+## L-2026-10-27-01
+Tags:     kind:build stage:verify
+When:     a done-check's Check command drives a browser automation tool (Playwright/Puppeteer/etc.) whose runtime browser binaries are not npm dependencies
+Lesson:   Provision the browser binary in a postinstall script tied to npm ci/install, not a pretest script tied to npm test — Check commands in PROBLEM.md often invoke the test runner directly (npx playwright test -g "D1:") and bypass npm's test-script lifecycle hooks entirely.
+Evidence: Isolating PLAYWRIGHT_BROWSERS_PATH to an empty directory and rerunning npx playwright test e2e/packing-list.spec.js -g "D1:" fails with 'Executable doesn't exist'; a shared ~/Library/Caches/ms-playwright on this build machine masked the gap for every prior check in this run.
+Status:   candidate
+
+## L-2026-10-27-02
+Tags:     kind:build stage:carry-out
+When:     a quality-gate/linter flags a standard language idiom (e.g. catch(e){ return [] } around a browser storage API) as a 'swallowed error'
+Lesson:   Treat a quality-gate false positive on an idiomatic pattern as a judgment call to override with a note, not a signal to re-attempt the unit — re-attempting without a code change just burns a cycle.
+Evidence: U3 took 2 attempts; its own notes say the files were already correct in the first attempt's commit and no code changed before the second attempt passed.
+Status:   candidate
+
+## L-2026-10-27-03
+Tags:     kind:change stage:report
+When:     2026-10-27, Snippet Vault export/import review
+Lesson:   Keep a single lessons-consulted ledger per run; if PROBLEM.md records a lesson as 'applied as D6', the report's own end-of-run lessons summary must not separately claim 'not applicable' for the same id.
+Evidence: PROBLEM.md's 'Lessons consulted' section marks L-2026-09-19-01/08/05/18-03 etc. as 'applied as' specific done-checks, while the report's 'Lessons that were consulted at Understand' section marks every one of the same ids 'not applicable' — a reader of only the latter would wrongly conclude no lesson was used.
+Status:   candidate
+
+## L-2026-10-27-04
+Tags:     kind:build stage:carry-out bounded-search
+When:     A function returns `count` results from a loop guarded by a fixed iteration/time cap against an unsatisfiable input
+Lesson:   Reset or scale that cap per result found, not once for the whole call, or a legitimately satisfiable but infrequent schedule will falsely throw 'unsatisfiable' once count needs more matches than the shared horizon can reach.
+Evidence: next('0 0 1 1 *', 2026-09-20, 15) and next('0 0 29 2 *', 2026-09-20, 4) both throw 'cannot be satisfied' on an otherwise-correct build, though both are genuinely satisfiable (confirmed on a fresh clone/build).
+Status:   candidate
+
+## L-2026-10-27-05
+Tags:     kind:build stage:devise done-check-coverage
+When:     A Done-check exercises a function with a `count`-like parameter alongside an input whose period/frequency varies (e.g. a cron expression)
+Lesson:   Vary count upward against the sparsest documented period, not just against the fastest one, or a shared-budget bug in a bounded-search guard will never be exercised.
+Evidence: D1/D2 vary count (3, 10) only on sub-daily expressions; D3/D7 use the sparse yearly/leap-day expressions but only ever at count=1, so neither D ever reaches the combination that breaks the guard.
+Status:   candidate
+
+## L-2026-10-28-01
+Tags:     kind:build stage:verify
+When:     a Done-check bind-mounts $PWD into Docker (e.g. D8's `docker run -v "$PWD":/app ...`)
+Lesson:   Run it from a fresh clone placed inside a path Docker Desktop's file-sharing allowlist actually covers (e.g. under $HOME), never an arbitrary mktemp/TMPDIR path.
+Evidence: Cloning to /var/folders/.../T/tmp.../repo made the mount show an empty /app (ls: only `.`/`..`), so `npm ci` failed with a misleading `lockfileVersion >= 1` error and D8 read FAIL; re-cloning under /Users/admin/.../_review-clone/repo and rerunning the identical D8 command passed.
+Status:   candidate
+
+## L-2026-10-28-02
+Tags:     kind:build stage:devise
+When:     a 'drop non-ASCII, never transliterate' rule is written as a byte-range strip with no normalization step
+Lesson:   Specify whether input is normalized to one Unicode form before the drop, since a decomposed accented letter and its precomposed equivalent are the same rendered title but can silently produce different output.
+Evidence: slugify('Caf\u00e9') (NFC) -> 'caf'; slugify('Caf\u0065\u0301') (NFD, e + combining acute U+0301) -> 'cafe' — no D1–D10 check catches this since all accented-title checks use NFC source literals.
+Status:   candidate
+
+## L-2026-10-28-03
+Tags:     kind:build stage:devise
+When:     an Unknown item names a formal spec by name (here, item 4's 'RFC4180-style') as the correctness bar for parsing
+Lesson:   Write at least one done-check against that spec's own stated edge cases (RFC4180's CRLF line terminator, embedded newline in a quoted field), not only the one example the request happened to give (a quoted comma); a check built with bare-\n fixtures throughout can pass by the letter while the implementation fails completely on the realistic dialect the spec actually names.
+Evidence: A 2-row CRLF-terminated CSV fed to the finished ledger-report (built and verified against all 8 LF-only done-checks) produced zero output lines and reported both data rows as malformed, confirmed via a fresh repro run in this review.
+Status:   candidate
+
+## L-2026-10-28-04
+Tags:     kind:build stage:devise topic:durability
+When:     a unit's Given requires state to survive a process restart via a file/db written on every mutation
+Lesson:   Make the persistence write atomic (temp file + rename) and make the load-time parse fail soft, not just correct on the happy path of a clean kill.
+Evidence: Hand-corrupting queue-state.json before npm start crashes src/store.js's unguarded JSON.parse and bricks every subsequent start; none of D1-D8 exercise a crash mid-write, so this shipped undetected by the mechanical checks.
+Status:   candidate
+
+## L-2026-10-28-05
+Tags:     kind:build stage:carry-out topic:process
+When:     a runtime-state file the app itself writes is already tracked in git before any unit's Touches are evaluated
+Lesson:   git rm --cached it the first time a turn's diff is caught dirtying it, instead of reverting its content on each subsequent turn.
+Evidence: queue-state.json was tracked from the seed commit onward, got reverted by the orchestrator at cc8423f and again (more broadly) at 1ca459e, and was only properly untracked two commits later at ffe0633.
+Status:   candidate
+
+## L-2026-10-28-06
+Tags:     kind:build stage:verify
+When:     2026-10-27
+Lesson:   When a Hand (or an automated repair pass) adds a test explicitly labeled as fixing a named flaw (e.g. '[vacuous-tests]'), a later revert of that commit must carry a reason in the commit message or PLAN/LOOKBACK record — a silent revert of a self-diagnosed test-quality fix is itself a defect the Verifier has no way to catch from the final diff alone.
+Evidence: Commit 7669d4e added tests/test_dedupe_positive_detection.py with the docstring 'Repair for [vacuous-tests]: test_d4 and test_d6 ... only assert absence-of-bad-behaviour ... and never assert that a real duplicate is actually found'; commit acbdea4 reverted it one step later with only 'This reverts commit 7669d4e', no rationale in the commit, PLAN.md, or LOOKBACK.md.
+Status:   candidate
+
+## L-2026-10-28-07
+Tags:     kind:build stage:devise
+When:     2026-10-27
+Lesson:   A Done-check whose own wording is purely negative ('X is never leaked', 'Y completes in N seconds') should still require a check that plants the positive case it's protecting ('X' containing a real duplicate to leak, 'Y' containing files that would exercise the pre-filter) — otherwise a scanner that finds nothing at all satisfies it as well as a correct one.
+Evidence: D3's and D5's own Done-check text (10k-file speed; symlink-boundary non-leak) is satisfiable by construction with zero duplicates present in either fixture; confirmed empirically against a 6-line no-op stub.
 Status:   candidate
