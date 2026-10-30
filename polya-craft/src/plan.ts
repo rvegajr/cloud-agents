@@ -204,6 +204,9 @@ export function commandOf(check: string | undefined): string | undefined {
   if (!check) return undefined;
   // Why it is red today is not the check.
   check = check.replace(/\s*(?:—|–|--|-)?\s*\b[Nn]ow:[\s\S]*$/, "");
+  // Nor is the old Check that Devise keeps after a changed one as `(was: …)`; when the old Check was a command, the
+  // note holds a second one and the Check reads as prose (oMLX corpus run, jsoncount-depth D3, 2026-10-28).
+  check = check.replace(/\s*\(was:[\s\S]*$/i, "");
   // A placeholder is `<name>` in the command itself; inside a quoted string it is text the command looks for
   // (live kv-api, 2026-09-20: `grep -q "/kv/<key>" README.md`).
   const unquoted = (c: string) => c.replace(/(["'])(?:\\.|(?!\1).)*\1/g, "");
