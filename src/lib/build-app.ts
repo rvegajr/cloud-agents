@@ -97,6 +97,12 @@ export interface RunBuildAppOpts {
   maxMilestones?: number;
   /** polya loop: units per plan (default 8). */
   maxUnits?: number;
+  /** polya loop, new run: stop at `plan-ready` once the plan passes its checks, until `approve`. */
+  planGate?: boolean;
+  /** polya loop, resume: build the plan a `plan-ready` run is waiting with. */
+  approve?: boolean;
+  /** polya loop, resume: a note for the next Understand or Devise turn (a re-plan, or an answer to what stopped Understand). */
+  noteFile?: string;
   apiKey?: string;
   stateDir?: string;
   log?: (line: string) => void;
@@ -179,9 +185,46 @@ export function createGithubRepo(name: string): string {
   return url;
 }
 
+/** The router reads a prompt's first 8000 characters for its kind; a note stays well inside that. */
+export const MAX_REQUESTER_NOTE = 4000;
+
+/** The plan-gate flags among themselves, before anything is cloned or charged. */
+export function planGateUsageError(opts: Pick<RunBuildAppOpts, "planGate" | "approve" | "noteFile" | "resume">, loop: string): string | undefined {
+  if (opts.planGate && opts.resume) return "usage: --plan-gate starts a new run; a resumed run keeps the gate it started with";
+  if (opts.planGate && loop !== "polya") return "usage: --plan-gate needs --loop polya";
+  if (opts.approve && opts.noteFile) return "usage: --approve and --note-file do not go together: a note re-plans, and the new plan waits for its own approval";
+  if ((opts.approve || opts.noteFile) && !opts.resume) return `usage: ${opts.approve ? "--approve" : "--note-file"} needs --resume <id>`;
+  return undefined;
+}
+
+/** The plan-gate flags against the run they resume, before its workspace is touched. */
+export function planGateResumeError(record: Pick<BuildRecord, "agentId" | "loop" | "polya">, opts: Pick<RunBuildAppOpts, "approve" | "noteFile">): string | undefined {
+  if (!opts.approve && !opts.noteFile) return undefined;
+  const flag = opts.approve ? "--approve" : "--note-file";
+  if (record.loop !== "polya" || !record.polya) return `${flag}: ${record.agentId} is not a polya run`;
+  if (opts.approve && record.polya.stopReason !== "plan-ready") return `--approve: ${record.agentId} is not waiting for approval (${record.polya.stopReason ?? record.polya.phase})`;
+  const at = polyaResumePhase(record.polya);
+  if (opts.noteFile && at !== "understand" && at !== "devise") return `--note-file: ${record.agentId} resumes at ${at}; a note reaches only Understand or Devise (a run stopped at plan-ready, understanding-incomplete, plan-not-workable or unit-not-workable)`;
+  return undefined;
+}
+
+/** A requester's note from `--note-file`: trimmed, not empty, not longer than MAX_REQUESTER_NOTE. */
+export function readRequesterNote(path: string, read: (p: string) => string = (p) => readFileSync(resolve(process.cwd(), p), "utf8")): { note: string } | { error: string } {
+  let note: string;
+  try {
+    note = read(path).trim();
+  } catch {
+    return { error: `usage: --note-file ${path}: cannot read it` };
+  }
+  if (!note) return { error: `usage: --note-file ${path} is empty` };
+  if (note.length > MAX_REQUESTER_NOTE) return { error: `usage: --note-file ${path} is ${note.length} characters; keep it under ${MAX_REQUESTER_NOTE}` };
+  return { note };
+}
+
 export function exitCodeForStopReason(reason: StopReason | BlueprintStopReason | PolyaStopReason | "startup-failed"): number {
   if (reason === "complete") return 0;
-  if (reason === "blocked") return 3;
+  // Both wait for a person, not for a fix.
+  if (reason === "blocked" || reason === "plan-ready") return 3;
   if (reason === "run-failed" || reason === "startup-failed") return 2;
   return 4;
 }
@@ -203,7 +246,16 @@ export function printBuildResult(result: BuildAppResult, log: (line: string) => 
     if (p.review) log(`review:       ${p.review.verdict}, ${p.review.findings.length} finding(s)`);
     if (p.lookback) log(`look back:    LOOKBACK.md written; ${p.lookback.lessons} lesson(s) appended, ${p.lookback.confirmed} confirmed`);
     if (result.prUrl) log(`PR: ${result.prUrl}`);
-    if (result.agentId && result.stopReason !== "complete") log(`\nResume with: npm run build-app -- --resume ${result.agentId}`);
+    if (result.agentId && result.stopReason === "plan-ready") {
+      log(`\nThe plan is ready: .runs/polya-${result.agentId}/PLAN.md, and what done means in PROBLEM.md beside it.`);
+      log(`Build it:   npm run build-app -- --resume ${result.agentId} --approve`);
+      log(`Change it:  npm run build-app -- --resume ${result.agentId} --note-file <note.md>`);
+    } else if (result.agentId && result.stopReason !== "complete") {
+      log(`\nResume with: npm run build-app -- --resume ${result.agentId}`);
+      if (p.stopReason && ["understanding-incomplete", "plan-not-workable", "unit-not-workable"].includes(p.stopReason)) {
+        log(`Or answer it: npm run build-app -- --resume ${result.agentId} --note-file <note.md>`);
+      }
+    }
     log(`\n${result.costClose ?? "COST\n  this run:     unknown"}`);
     return;
   }
@@ -284,6 +336,14 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
   const maxMilestones = opts.maxMilestones ?? 7;
   const engine = parseEngine(opts.engine);
   const loop = parseLoopKind(opts.loop);
+  const gateError = planGateUsageError(opts, loop);
+  if (gateError) return { engine, stopReason: "startup-failed", error: gateError };
+  let requesterNote: string | undefined;
+  if (opts.noteFile) {
+    const r = readRequesterNote(opts.noteFile);
+    if ("error" in r) return { engine, stopReason: "startup-failed", error: r.error };
+    requesterNote = r.note;
+  }
   const cursorApp = opts.cursorApp ?? "warn";
   const createRepoFn = opts.createRepoFn ?? createGithubRepo;
   const grantFn =
@@ -332,6 +392,8 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
   try {
     if (opts.resume) {
       record = loadBuildRecord(opts.resume, stateDir);
+      const resumeError = planGateResumeError(record, opts);
+      if (resumeError) return { agentId: record.agentId, repo: record.repo, ref: record.ref, engine, stopReason: "startup-failed", error: resumeError };
       if (record.state.phase === "stopped") record.state.phase = record.state.spec ? "iterate" : "spec";
       lastPr = record.prUrl;
       const resumeEngine: EngineName = isClaudeAgentId(record.agentId)
@@ -412,7 +474,7 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
           loop,
           state: { phase: "spec", iteration: 0, runIds: [], history: [] },
           blueprint: loop === "blueprint" ? initialBlueprintState() : undefined,
-          polya: loop === "polya" ? initialPolyaState() : undefined,
+          polya: loop === "polya" ? { ...initialPolyaState(), ...(opts.planGate ? { planGate: true } : {}) } : undefined,
           updatedAt: new Date().toISOString(),
         };
         saveBuildRecord(record, stateDir);
@@ -525,6 +587,11 @@ export async function runBuildApp(opts: RunBuildAppOpts): Promise<BuildAppResult
         initialState.phase = polyaResumePhase(initialState);
         // A resumed look back starts its verify attempts over; the attempts that stopped the run are on record.
         if (initialState.phase === "look-back") initialState.verifyAttempts = 0;
+        if (opts.approve) {
+          initialState.planGate = false;
+          log("plan approved: re-checking it, then building it");
+        }
+        if (requesterNote) initialState.requesterNote = requesterNote;
       }
       const ps = await runPolyaLoop(
         send,

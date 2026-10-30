@@ -22,6 +22,11 @@
  * → gated units → look back (checks, verifier, review, LOOKBACK.md + LESSONS.md).
  * `--max-units N` caps a polya plan (default 8).
  *
+ * Ask before building (polya): `--plan-gate` stops a new run at `plan-ready` once its
+ * plan passes the checks (exit 3). Then `--resume <id> --approve` builds it, or
+ * `--resume <id> --note-file note.md` plans again with the note and stops there again.
+ * A note also answers a run stopped at Understand or Devise.
+ *
  * For many ideas in parallel, use `npm run build-farm` (Cursor only).
  */
 import { loadEnv, flags } from "./lib/env.js";
@@ -46,6 +51,9 @@ try {
     maxIterations: args["max-iterations"] ? Number(args["max-iterations"]) : undefined,
     maxMilestones: args["max-milestones"] ? Number(args["max-milestones"]) : undefined,
     maxUnits: args["max-units"] ? Number(args["max-units"]) : undefined,
+    planGate: args["plan-gate"] === "true",
+    approve: args.approve === "true",
+    noteFile: args["note-file"],
   });
   if (result.stopReason === "startup-failed" && result.error?.startsWith("usage:")) {
     console.error(result.error);

@@ -48,6 +48,9 @@ two sections are the instructions.
 npm run build-app -- --loop polya --engine hybrid --idea "<problem>" --repo <url>      # Max: Solver; local: Hand, Verifier
 npm run build-app -- --loop polya --engine local  --idea-file ideas/x.md --create-repo my-app
 npm run build-app -- --resume cc-…                                                    # restarts at the stage that stopped
+npm run build-app -- --loop polya --engine hybrid --plan-gate --idea-file ideas/x.md --repo <url>  # stops at plan-ready (exit 3)
+npm run build-app -- --resume cc-… --approve                                          # builds the plan it stopped with
+npm run build-app -- --resume cc-… --note-file note.md                                # plans again with the note, stops again
 npm test && npx tsc --noEmit
 ```
 
@@ -55,6 +58,15 @@ Env: `POLYA_LESSONS_FILE` (the ledger; default `polya-craft/LESSONS.md`),
 `LOCAL_GATE*` (the borrowed gate), `HYBRID_QA_FALLBACK` (the Verifier's
 fallback tier), `QA_BROWSER` (Playwright for any turn that names a page, on
 by default), `--max-units` (default 8).
+
+Ask before building: with `--plan-gate`, a run stops at `plan-ready` once its
+plan passes every Devise check (the plan lints and the red-test check), before
+any unit runs. `.runs/polya-<id>/` holds PROBLEM.md and PLAN.md to read.
+`--approve` resumes at Devise, which re-checks the plan on disk without a Solver
+turn and goes on to carry it out. `--note-file` (at most 4000 characters) sends
+the requester's note, quoted, into the next Devise turn, which re-plans and stops
+at `plan-ready` again; on a run stopped at Understand it goes into the
+Understand turn instead. Without `--approve`, a gated run stays gated.
 
 ## Layout rules
 

@@ -57,6 +57,7 @@ export type PolyaPhase = "understand" | "devise" | "carry-out" | "look-back" | "
 
 export type PolyaStopReason =
   | "complete"
+  | "plan-ready"
   | "understanding-incomplete"
   | "plan-not-workable"
   | "unit-not-workable"
@@ -114,6 +115,10 @@ export interface PolyaState {
   baselineSha?: string;
   /** A Hand's question, carried into the next Devise turn on resume. */
   replanNote?: string;
+  /** Stop at `plan-ready` once the plan passes its checks, until the requester approves it (build-app --plan-gate, --approve). */
+  planGate?: boolean;
+  /** The requester's note (build-app --note-file), read by the next Understand or Devise turn, then cleared. */
+  requesterNote?: string;
   /** Files the Solver itself committed after the baseline (a repair's red test); the finish check allows them. */
   solverFiles?: string[];
   /** Units the Solver has already been asked to re-plan once, so a bad unit cannot loop. */
@@ -162,6 +167,16 @@ const WRITE_REMINDER = (missing: string): string =>
   `Your previous attempt printed its answer but left the working tree untouched: ${missing} does not exist on disk. ` +
   `The orchestrator reads files, not your message. Create it with your file-writing tool, commit, then reply again with the same JSON block.\n\n---\n\n`;
 
+/** Quoted line by line, so a `# …` line in the note cannot read as the turn's own heading to the router. */
+const REQUESTER_NOTE = (stage: "understand" | "devise", note: string): string =>
+  `## The requester's note\n\n` +
+  (stage === "devise" ? `The requester read ${ARTIFACTS.plan} and asks for this:` : `The requester answers what stopped Understand:`) +
+  `\n\n${note.trim().split("\n").map((l) => `> ${l}`).join("\n")}\n\n` +
+  (stage === "devise"
+    ? `Rewrite ${ARTIFACTS.plan} and its red tests to answer it. The done-checks in ${ARTIFACTS.problem} stay as they are: a Check may change only to the command that runs a test written this turn.`
+    : `Rewrite ${ARTIFACTS.problem} to take it in.`) +
+  ` Commit, then reply with the same JSON block.\n\n---\n\n`;
+
 export function initialPolyaState(): PolyaState {
   return { phase: "understand", units: [], unitIndex: 0, unitRecords: [], verifyAttempts: 0, runIds: [] };
 }
@@ -172,6 +187,8 @@ export function polyaResumePhase(state: PolyaState): PolyaPhase {
   switch (state.stopReason) {
     case "understanding-incomplete":
       return "understand";
+    // Devise finds PLAN.md on disk and skips the Solver turn, so an approved plan is re-checked, not re-paid for.
+    case "plan-ready":
     case "plan-not-workable":
     case "unit-not-workable":
       return "devise";
@@ -567,11 +584,14 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     });
     const gapsOf = () => problemGaps(readProblem(), { maxDone: opts.oracle ? 10 : 8, software, offeredLessons: offered.map((l) => l.id), oracle: opts.oracle, request });
     // Already on disk (a resume, or a person wrote it): do not pay for the full turn again. Gaps get the one targeted retry below.
-    if (artifact(ARTIFACTS.problem)) {
+    // A requester's note always gets the turn.
+    if (artifact(ARTIFACTS.problem) && !state.requesterNote) {
       log(`${ARTIFACTS.problem} is on disk; ${gapsOf().length ? "it has gaps, asking the Solver to fix only those" : "skipping the Solver turn"}`);
     } else {
-      const r = await strongTurn<Parameters<typeof renderProblem>[0]>(prompt, ARTIFACTS.problem, "understand: PROBLEM.md", renderProblem);
+      const note = state.requesterNote ? REQUESTER_NOTE("understand", state.requesterNote) : "";
+      const r = await strongTurn<Parameters<typeof renderProblem>[0]>(`${note}${prompt}`, ARTIFACTS.problem, "understand: PROBLEM.md", renderProblem);
       if (typeof r === "string") return stop(r, "understand turn did not finish");
+      state.requesterNote = undefined;
     }
     let problem = readProblem();
     if (!problem) return stop("unparseable-report", `${ARTIFACTS.problem} is missing or has no title`);
@@ -618,7 +638,8 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     const problemMd = artifact(ARTIFACTS.problem) ?? "";
     const carried = problem.done.map((d) => d.id);
     const replan = state.replanNote ? `## Re-plan\n\nThe previous plan stopped because a Hand had to ask a question. ${state.replanNote}\n\nRewrite the unit it names so the question is answered inside the unit; leave the units that already passed unchanged.\n\n---\n\n` : "";
-    const prompt = `${replan}${buildPrompt(`${PROMPTS}/devise`, "", { problem_md: problemMd, max_units: String(maxUnits), done_ids: carried.join(" ") })}`;
+    const revise = state.requesterNote ? REQUESTER_NOTE("devise", state.requesterNote) : "";
+    const prompt = `${replan}${revise}${buildPrompt(`${PROMPTS}/devise`, "", { problem_md: problemMd, max_units: String(maxUnits), done_ids: carried.join(" ") })}`;
     const exists = (p: string) => artifact(p) !== undefined;
     // The one edit Devise may make to PROBLEM.md: a D's Check becomes the command that runs a test written this turn
     // (a Playwright spec, a Node test against a fake window). Then look back runs it instead of walking it, which is
@@ -653,13 +674,15 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
       if (!plan.outer.length) lines.push("- no `## Outer test` steps");
       return lines;
     };
-    // Already on disk and no question to re-plan for: do not pay for the full turn again. Gaps get the one targeted retry below.
-    if (artifact(ARTIFACTS.plan) && !state.replanNote) {
+    // Already on disk and no question or note to re-plan for: do not pay for the full turn again. Gaps get the one
+    // targeted retry below.
+    if (artifact(ARTIFACTS.plan) && !state.replanNote && !state.requesterNote) {
       log(`${ARTIFACTS.plan} is on disk; ${gapsOf().length ? "it has gaps, asking the Solver to fix only those" : "skipping the Solver turn"}`);
     } else {
       const r = await strongTurn<Parameters<typeof renderPlan>[0]>(prompt, ARTIFACTS.plan, "devise: PLAN.md", renderPlan);
       if (typeof r === "string") return stop(r, "devise turn did not finish");
       state.replanNote = undefined;
+      state.requesterNote = undefined;
     }
     let gaps = gapsOf();
     if (gaps.length) {
@@ -691,6 +714,8 @@ export async function runPolyaLoop(send: SendFn, opts: PolyaOptions, initial?: P
     state.baselineSha = io.headSha();
     state.unitIndex = 0;
     log(`plan: ${state.units.length} unit(s), baseline ${state.baselineSha.slice(0, 8)}`);
+    // The plan passed every check above; with the gate on, nothing is built until the requester approves it.
+    if (state.planGate) return stop("plan-ready", `${state.units.length} unit(s) planned and checked; nothing is built until the requester approves`);
     state.phase = "carry-out";
     await persist();
   }
