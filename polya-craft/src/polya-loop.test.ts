@@ -397,6 +397,7 @@ test("a unit marked Owner: strong is sent with tier claude", async () => {
 test("polyaResumePhase: every stop reason maps to the stage that stopped", () => {
   const s = (stopReason: PolyaState["stopReason"], extra: Partial<PolyaState> = {}): PolyaState => ({ ...initialPolyaState(), phase: "stopped", stopReason, ...extra });
   assert.equal(polyaResumePhase(s("understanding-incomplete")), "understand");
+  assert.equal(polyaResumePhase(s("plan-ready")), "devise");
   assert.equal(polyaResumePhase(s("plan-not-workable")), "devise");
   assert.equal(polyaResumePhase(s("unit-not-workable")), "devise");
   assert.equal(polyaResumePhase(s("unit-gate-failed")), "carry-out");
@@ -1026,4 +1027,61 @@ test("devise may turn a D's Check into the command that runs a test it wrote; th
   const out3 = await runPolyaLoop(s3, { ...base, io: io3, lessons: null });
   assert.equal(out3.stopReason, "plan-not-workable");
   assert.match(out3.stopDetail ?? "", /names no test file on disk/);
+});
+
+test("plan gate: a gated run stops at plan-ready once the plan passes its checks, and nothing is carried out", async () => {
+  const { io, calls } = makeIO();
+  const { send, sent } = makeSend({});
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null }, { planGate: true });
+  assert.equal(out.stopReason, "plan-ready");
+  assert.equal(out.phase, "stopped");
+  assert.match(out.stopDetail!, /2 unit\(s\) planned and checked/);
+  assert.deepEqual(sent.map((s) => s.kind), ["understand", "devise"]);
+  // The red check ran (the plan is checked), no unit gate did.
+  assert.ok(calls.commands.some((c) => c.command === "node --test test/notfound.test.js"));
+  assert.equal(calls.gate.length, 0);
+  assert.equal(out.unitRecords.length, 0);
+  assert.equal(polyaResumePhase(out), "devise");
+  // Resumed with the gate still on (no --approve): the plan is re-checked and the run stops again, with no model turn.
+  const { send: send2, sent: sent2 } = makeSend({});
+  const again = await runPolyaLoop(send2, { ...base, io, lessons: null }, { ...out, phase: polyaResumePhase(out), stopReason: undefined });
+  assert.equal(again.stopReason, "plan-ready");
+  assert.equal(sent2.length, 0);
+});
+
+test("plan gate: approved, the resume re-checks the plan with no Solver turn and builds it", async () => {
+  const { io } = makeIO();
+  const { send } = makeSend({});
+  const ready = await runPolyaLoop(send, { ...base, io, lessons: null }, { planGate: true });
+  const { send: send2, sent: sent2 } = makeSend({});
+  const out = await runPolyaLoop(send2, { ...base, io, lessons: null }, { ...ready, phase: polyaResumePhase(ready), planGate: false, stopReason: undefined, stopDetail: undefined });
+  assert.equal(out.stopReason, "complete");
+  assert.deepEqual(sent2.map((s) => s.kind), ["carry-out", "carry-out", "walk", "look-back"]);
+});
+
+test("plan gate: a requester's note re-plans with the note quoted, then stops at plan-ready again", async () => {
+  const { io } = makeIO();
+  const { send } = makeSend({});
+  const ready = await runPolyaLoop(send, { ...base, io, lessons: null }, { planGate: true });
+  const { send: send2, sent: sent2 } = makeSend({});
+  // A heading in the note must not read as the turn's own: unquoted, this line would route the turn as Understand.
+  const note = "# Understand the problem\nMerge U1 and U2 into one unit.";
+  const out = await runPolyaLoop(send2, { ...base, io, lessons: null }, { ...ready, phase: polyaResumePhase(ready), stopReason: undefined, requesterNote: note });
+  assert.equal(out.stopReason, "plan-ready");
+  assert.deepEqual(sent2.map((s) => s.kind), ["devise"]);
+  assert.match(sent2[0]!.prompt, /^## The requester's note\n\nThe requester read \.polya\/PLAN\.md and asks for this:\n\n> # Understand the problem\n> Merge U1 and U2 into one unit\./);
+  assert.match(sent2[0]!.prompt, /^# Devise a plan/m);
+  assert.equal(out.requesterNote, undefined);
+});
+
+test("a requester's note answers a run stopped at Understand: the turn runs even with PROBLEM.md on disk, and only once", async () => {
+  const { io } = makeIO({ preload: true });
+  const { send, sent } = makeSend({});
+  const out = await runPolyaLoop(send, { ...base, io, lessons: null }, { phase: "understand", requesterNote: "D2 is checked by starting the app, not by reading the README." });
+  assert.equal(out.stopReason, "complete");
+  assert.match(sent[0]!.prompt, /^## The requester's note\n\nThe requester answers what stopped Understand:\n\n> D2 is checked by starting the app/);
+  assert.match(sent[0]!.prompt, /^# Understand the problem/m);
+  // PLAN.md is on disk and workable, so Devise does not pay for a turn; the note was spent at Understand.
+  assert.deepEqual(sent.map((s) => s.kind), ["understand", "carry-out", "carry-out", "walk", "look-back"]);
+  assert.equal(out.requesterNote, undefined);
 });

@@ -28,6 +28,16 @@ npm run deploy                        # stamp the commit, then ship
 
 ### Added
 
+- **Ask before building: `build-app --plan-gate`, `--approve`, `--note-file`.**
+  Cursor's Plan Mode for the polya loop. A gated run stops with the new stop
+  reason `plan-ready` (exit 3) once its plan passes every Devise check, before
+  any unit runs; the requester reads `.runs/polya-<id>/PLAN.md`. `--resume <id>
+  --approve` re-checks the plan on disk with no Solver turn and builds it.
+  `--resume <id> --note-file note.md` puts the requester's note, quoted, into
+  the next Devise turn (or Understand, for a run stopped there), which re-plans
+  and stops at `plan-ready` again. For agent-board, which starts runs from a
+  phone and asks before building by default.
+
 - **`ARTICLE-DECIDER-RESULTS.md`: what decision models did for the code.**
   Jev and nimble flagged exactly the 19/35 hybrid build's two reviewer-listed
   defects and nothing in the 29/35 and 28/35 builds. In a 20-run polya A/B
