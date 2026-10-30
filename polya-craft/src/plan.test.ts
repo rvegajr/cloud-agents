@@ -610,6 +610,16 @@ test("commandOf: a placeholder inside a quoted string is text, and a note after 
   assert.equal(commandOf("`curl -X POST /api/snippets` with a missing title"), undefined);
 });
 
+test("commandOf: the `(was: …)` note Devise keeps after a changed Check is not part of it (oMLX corpus run, jsoncount-depth D3, 2026-10-28)", () => {
+  // The old Check was itself a command, so the note held a second backticked command and the Check read as prose.
+  const d3 =
+    "`node --test test/count.test.js` (was: `out=\"$PWD/tmp.d3.$$\"; node --test test/count.test.js >\"$out\" 2>&1; code=$?; rm -f \"$out\"; [ \"$code\" -eq 0 ]` — now that the test itself is written this turn, the Check is simply the command that runs it: `node --test` exits non-zero if any test in the file fails, which is exactly \"passes.\")";
+  assert.equal(commandOf(d3), "node --test test/count.test.js");
+  assert.equal(commandOf("`npx playwright test tests/e2e/start.spec.js` (was: a stranger follows the README and the app starts)"), "npx playwright test tests/e2e/start.spec.js");
+  // Only a note after the Check: a Check that is nothing but a note is still no command.
+  assert.equal(commandOf("(was: `npm test`)"), undefined);
+});
+
 test("validateUnits: a Check that asserts the suite is red is a transient state, not a Check (live cron-next, 2026-09-21)", () => {
   for (const check of ["`npm ci && npm run build && ! npm test`", "`npm test; test $? -ne 0`", "`! npm run test`"]) {
     const plan = parsePlan(PLAN_MD.replace("Check:    `node --test test/notfound.test.js` — Now: unmet", `Check:    ${check} — Now: unmet`));
