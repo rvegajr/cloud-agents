@@ -17,6 +17,14 @@ npm run deploy                        # stamp the commit, then ship
 
 ### Fixed
 
+- **Agents no longer sign their commits.** Claude Code added
+  `Co-Authored-By: Claude …` and qwen-code added `Co-authored-by: Qwen-Coder`
+  to the commits they made in a workspace; 10 of them reached a shared repo
+  (YOLOVibeCode/agent-board PR #1) and the branch had to be rewritten. Every
+  Claude turn now runs with `attribution` set to empty, and qwen-code reads
+  `src/lib/qwen-system-settings.json` (`general.gitCoAuthor` off) through
+  `QWEN_CODE_SYSTEM_SETTINGS_PATH`, so nothing is written into the product repo.
+
 - **Two orchestrator crashes from the decider A/B corpus run.**
   (1) A done-check probe left `mktemp` scratch in the repo root, one file
   deliberately unreadable, and the orchestrator's `git add -A` threw, killing

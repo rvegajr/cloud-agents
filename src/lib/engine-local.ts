@@ -145,6 +145,13 @@ export interface LocalCommand {
 }
 
 /**
+ * qwen-code adds `Co-authored-by: Qwen-Coder` to every commit it makes unless `general.gitCoAuthor.commit` is off.
+ * System settings outrank the user's and the checkout's, and pointing at our own file keeps `.qwen/` out of the
+ * product repo (an existing repo need not ignore it).
+ */
+export const QWEN_SYSTEM_SETTINGS = resolve(import.meta.dirname, "qwen-system-settings.json");
+
+/**
  * The subprocess sees the login-scrubbed env plus only what the runner needs to reach the local server.
  * `mcpServers` (qwen-code only) are handed over on the command line for this turn: the QA
  * analyst's browser, never persisted in the checkout.
@@ -185,6 +192,7 @@ export function buildLocalCommand(cfg: LocalConfig, model: string, prompt: strin
       OPENAI_BASE_URL: cfg.baseUrl,
       OPENAI_MODEL: model,
       QWEN_CODE_SUPPRESS_YOLO_WARNING: "1",
+      QWEN_CODE_SYSTEM_SETTINGS_PATH: QWEN_SYSTEM_SETTINGS,
     },
   };
 }

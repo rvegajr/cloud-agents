@@ -207,6 +207,13 @@ export function rateLimitSamples(info: SDKRateLimitInfo, observedAt = new Date()
   return out;
 }
 
+/**
+ * Claude Code adds a Co-Authored-By trailer to the commits it makes and a "Generated with" line to PRs. Factory
+ * branches land in shared repos (YOLOVibeCode/agent-board PR #1 carried 4 of them, plus 6 from qwen-code; the
+ * owner rewrote the branch), so every agent session runs with attribution off.
+ */
+export const NO_AGENT_ATTRIBUTION = { attribution: { commit: "", pr: "" }, includeCoAuthoredBy: false };
+
 /** Ask the live query for the plan windows; silent when the SDK or plan does not offer them. */
 export async function samplePlanUsage(q: unknown, onSample: (u: MaxUsage) => void): Promise<boolean> {
   const fn = (q as UsageCapable | null)?.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
@@ -256,6 +263,7 @@ export function makeClaudeSend(opts: {
       ...(opts.tools?.disallowed?.length ? { disallowedTools: opts.tools.disallowed } : {}),
       ...(browser ? { mcpServers: { playwright: { type: "stdio" as const, command: browser.command, args: browser.args, ...(browser.env ? { env: browser.env } : {}) } } } : {}),
       settingSources: ["project"],
+      settings: NO_AGENT_ATTRIBUTION,
       // A big blueprint (one red test per requirement) can outrun the default; raise it per-job with CLAUDE_MAX_TURNS.
       maxTurns: Number(process.env.CLAUDE_MAX_TURNS?.trim()) || 80,
       maxBudgetUsd: opts.maxBudgetUsd ?? 20,
