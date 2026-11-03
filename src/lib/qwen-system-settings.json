@@ -1,0 +1,9 @@
+{
+  "general": {
+    "gitCoAuthor": {
+      "commit": false,
+      "pr": false
+    }
+  },
+  "$version": 4
+}

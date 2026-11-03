@@ -266,6 +266,27 @@ test("makeClaudeSend gives a browser turn the Playwright MCP server and its tool
   }
 });
 
+test("makeClaudeSend turns off Claude's commit and PR attribution for every turn", async () => {
+  const saved = process.env.ANTHROPIC_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+  try {
+    const seen: Options[] = [];
+    const send = makeClaudeSend({
+      cwd: "/tmp",
+      queryFn: async function* ({ options }) {
+        seen.push(options!);
+        yield { type: "system", subtype: "init", session_id: "s", apiKeySource: "none" } as never;
+        yield { type: "result", subtype: "success", result: "ok", total_cost_usd: 0 } as never;
+      },
+    });
+    await send("build");
+    await send("plan", { mode: "plan", fresh: true });
+    for (const o of seen) assert.deepEqual(o.settings, { attribution: { commit: "", pr: "" }, includeCoAuthoredBy: false });
+  } finally {
+    if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
+  }
+});
+
 test("makeClaudeSend: an SDK throw after an error result is a failed turn, not a crash", async () => {
   const saved = process.env.ANTHROPIC_API_KEY;
   delete process.env.ANTHROPIC_API_KEY;

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -8,6 +9,7 @@ import {
   localModels,
   makeLocalSend,
   modelIsPulled,
+  QWEN_SYSTEM_SETTINGS,
   transcriptContext,
   wasInterrupted,
   type ExecFn,
@@ -76,6 +78,13 @@ test("modelIsPulled treats an untagged name as :latest", () => {
   assert.equal(modelIsPulled("qwen3-coder-next", ["qwen3-coder-next:latest"]), true);
   assert.equal(modelIsPulled("qwen3.6:35b-coding", ["qwen3.6:35b-coding"]), true);
   assert.equal(modelIsPulled("qwen3.6:35b-coding", ["qwen3.6:27b-coding"]), false);
+});
+
+test("qwen-code runs with its Co-authored-by trailer off, from settings outside the checkout", () => {
+  const cmd = buildLocalCommand(cfg, "qwen3-coder-next", "do it");
+  assert.equal(cmd.env.QWEN_CODE_SYSTEM_SETTINGS_PATH, QWEN_SYSTEM_SETTINGS);
+  const settings = JSON.parse(readFileSync(QWEN_SYSTEM_SETTINGS, "utf8"));
+  assert.deepEqual(settings.general.gitCoAuthor, { commit: false, pr: false });
 });
 
 test("qwen-code command is headless and reaches Ollama through the OpenAI endpoint only", () => {
