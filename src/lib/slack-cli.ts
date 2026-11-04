@@ -327,6 +327,7 @@ export function formatGlobalUsage(opts: {
   lines.push(`${bot} version         which build of the bot is answering`);
   lines.push("");
   lines.push("deploys happen when a PR merges, not from here.");
+  lines.push("after a merge I post in the job thread when each site is running it.");
   lines.push("```");
   if (opts.docsUrl) lines.push(docsLine(opts.docsUrl));
   return lines.join("\n");
@@ -365,6 +366,7 @@ export function formatProjectUsage(opts: {
   lines.push("options: branch=<name>  autopr=true|false  model=<id>");
   lines.push("hooks:   force-push, push to develop/main, deploys, and --no-verify are blocked");
   lines.push("deploy:  merge the PR — the host builds and posts the result here");
+  lines.push("retest:  after the merge I post in the thread when each site is running it");
   lines.push("```");
   if (opts.docsUrl) lines.push(docsLine(opts.docsUrl));
   return lines.join("\n");

@@ -19,6 +19,10 @@ import { reportStartupFailure } from "./lib/report.js";
 import { ensureJamBin } from "./lib/jam.js";
 import { JobStore, jobsListenPort, listenJobsHttp, mentionText } from "./lib/jobs-http.js";
 import { HeartbeatMonitor, relayTextSender } from "./lib/heartbeat.js";
+import { LiveWatch, liveWatchIO, loadWatches } from "./lib/live-watch.js";
+import { loadRegistry } from "./lib/freshness.js";
+import { buildStateDir } from "./lib/build-app.js";
+import { join } from "node:path";
 import { createSlackJobs, postDriverMention, type SlackClient } from "./lib/slack-jobs.js";
 import {
   isCursorNativeCommand,
@@ -147,7 +151,9 @@ try {
   const ownBotId = typeof auth.bot_id === "string" ? auth.bot_id : "";
   const botHandle = await resolveBotHandle(app.client, auth);
 
+  let liveWatch: LiveWatch | undefined;
   const jobs = createSlackJobs({
+    onPullRequest: async (pr) => liveWatch?.add(pr),
     creds,
     defaultModel,
     routes,
@@ -164,6 +170,35 @@ try {
 
   type BoltClient = typeof app.client;
   const asSlackClient = (client: BoltClient): SlackClient => client;
+
+  // After a job's PR merges, post in its thread when each deploy in services.json is running it.
+  // Needs GITHUB_TOKEN to read PRs; state survives restarts only if .runs is on a volume.
+  let liveWatchTimer: NodeJS.Timeout | undefined;
+  if (githubToken && process.env.LIVE_WATCH !== "off") {
+    try {
+      const file = process.env.LIVE_WATCH_FILE?.trim() || join(buildStateDir(), "live-watch.json");
+      liveWatch = new LiveWatch({
+        registry: loadRegistry(),
+        initial: loadWatches(file),
+        maxAgeMs: (Number(process.env.LIVE_WATCH_MAX_DAYS) || 14) * 86_400_000,
+        io: liveWatchIO({
+          githubToken,
+          file,
+          post: async (channel, threadTs, text) => {
+            await app.client.chat.postMessage({ channel, thread_ts: threadTs, text });
+          },
+        }),
+      });
+      const everyMin = Number(process.env.LIVE_WATCH_INTERVAL_MIN) || 10;
+      liveWatchTimer = setInterval(() => void liveWatch?.tick(), everyMin * 60_000);
+      liveWatchTimer.unref();
+      console.log(`  live watch: every ${everyMin} min, ${liveWatch.list().length} PR(s) pending (${file})`);
+    } catch (err) {
+      console.warn(`  live watch: off (${err instanceof Error ? err.message : String(err)})`);
+    }
+  } else {
+    console.log("  live watch: off (needs GITHUB_TOKEN; LIVE_WATCH=off disables it)");
+  }
 
   app.event("app_mention", async ({ event, client, body }) => {
     const eventId = ("event_id" in body && typeof body.event_id === "string" && body.event_id) || event.client_msg_id || event.ts;
@@ -329,6 +364,7 @@ try {
 
   const stop = async () => {
     if (heartbeatTimer) clearInterval(heartbeatTimer);
+    if (liveWatchTimer) clearInterval(liveWatchTimer);
     await app.stop();
     process.exit(0);
   };

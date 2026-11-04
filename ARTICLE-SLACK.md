@@ -593,6 +593,20 @@ What you lose is a keystroke. What you keep is that every deploy has a diff, a
 reviewer, and a revert. The status card still lands in the same channel — that
 is addendums A and B, and it involves no bot code and no tokens in `.env`.
 
+The deploy card answers "did a build succeed," which is not the tester's
+question. Theirs is "is my fix on the site I test," and on a repo that merges
+to `develop` and promotes to `main` later, that can be days after the card.
+So the bot watches every PR a job leaves in a thread (`src/lib/live-watch.ts`).
+Once the PR merges, it reads `GET /health` on each deploy of that repo in
+`services.json`, asks GitHub whether the running commit contains the merge,
+and posts in the thread once per deploy: `Live on blessbox production
+(www.blessbox.org): PR #320 is in the running build 1a2b3c4d. @tester please
+retest.` It only reads, so it needs nothing beyond the `GITHUB_TOKEN` it
+already has. A repo with no `/health` row says so in the thread rather than
+going quiet. `LIVE_WATCH=off` turns it off, `LIVE_WATCH_INTERVAL_MIN` (10)
+and `LIVE_WATCH_MAX_DAYS` (14) tune it, and pending watches live in
+`.runs/live-watch.json`, which survives a redeploy only on a volume.
+
 **What you learned:** the repo hook says what the model may not do; the bot's
 missing verb says what *convenience* may not do. Both point the same way. The
 Cloud Agent never gets a token that can deploy, the bot process never gets one
