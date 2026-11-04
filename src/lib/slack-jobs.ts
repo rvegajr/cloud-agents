@@ -85,6 +85,8 @@ export interface SlackJobsConfig {
   claudeUserIds: string[];
   /** Cursor's view of a bc- agent for `status`. Defaults to `Agent.get`. */
   agentInfo?: (agentId: string) => Promise<AgentSnapshot | undefined>;
+  /** A job left a PR in a Slack thread. The bot uses it to post when that PR is live. */
+  onPullRequest?: (pr: { prUrl: string; channel: string; threadTs: string; user?: string }) => Promise<unknown>;
 }
 
 async function cursorAgentInfo(agentId: string, creds: { apiKey?: string }): Promise<AgentSnapshot | undefined> {
@@ -418,6 +420,14 @@ export function createSlackJobs(cfg: SlackJobsConfig) {
       if (outcome.kind === "failed") await react("x", "add");
       else await react("white_check_mark", "add");
       console.log(`thread ${threadTs ?? inflightKey} ${outcome.kind} agent=${outcome.agentId ?? "none"}`);
+      const prUrl = "prUrl" in outcome ? outcome.prUrl : undefined;
+      if (prUrl && channel && threadTs && cfg.onPullRequest) {
+        try {
+          await cfg.onPullRequest({ prUrl, channel, threadTs, user: args.user });
+        } catch (err) {
+          console.warn(`live-watch: could not watch ${prUrl} (${err instanceof Error ? err.message : String(err)})`);
+        }
+      }
       if (jobId) {
         cfg.store.patch(jobId, {
           status: outcome.kind === "failed" ? "failed" : outcome.kind === "need-info" ? "need-info" : "done",
