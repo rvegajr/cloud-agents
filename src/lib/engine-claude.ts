@@ -312,6 +312,8 @@ export interface ClaudeRecord {
   repo: string;
   ref: string;
   branch: string;
+  /** Set when an agent checked out another branch mid-run and the run followed it (see followAgentBranch). */
+  branchMovedFrom?: string;
   apiEquivalentUsd: number;
   prUrl?: string;
   /** Absent on records written before the hybrid engine existed: those are plain Claude. */
@@ -390,13 +392,51 @@ export function hasCommitsAhead(cwd: string, base: string): boolean {
 export function pushAndOpenPr(cwd: string, title: string, base = "main"): string {
   const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd, encoding: "utf8" }).trim();
   execFileSync("git", ["push", "-u", "origin", branch], { cwd, stdio: "inherit", env: process.env });
-  const out = execFileSync("gh", ["pr", "create", "--draft", "--fill", "--head", branch, "--base", base, "--title", title], {
-    cwd,
-    encoding: "utf8",
-    env: process.env,
-  });
+  let out: string;
+  try {
+    out = execFileSync("gh", ["pr", "create", "--draft", "--fill", "--head", branch, "--base", base, "--title", title], {
+      cwd,
+      encoding: "utf8",
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (err) {
+    const existing = existingPrUrl(`${String((err as { stderr?: unknown }).stderr ?? "")}\n${err instanceof Error ? err.message : ""}`);
+    if (existing) return existing;
+    throw err;
+  }
   const url = out.trim().split(/\s+/).find((s) => s.startsWith("http")) ?? out.trim();
   return url;
+}
+
+/**
+ * gh refuses a second PR for a branch and names the open one. The run's work is on that PR, so it is the run's PR:
+ * the jsoncount walk-through (cc-4f609e2b, 2026-11-04) pushed to an older run's branch, got this refusal, and ended
+ * "complete" with no PR link anywhere.
+ */
+export function existingPrUrl(ghOutput: string): string | undefined {
+  return ghOutput.match(/already exists:\s*(https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+)/)?.[1];
+}
+
+/**
+ * An agent can check out another branch mid-run (the jsoncount walk-through's Understand turn switched to the older
+ * run's branch, where the code lived), and every later commit lands there. Follow it, so pushes, the PR, the board
+ * and a resume on a fresh box all use the branch the work is on, and say so loudly. Returns the line to log, or
+ * undefined when nothing moved. A detached HEAD is reported but not followed.
+ */
+export function followAgentBranch(rec: ClaudeRecord): string | undefined {
+  let head: string;
+  try {
+    head = git(rec.cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  } catch {
+    return undefined;
+  }
+  if (head === rec.branch) return undefined;
+  if (head === "HEAD") return `branch: WARNING an agent left the workspace on a detached HEAD; the run's branch is still ${rec.branch}`;
+  const from = rec.branch;
+  rec.branchMovedFrom ??= from;
+  rec.branch = head;
+  return `branch: WARNING an agent moved the run from ${from} to ${head}; following it (pushes and the PR go to ${head})`;
 }
 
 export function git(cwd: string, args: string[]): string {
@@ -467,6 +507,11 @@ export async function createClaudeHandle(args: {
     workspace: rec.cwd,
     send: async (prompt, opts) => {
       const turn = await send(prompt, opts);
+      const moved = followAgentBranch(rec);
+      if (moved) {
+        console.log(moved);
+        saveClaudeRecord(rec);
+      }
       if (opts?.mode !== "plan" && args.autoCreatePR !== false && !rec.prUrl && hasCommitsAhead(rec.cwd, rec.ref)) {
         try {
           rec.prUrl = pushAndOpenPr(rec.cwd, `claude: ${rec.branch}`, rec.ref);

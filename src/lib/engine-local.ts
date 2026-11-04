@@ -6,6 +6,7 @@ import type { SendFn, SendOpts, TurnResult } from "./build-loop.js";
 import {
   assertClaudeCredential,
   createClaudeHandle,
+  followAgentBranch,
   git,
   hasCommitsAhead,
   loadClaudeRecord,
@@ -618,6 +619,11 @@ export async function createHybridHandle(args: HybridHandleArgs): Promise<AgentH
     workspace: rec.cwd,
     send: async (prompt, opts) => {
       const turn = await send(prompt, opts);
+      const moved = followAgentBranch(rec);
+      if (moved) {
+        log(moved);
+        saveClaudeRecord(rec);
+      }
       if (opts?.mode !== "plan") orchestratorCommit(rec.cwd, `${args.engine}: ${classifyPrompt(prompt)} turn`, log);
       if (opts?.mode !== "plan" && args.autoCreatePR !== false && !rec.prUrl && hasCommitsAhead(rec.cwd, rec.ref)) {
         try {

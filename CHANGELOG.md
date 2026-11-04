@@ -17,6 +17,17 @@ npm run deploy                        # stamp the commit, then ship
 
 ### Fixed
 
+- **A run that lands on an existing PR now links it, and a branch switch is
+  followed out loud.** In the jsoncount walk-through (cc-4f609e2b) the Understand
+  turn checked out an older run's branch, where the code lived; every later
+  commit went there, `gh pr create` refused because that branch already had
+  PR #1, and the run ended "complete" with no PR link. Now `pushAndOpenPr`
+  takes the PR gh names in its "already exists" refusal, and after every turn
+  `followAgentBranch` notices HEAD on another branch, logs a WARNING, and moves
+  the record's `branch` there (keeping the first in `branchMovedFrom`), so
+  pushes, the PR, the board and a resume on a fresh box use the branch the work
+  is on.
+
 - **Agents no longer sign their commits.** Claude Code added
   `Co-Authored-By: Claude …` and qwen-code added `Co-authored-by: Qwen-Coder`
   to the commits they made in a workspace; 10 of them reached a shared repo

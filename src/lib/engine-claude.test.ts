@@ -1,3 +1,7 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -6,6 +10,8 @@ import {
   authenticatedCloneUrl,
   claudeAllowedForSlackUser,
   claudeApiKeySourceFromAuth,
+  existingPrUrl,
+  followAgentBranch,
   isClaudeAgentId,
   makeClaudeSend,
   parseClaudeUserIds,
@@ -314,5 +320,35 @@ test("makeClaudeSend: an SDK throw after an error result is a failed turn, not a
     await assert.rejects(() => early("hi"), /ENOENT/, "a failure before any result is still an error the caller sees");
   } finally {
     if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
+  }
+});
+
+test("existingPrUrl reads the open PR out of gh's already-exists refusal", () => {
+  const refusal = 'a pull request for branch "claude/f9a3cb48" into branch "main" already exists:\nhttps://github.com/rvegajr/polya-live-json-count/pull/1\n';
+  assert.equal(existingPrUrl(refusal), "https://github.com/rvegajr/polya-live-json-count/pull/1");
+  assert.equal(existingPrUrl("Command failed: gh pr create\nGraphQL: Resource not accessible by integration"), undefined);
+});
+
+test("followAgentBranch follows an agent's checkout, keeps the first branch, and ignores a detached HEAD", () => {
+  const dir = mkdtempSync(join(tmpdir(), "follow-branch-"));
+  try {
+    const g = (...a: string[]) => execFileSync("git", a, { cwd: dir, stdio: "pipe" });
+    g("init", "-q", "-b", "main");
+    g("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "init");
+    g("checkout", "-q", "-b", "claude/aaaa1111");
+    const rec = { agentId: "cc-x", cwd: dir, repo: "https://github.com/o/r", ref: "main", branch: "claude/aaaa1111", apiEquivalentUsd: 0 };
+    assert.equal(followAgentBranch(rec), undefined, "nothing moved");
+    g("checkout", "-q", "-b", "claude/old-run");
+    assert.match(followAgentBranch(rec)!, /moved the run from claude\/aaaa1111 to claude\/old-run/);
+    assert.equal(rec.branch, "claude/old-run");
+    g("checkout", "-q", "-b", "claude/third");
+    followAgentBranch(rec);
+    assert.equal(rec.branch, "claude/third");
+    assert.equal((rec as { branchMovedFrom?: string }).branchMovedFrom, "claude/aaaa1111", "the run's own branch is kept");
+    g("checkout", "-q", "--detach");
+    assert.match(followAgentBranch(rec)!, /detached HEAD/);
+    assert.equal(rec.branch, "claude/third");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
