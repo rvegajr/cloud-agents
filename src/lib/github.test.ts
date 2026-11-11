@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   armAutoMerge,
+  productionBranches,
   cursorAppGrantBlocksCreate,
   cursorAppSlugs,
   formatCursorAppGrant,
@@ -46,7 +47,7 @@ test("markPullRequestReady: looks up the node id, then runs the mutation", async
   assert.deepEqual(calls[1]?.variables, { id: "PR_1" });
 });
 
-function armFetch(opts: { allowed?: boolean; armed?: boolean; workflow?: string; mutationError?: string }) {
+function armFetch(opts: { base?: string; allowed?: boolean; armed?: boolean; workflow?: string; mutationError?: string }) {
   const mutations: Array<Record<string, unknown>> = [];
   const fetchImpl: typeof fetch = async (url, init) => {
     const u = String(url);
@@ -70,7 +71,7 @@ function armFetch(opts: { allowed?: boolean; armed?: boolean; workflow?: string;
             autoMergeAllowed: opts.allowed ?? true,
             squashMergeAllowed: true,
             mergeCommitAllowed: true,
-            pullRequest: { id: "PR_1", autoMergeRequest: opts.armed ? { enabledAt: "2026-10-03" } : null },
+            pullRequest: { id: "PR_1", baseRefName: opts.base ?? "develop", autoMergeRequest: opts.armed ? { enabledAt: "2026-10-03" } : null },
           },
         },
       }),
@@ -98,6 +99,18 @@ test("armAutoMerge: never merges a PR with nothing to wait for", async () => {
   assert.equal(await armAutoMerge(PR, "ghp_x", armFetch({ armed: true }).fetchImpl), "already-armed");
   const clean = armFetch({ mutationError: "Pull request Pull request is in clean status" });
   assert.equal(await armAutoMerge(PR, "ghp_x", clean.fetchImpl), "no-required-checks");
+});
+
+test("armAutoMerge: a PR against main is never armed, even with checks and auto-merge on", async () => {
+  const { fetchImpl, mutations } = armFetch({ base: "main" });
+  assert.equal(await armAutoMerge(PR, "ghp_x", fetchImpl), "production-branch");
+  assert.equal(mutations.length, 0);
+});
+
+test("productionBranches: defaults, override, and none", () => {
+  assert.deepEqual(productionBranches({}), ["main", "master"]);
+  assert.deepEqual(productionBranches({ SLACK_NO_AUTOMERGE_BRANCHES: "main, release" }), ["main", "release"]);
+  assert.deepEqual(productionBranches({ SLACK_NO_AUTOMERGE_BRANCHES: "none" }), []);
 });
 
 test("markPullRequestReady: already-ready PR is a no-op", async () => {

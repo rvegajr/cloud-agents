@@ -92,7 +92,20 @@ export type ArmAutoMergeResult =
   /** "Allow auto-merge" is off in the repo settings. */
   | "not-allowed"
   /** No required checks on the base branch, so there is nothing to wait for; a person merges. */
-  | "no-required-checks";
+  | "no-required-checks"
+  /** The PR targets a production branch (main/master by default); a person always merges. */
+  | "production-branch";
+
+/**
+ * Branches whose merge ships to production. A job PR against one of these is
+ * never auto-merged by the bot, whatever the repo's settings say.
+ * Override with SLACK_NO_AUTOMERGE_BRANCHES (comma list; "none" disables).
+ */
+export function productionBranches(env: NodeJS.ProcessEnv = process.env): string[] {
+  const raw = env.SLACK_NO_AUTOMERGE_BRANCHES?.trim();
+  if (raw?.toLowerCase() === "none") return [];
+  return (raw ? raw.split(/[,\s]+/) : ["main", "master"]).map((b) => b.trim()).filter(Boolean);
+}
 
 const ARMS_AUTO_MERGE_RE = /merge\s+--auto|enablePullRequestAutoMerge/;
 
@@ -131,14 +144,14 @@ export async function armAutoMerge(
       autoMergeAllowed: boolean;
       squashMergeAllowed: boolean;
       mergeCommitAllowed: boolean;
-      pullRequest: { id: string; autoMergeRequest: { enabledAt: string } | null } | null;
+      pullRequest: { id: string; baseRefName?: string; autoMergeRequest: { enabledAt: string } | null } | null;
     } | null;
   }>(
     token,
     `query($owner: String!, $repo: String!, $number: Int!) {
        repository(owner: $owner, name: $repo) {
          autoMergeAllowed squashMergeAllowed mergeCommitAllowed
-         pullRequest(number: $number) { id autoMergeRequest { enabledAt } }
+         pullRequest(number: $number) { id baseRefName autoMergeRequest { enabledAt } }
        }
      }`,
     { owner: ref.owner, repo: ref.repo, number: ref.number },
@@ -148,6 +161,7 @@ export async function armAutoMerge(
   const pr = repo?.pullRequest;
   if (!repo || !pr) throw new Error(`PR not found: ${prUrl}`);
   if (pr.autoMergeRequest) return "already-armed";
+  if (pr.baseRefName && productionBranches().includes(pr.baseRefName)) return "production-branch";
   if (await repoArmsItsOwnAutoMerge(ref, token, fetchImpl)) return "repo-managed";
   if (!repo.autoMergeAllowed) return "not-allowed";
 

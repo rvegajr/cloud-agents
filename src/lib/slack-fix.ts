@@ -53,6 +53,7 @@ const ARM_LINES: Record<ArmAutoMergeResult, string> = {
   "repo-managed": "This repo's own auto-merge workflow decides whether it merges.",
   "not-allowed": "Auto-merge is off in this repo's settings, so a person merges it.",
   "no-required-checks": "The base branch has no required checks, so a person merges it.",
+  "production-branch": "This PR targets a production branch, so a person always merges it.",
 };
 
 /** After a verifier report: ready + auto-merge when done, otherwise say why it stays a draft. */

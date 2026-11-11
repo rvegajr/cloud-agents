@@ -104,6 +104,14 @@ export function commitFromHealth(payload: unknown): string | undefined {
     const v = obj[key];
     if (typeof v === "string" && /^[0-9a-f]{7,40}$/i.test(v.trim())) return v.trim().toLowerCase();
   }
+  // Some services nest it: { version: { commit: "…" } }.
+  for (const key of ["version", "build", "buildInfo"]) {
+    const nested = obj[key];
+    if (nested && typeof nested === "object") {
+      const found = commitFromHealth(nested);
+      if (found) return found;
+    }
+  }
   for (const key of ["version", "build", "buildInfo"]) {
     const v = obj[key];
     if (typeof v !== "string") continue;

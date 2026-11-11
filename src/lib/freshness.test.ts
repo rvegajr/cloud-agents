@@ -52,6 +52,13 @@ test("commitFromHealth reads the contract field", () => {
   assert.equal(commitFromHealth(real), "d6e2af5d4c30c2ca3fbbf76d0f924a16b2277593");
 });
 
+test("commitFromHealth reads a commit nested under version", () => {
+  assert.equal(
+    commitFromHealth({ status: "healthy", version: { version: "67c53f2", commit: "67c53f2447009faa073fb3b4fd143c49a05c0103" } }),
+    "67c53f2447009faa073fb3b4fd143c49a05c0103",
+  );
+});
+
 test("commitFromHealth falls back to a formatted version string", () => {
   // This kit's own bot reports `formatVersion()`, not a commit field.
   assert.equal(commitFromHealth({ version: "v0.2.0 (abc123def456 on main)" }), "abc123def456");
