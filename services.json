@@ -9,28 +9,36 @@
       "env": "production",
       "health": "https://tailorfolio.com/health",
       "repo": "rvegajr/tailorfolio",
-      "expect": { "branch": "main" }
+      "expect": {
+        "branch": "main"
+      }
     },
     {
       "name": "tailorfolio",
       "env": "uat",
       "health": "https://uat.tailorfolio.com/health",
       "repo": "rvegajr/tailorfolio",
-      "expect": { "branch": "uat" }
+      "expect": {
+        "branch": "uat"
+      }
     },
     {
       "name": "tailorfolio",
       "env": "dev",
       "health": "https://dev.tailorfolio.com/health",
       "repo": "rvegajr/tailorfolio",
-      "expect": { "branch": "develop" }
+      "expect": {
+        "branch": "develop"
+      }
     },
     {
       "name": "blessbox",
       "env": "production",
       "health": "https://www.blessbox.org/api/health",
       "repo": "rvegajr/blessbox",
-      "expect": { "branch": "main" },
+      "expect": {
+        "branch": "main"
+      },
       "note": "commit lands with blessbox#230; if commitSource comes back unknown, set BUILD_COMMIT_SHA as a runtime env in Vercel"
     },
     {
@@ -38,7 +46,9 @@
       "env": "production",
       "health": "https://api.sendgrid.noctusoft.com/health",
       "repo": "rvegajr/noctusoft-relay",
-      "expect": { "branch": "main" },
+      "expect": {
+        "branch": "main"
+      },
       "note": "commit lands with noctusoft-relay#78 on the next deploy.sh run; it reads HEAD from the checkout, nothing to stamp"
     },
     {
@@ -46,7 +56,9 @@
       "env": "dev",
       "health": "https://api-dev-03d7.up.railway.app/health",
       "repo": "YOLOVibeCode/escalating-reminders",
-      "expect": { "branch": "develop" },
+      "expect": {
+        "branch": "develop"
+      },
       "note": "Railway-generated domain until custom domains exist"
     },
     {
@@ -54,8 +66,130 @@
       "env": "uat",
       "health": "https://api-uat-a875.up.railway.app/health",
       "repo": "YOLOVibeCode/escalating-reminders",
-      "expect": { "branch": "uat" },
+      "expect": {
+        "branch": "uat"
+      },
       "note": "Railway-generated domain until custom domains exist; production not provisioned yet"
+    },
+    {
+      "name": "blessbox",
+      "env": "uat",
+      "health": "https://uat.blessbox.org/api/health",
+      "repo": "rvegajr/blessbox",
+      "expect": {
+        "branch": "uat"
+      }
+    },
+    {
+      "name": "blessbox",
+      "env": "dev",
+      "health": "https://dev.blessbox.org/api/health",
+      "repo": "rvegajr/blessbox",
+      "expect": {
+        "branch": "develop"
+      }
+    },
+    {
+      "name": "rubriqflow",
+      "env": "production",
+      "health": "https://rubriqflow.com/api/health",
+      "repo": "rvegajr/rubriq-flow",
+      "expect": {
+        "branch": "main"
+      },
+      "note": "commit is nested under version.commit"
+    },
+    {
+      "name": "rubriqflow",
+      "env": "dev",
+      "health": "https://dev.rubriqflow.com/api/health",
+      "repo": "rvegajr/rubriq-flow",
+      "expect": {
+        "branch": "develop"
+      }
+    },
+    {
+      "name": "fieldview",
+      "env": "production",
+      "health": "https://fieldview.live/api/health",
+      "repo": "YOLOVibeCode/fieldview-live",
+      "expect": {
+        "branch": "main"
+      }
+    },
+    {
+      "name": "fieldview",
+      "env": "dev",
+      "health": "https://dev.fieldview.live/api/health",
+      "repo": "YOLOVibeCode/fieldview-live",
+      "expect": {
+        "branch": "develop"
+      }
+    },
+    {
+      "name": "scholarmancy",
+      "env": "production",
+      "health": "https://scholarmancy.com/api/health",
+      "repo": "YOLOVibeCode/scholaracle",
+      "expect": {
+        "branch": "main"
+      },
+      "note": "single branch; no separate dev host registered"
+    },
+    {
+      "name": "coachatron",
+      "env": "production",
+      "health": "https://coachatron.com/health",
+      "repo": "YOLOVibeCode/coachatron",
+      "expect": {
+        "branch": "main"
+      }
+    },
+    {
+      "name": "coachatron",
+      "env": "dev",
+      "health": "https://dev.coachatron.com/health",
+      "repo": "YOLOVibeCode/coachatron",
+      "expect": {
+        "branch": "develop"
+      }
+    },
+    {
+      "name": "emberlead-api",
+      "env": "production",
+      "health": "https://api.emberlead.pro/health",
+      "repo": "YOLOVibeCode/emberlead",
+      "expect": {
+        "branch": "main"
+      },
+      "note": "also serves the TankRoom app"
+    },
+    {
+      "name": "emberlead-web",
+      "env": "production",
+      "health": "https://emberlead.pro/health",
+      "repo": "YOLOVibeCode/emberlead",
+      "expect": {
+        "branch": "main"
+      }
+    },
+    {
+      "name": "emberlead-api",
+      "env": "dev",
+      "health": "https://dev-api.emberlead.pro/health",
+      "repo": "YOLOVibeCode/emberlead",
+      "expect": {
+        "branch": "develop"
+      }
+    },
+    {
+      "name": "emberlead-web",
+      "env": "dev",
+      "health": "https://dev.emberlead.pro/health",
+      "repo": "YOLOVibeCode/emberlead",
+      "expect": {
+        "branch": "develop"
+      }
     }
   ]
 }
